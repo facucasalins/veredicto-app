@@ -309,7 +309,7 @@ function Dash({ stats, goal, setGoal }) {
   return (
     <>
       <section className="goal">
-        <div className="goalhead"><span className="goaltitle">OBJETIVO DEL MES · JUNIO</span><label className="goaledit">META<span className="finput"><i>$</i><input type="number" value={goal} step={1000000} onChange={(e) => setGoal(parseFloat(e.target.value) || 0)} /></span></label></div>
+        <div className="goalhead"><span className="goaltitle">OBJETIVO DEL MES · JUNIO</span><label className="goaledit">META<span className="finput"><i>$</i><input type="text" inputMode="numeric" value={goal} onChange={(e) => { const n = parseInt(String(e.target.value).replace(/[^\d]/g, ""), 10); setGoal(isNaN(n) ? 0 : n); }} /></span></label></div>
         <div className="goalbar"><span style={{ width: pct + "%" }} /></div>
         <div className="goalnums"><div className="goalpct">{pct.toFixed(0)}<small>%</small></div><div className="goalstack"><div><b className="mono">{short(stats.revenue)}</b> <span className="soft">facturado de {short(goal)}</span></div><div className="soft mono">faltan {short(falta)} · quedan 23 días</div></div></div>
       </section>
@@ -524,9 +524,10 @@ Devolvé EXCLUSIVAMENTE un objeto JSON válido (sin markdown, sin explicaciones,
 }
 
 function Field({ label, value, onChange, prefix, suffix, step, locked }) {
+  const [txt, setTxt] = useState(String(value));
+  if (locked) return (<label className="field"><span className="flab">{label}</span><span className="fstatic">{prefix || ""}{value}{suffix || ""}</span></label>);
   return (<label className="field"><span className="flab">{label}</span>
-    {locked ? <span className="fstatic">{prefix || ""}{value}{suffix || ""}</span>
-      : <span className="finput">{prefix && <i>{prefix}</i>}<input type="number" value={value} step={step} onChange={(e) => onChange(parseFloat(e.target.value) || 0)} />{suffix && <i>{suffix}</i>}</span>}
+    <span className="finput">{prefix && <i>{prefix}</i>}<input type="text" inputMode="decimal" value={txt} onChange={(e) => { const raw = e.target.value; setTxt(raw); const n = parseFloat(raw.replace(",", ".")); if (!isNaN(n)) onChange(n); }} />{suffix && <i>{suffix}</i>}</span>
   </label>);
 }
 function Th({ label, k, sort, on, align = "right" }) {
