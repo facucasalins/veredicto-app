@@ -626,7 +626,13 @@ const GEN_TIPOS = {
 };
 
 function Generar({ rows = [], accountName = "" }) {
-  const best = useMemo(() => [...rows.filter((r) => r.spend > 0)].sort((a, b) => b.roas - a.roas)[0] || null, [rows]);
+  // Receta ganadora = mayor ROAS entre creativos CONFIABLES (con spend real y al menos 5 ventas,
+  // para no coronar un ROAS ruidoso de poca data). Si ninguno llega a 5 ventas, cae a los que tienen spend.
+  const best = useMemo(() => {
+    const conSpend = rows.filter((r) => r.spend > 0);
+    const confiables = conSpend.filter((r) => r.ventas >= 5);
+    return [...(confiables.length ? confiables : conSpend)].sort((a, b) => b.roas - a.roas)[0] || null;
+  }, [rows]);
   const recipe = {
     angulo: best?.sheet?.angulo || best?.ang || "—",
     categoria: best?.ang || "—",
