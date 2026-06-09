@@ -7,6 +7,23 @@ import { useState, useMemo, useEffect } from "react";
 // Datos = forma de tu Sheet de Juanita. Reemplazá SAMPLE por filas reales (Parte 8).
 // ─────────────────────────────────────────────────────────────
 
+
+const [tabs, setTabs] = useState([]);
+const [tab, setTab] = useState("");
+
+useEffect(() => {
+  fetch("/api/sheets/tabs").then(r => r.json()).then(d => setTabs(d.tabs || []));
+}, []);
+
+// en el JSX:
+<select value={tab} onChange={e => setTab(e.target.value)}>
+  <option value="">— pestaña del sheet —</option>
+  {tabs.map(t => <option key={t.gid} value={t.title}>{t.title}</option>)}
+</select>
+
+// y al pedir los ads, sumás &tab=:
+fetch(`/api/ads?account=${accountId}&period=${period}&tab=${encodeURIComponent(tab)}`)
+
 const SAMPLE = [
   { id: 1,  nombre: "02-06 · Catálogo Dinámico",  fecha: "02-06-26", spend: 558000, roas: 21.2, cpa: 2122, ventas: 263, ang: "Catálogo", sec: "—",            split: "100/0", aud: "Advantage+",  hook: "—",           fmt: "CAT" },
   { id: 2,  nombre: "31-05 · HotSaleBotas",        fecha: "31-05-26", spend: 210000, roas: 24.6, cpa: 2187, ventas: 96,  ang: "HotSale",  sec: "Urgencia",     split: "70/30", aud: "Amplio",      hook: "HotSale",     fmt: "VID" },
