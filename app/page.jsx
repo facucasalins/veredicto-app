@@ -114,6 +114,7 @@ export default function App() {
   const [tnLoading, setTnLoading] = useState(false);
   const [analysis, setAnalysis] = useState(null); // lectura del cerebro, persiste entre pestañas
   const [hookMatch, setHookMatch] = useState(null); // {probados, byTemplate} del match de biblioteca, persiste
+  const [plan, setPlan] = useState(null); // plan para llegar al objetivo, persiste entre pestañas
   const [data, setData] = useState([]); // sin cliente elegido => vacío (no data de muestra)
   const [audiencias, setAudiencias] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -124,6 +125,7 @@ export default function App() {
   const logout = async () => { try { await fetch("/api/logout", { method: "POST" }); } finally { window.location.href = "/login"; } };
   // la lectura del analista queda obsoleta si cambia el cliente/período/tienda → la limpiamos
   useEffect(() => { setAnalysis(null); setHookMatch(null); }, [account, preset, tnStore, cSince, cUntil]);
+  useEffect(() => { setPlan(null); }, [account, tnStore, goal]); // el plan depende de la meta y el mes en curso
   useEffect(() => { fetch("/api/sheets/tabs").then((r) => r.json()).then((j) => setSheetTabs(j.tabs || [])).catch(() => {}); }, []);
   useEffect(() => { fetch("/api/tiendanube/stores").then((r) => r.json()).then((j) => setTnStores(j.stores || [])).catch(() => {}); }, []);
   useEffect(() => {
@@ -259,6 +261,7 @@ export default function App() {
           <nav className="nav">
             {role === "vos" && <button className={"tab" + (effView === "dash" ? " active" : "")} onClick={() => setView("dash")}>DASHBOARD</button>}
             <button className={"tab tabai" + (effView === "an" ? " active" : "")} onClick={() => setView("an")}>◆ ANÁLISIS</button>
+            <button className={"tab tabai" + (effView === "plan" ? " active" : "")} onClick={() => setView("plan")}>◎ PLAN</button>
             <button className={"tab" + (effView === "hoy" ? " active" : "")} onClick={() => setView("hoy")}>QUÉ HACER HOY {totalTasks ? <span className="tabn">{totalTasks}</span> : null}</button>
             <button className={"tab" + (effView === "top" ? " active" : "")} onClick={() => setView("top")}>TOP PERFORMERS</button>
             <button className={"tab" + (effView === "panel" ? " active" : "")} onClick={() => setView("panel")}>PANEL</button>
@@ -277,6 +280,7 @@ export default function App() {
           )}
 
           {effView === "an" && (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Analisis withV={withV} stats={stats} audiencias={audiencias} tnSummary={tnSummary} u={ueff} accountName={(accounts.find((a) => a.id === account) || {}).name || ""} periodo={preset === "custom" && cSince && cUntil ? cSince + " → " + cUntil : preset} analysis={analysis} setAnalysis={setAnalysis} />)}
+          {effView === "plan" && (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Plan account={account} store={tnStore} goal={goal} plan={plan} setPlan={setPlan} />)}
           {effView === "dash" && (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Dash stats={stats} goal={goal} setGoal={setGoal} factTienda={tnSummary ? tnSummary.facturacion : null} tnStore={tnStore} />)}
           {effView === "hoy" && (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Hoy acc={acciones} u={ueff} done={done} toggle={toggle} total={totalTasks} doneCount={doneCount} mantener={stats.counts.Mantener} />)}
           {effView === "top" && (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Top withV={withV} u={ueff} audData={audiencias} />)}
@@ -522,6 +526,63 @@ function Analisis({ withV, stats, audiencias, tnSummary, u, accountName, periodo
           )}
           {Array.isArray(out.riesgos) && out.riesgos.length > 0 && (
             <div className="anblock"><div className="anbh">RIESGOS</div>{out.riesgos.map((e, i) => <div className="anitem riesgo" key={i}>⚠ {e}</div>)}</div>
+          )}
+        </div>
+      )}
+    </section>
+  );
+}
+
+// ─────────── Vista: PLAN (cómo llegar al objetivo) ───────────
+function Plan({ account, store, goal, plan, setPlan }) {
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState("");
+  const pedir = async () => {
+    setLoading(true); setErr("");
+    try {
+      const qs = "account=" + account + (store ? "&store=" + encodeURIComponent(store) : "") + "&goal=" + goal;
+      const res = await fetch("/api/plan?" + qs, { method: "POST" });
+      const d = await res.json();
+      if (d.error) throw new Error(d.error);
+      setPlan(d);
+    } catch (e) { setErr("No se pudo armar el plan: " + e.message); } finally { setLoading(false); }
+  };
+  const COL = { Pesimista: "#C0392B", Normal: "#E0852E", Optimista: "#2E8B6B" };
+  const ACC = { subir: "↑", bajar: "↓", pausar: "⏸", mantener: "=" };
+  const p = plan && plan.plan;
+  const snap = plan && plan.snapshot;
+  return (
+    <section className="an">
+      <div className="anhead">
+        <div><div className="antitle">◎ PLAN PARA LLEGAR AL OBJETIVO</div><div className="ansub">Claude mira tu inversión real por adset/campaña (ABO/CBO) del mes en curso y te da 3 escenarios de cuánto y dónde invertir. Read-only.</div></div>
+        {goal > 0 && <button className="anbtn" onClick={pedir} disabled={loading}>{loading ? "● CALCULANDO..." : p ? "↻ RECALCULAR" : "▶ PEDIR PLAN"}</button>}
+      </div>
+      {goal <= 0 && <div className="anplaceholder">Primero cargá la <b>META del mes</b> en el Dashboard (Objetivo del mes). Sin meta no hay a dónde llegar.</div>}
+      {err && <div className="generr">{err}</div>}
+      {goal > 0 && !p && !loading && !err && <div className="anplaceholder">Apretá <b>“Pedir plan”</b>. El sistema cruza la meta, lo facturado del mes, los días que faltan y el budget real de cada unidad, y arma escenarios <b>pesimista / normal / optimista</b> de cuánto invertir y dónde (y qué desinvertir). ~5 centavos de IA, on-demand.</div>}
+      {p && (
+        <div className="anout">
+          {snap && <div className="planbar"><span>META {money(snap.meta)}</span><span>FACTURADO MTD {money(snap.facturacion_mtd)}</span><span>MER {snap.mer}x</span><span>PROYECCIÓN {money(snap.proyeccion_sin_cambios)}</span><span>FALTAN {snap.dias_restantes} días</span></div>}
+          <div className="andiag">{p.resumen}</div>
+          <div className="planscenarios">
+            {(p.escenarios || []).map((e, i) => (
+              <div className="plansc" key={i} style={{ "--sc": COL[e.nombre] || "#857A66" }}>
+                <div className="planschead"><span className="planscname">{e.nombre}</span><span className={"planscmeta" + (e.alcanza_meta ? " ok" : "")}>{e.alcanza_meta ? "✓ llega" : "✗ no llega"}</span></div>
+                <div className="planscsup">{e.supuesto}</div>
+                <div className="planscnums"><div><b>{money(e.inversion_extra_diaria)}</b><span>/día extra</span></div><div><b>{money(e.inversion_extra_total)}</b><span>total al mes</span></div><div><b>{money(e.facturacion_proyectada)}</b><span>proyección</span></div></div>
+                <div className="planscacc">
+                  {(e.acciones || []).map((a, j) => (
+                    <div className="planacc" key={j}>
+                      <span className="planaccico">{ACC[a.accion] || "•"}</span>
+                      <div><div className="planacct"><b>{a.unidad}</b> <span className="planlvl">{a.nivel}</span> {a.de != null && a.a != null ? <span className="planba">{money(a.de)}→{money(a.a)}/día</span> : a.accion}</div><div className="planaccp">{a.porque}</div></div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+          {Array.isArray(p.desinversion) && p.desinversion.length > 0 && (
+            <div className="anblock"><div className="anbh">DESINVERTIR / REASIGNAR</div>{p.desinversion.map((d, i) => <div className="anitem" key={i}>↓ {d}</div>)}</div>
           )}
         </div>
       )}
@@ -1218,6 +1279,27 @@ td{padding:11px 12px;vertical-align:middle;}.num{text-align:right;}.name{font-we
 .anitem{font-size:13.5px;color:var(--ink);padding:6px 0;line-height:1.5;}
 .anitem.riesgo{color:#8A1C12;}
 .tabai.active{background:var(--c6);border-color:var(--c6);}
+.planbar{display:flex;flex-wrap:wrap;gap:14px;font-family:'Space Mono',monospace;font-size:11px;color:var(--soft);background:var(--paper2);border:1px solid var(--line);border-radius:8px;padding:9px 14px;}
+.planbar b{color:var(--ink);}
+.planscenarios{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;}
+.plansc{background:var(--paper2);border:2px solid var(--ink);border-top:5px solid var(--sc);border-radius:12px;padding:14px;box-shadow:4px 4px 0 var(--ink);display:flex;flex-direction:column;gap:9px;}
+.planschead{display:flex;justify-content:space-between;align-items:center;}
+.planscname{font-family:'Anton',Impact,sans-serif;font-size:17px;letter-spacing:1px;color:var(--sc);}
+.planscmeta{font-family:'Space Mono',monospace;font-size:10px;color:#8A1C12;border:1px solid currentColor;border-radius:4px;padding:1px 6px;}
+.planscmeta.ok{color:#0F6E56;}
+.planscsup{font-family:'Space Mono',monospace;font-size:11px;color:var(--soft);line-height:1.4;min-height:30px;}
+.planscnums{display:flex;gap:10px;border-top:1px solid var(--line);border-bottom:1px solid var(--line);padding:9px 0;}
+.planscnums>div{display:flex;flex-direction:column;}
+.planscnums b{font-size:14px;color:var(--ink);}
+.planscnums span{font-family:'Space Mono',monospace;font-size:9px;color:var(--soft);}
+.planscacc{display:flex;flex-direction:column;gap:7px;}
+.planacc{display:flex;gap:8px;align-items:flex-start;}
+.planaccico{font-size:13px;color:var(--sc);width:14px;flex-shrink:0;}
+.planacct{font-size:12.5px;color:var(--ink);line-height:1.35;}
+.planlvl{font-family:'Space Mono',monospace;font-size:8.5px;color:var(--soft);border:1px solid var(--line);border-radius:3px;padding:0 4px;}
+.planba{font-family:'Space Mono',monospace;font-size:11px;color:var(--sc);}
+.planaccp{font-family:'Space Mono',monospace;font-size:10.5px;color:var(--soft);margin-top:2px;line-height:1.35;}
+@media(max-width:760px){.planscenarios{grid-template-columns:1fr;}}
 .empty{margin-top:40px;padding:60px 24px;text-align:center;border:2px dashed var(--line);border-radius:14px;background:var(--paper2);}
 .emptymark{font-size:34px;color:var(--soft);opacity:.5;margin-bottom:14px;}
 .emptytitle{font-family:'Anton',Impact,sans-serif;font-size:24px;letter-spacing:1px;color:var(--ink);}
