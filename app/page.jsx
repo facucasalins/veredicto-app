@@ -573,7 +573,7 @@ function Hoy({ acc, u, done, toggle, total, doneCount, mantener }) {
   return (
     <>
       <div className="dayhead">
-        <div><div className="daytitle">QUÉ HACER HOY</div><div className="daysub">07-06-26 · {acc.escalar.length} para escalar · {acc.apagar.length} para apagar/iterar · {acc.validar.length} para validar</div></div>
+        <div><div className="daytitle">QUÉ HACER HOY</div><div className="daysub">{new Date().toLocaleDateString("es-AR")} · {acc.escalar.length} para escalar · {acc.apagar.length} para apagar/iterar · {acc.validar.length} para validar</div></div>
         <div className="progress"><div className="pbar"><span style={{ width: total ? `${(doneCount / total) * 100}%` : "0%" }} /></div><div className="pnum">{doneCount}/{total} HECHAS</div></div>
       </div>
       <Section title="ESCALÁ — SUBÍ EL CONJUNTO/CAMPAÑA" verb="Escalar" b={BUCKETS.Escalar} empty="Sin ganadores claros hoy.">
@@ -943,7 +943,7 @@ const CSS = `
 
 .top{background:var(--ink);border:2px solid var(--ink);border-radius:12px;overflow:hidden;box-shadow:5px 5px 0 #1e181233;margin-bottom:18px;}
 .topinner{display:flex;justify-content:space-between;align-items:center;padding:16px 20px;color:var(--paper);}
-.brand{display:flex;gap:15px;align-items:center;}
+.brand{display:flex;gap:15px;align-items:center;flex-wrap:wrap;}
 .mark{width:42px;height:42px;flex:0 0 42px;display:grid;place-items:center;border:2px solid var(--paper);color:var(--paper);border-radius:8px;font-size:18px;}
 .bname{font-family:'Anton',Impact,sans-serif;font-size:34px;letter-spacing:3px;line-height:.9;background:linear-gradient(90deg,var(--c1),var(--c2),var(--c3),var(--c4),var(--c5),var(--c6));-webkit-background-clip:text;background-clip:text;color:transparent;}
 .bsub{color:#D8CDB6;font-size:11px;letter-spacing:1.5px;margin-top:5px;}
@@ -1127,8 +1127,8 @@ td{padding:11px 12px;vertical-align:middle;}.num{text-align:right;}.name{font-we
 .pausedtag{font-size:9px;color:#8A1C12;background:#FBE8E6;border:1px solid #E0A59E;border-radius:3px;padding:1px 5px;margin-left:6px;font-family:'Space Mono',monospace;letter-spacing:.5px;white-space:nowrap;font-weight:700;}
 .metaerr{background:#FBE8E6;color:#8A1C12;border-top:2px solid #C0392B;padding:9px 22px;font-size:12.5px;line-height:1.45;font-family:'Space Mono',monospace;}
 .metaerr-sample{color:#B05A50;}
-.userbox{display:flex;align-items:center;gap:8px;margin-left:14px;}
-.uname{font-family:'Space Mono',monospace;font-size:11px;color:var(--soft);letter-spacing:.5px;}
+.userbox{display:flex;align-items:center;gap:8px;margin-left:10px;flex-shrink:0;white-space:nowrap;}
+.uname{font-family:'Space Mono',monospace;font-size:11px;color:var(--soft);letter-spacing:.5px;white-space:nowrap;}
 .logout{font-family:'Space Mono',monospace;font-size:11px;color:var(--paper);background:transparent;border:1px solid rgba(242,235,217,.4);border-radius:5px;padding:3px 9px;cursor:pointer;}
 .logout:hover{background:rgba(242,235,217,.12);border-color:var(--paper);}
 .tnband{background:#1A1A17;color:#F2EBD9;padding:16px 22px 16px;border:2px solid var(--ink);border-top:4px solid #C0392B;border-radius:12px;box-shadow:5px 5px 0 #1e181233;margin-bottom:18px;}
