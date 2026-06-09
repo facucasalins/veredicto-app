@@ -72,6 +72,15 @@ const tf = (r) => { const m = String(r?.id || "").match(/\((\d{1,2}\.\d{2}\.\d{2
 const TF = ({ r }) => tf(r) ? <span className="tf">{tf(r)}</span> : null;
 // Tag de estado: solo aparece si SABEMOS que el creativo está pausado (activa === false).
 const Paused = ({ r }) => r && r.activa === false ? <span className="pausedtag">⏸ PAUSADA</span> : null;
+// Ganadores para coronar/iterar: prioriza creativos ACTIVOS y confiables (>=5 ventas). Así no
+// corona un HotSale pausado o un ROAS de chiripa. Cae a lo que haya si no llega.
+function topWinners(rows, n = 3) {
+  const conSpend = rows.filter((r) => r.spend > 0);
+  const live = conSpend.filter((r) => r.activa !== false);
+  const base = live.length ? live : conSpend;
+  const conf = base.filter((r) => r.ventas >= 5);
+  return [...(conf.length ? conf : base)].sort((a, b) => b.roas - a.roas).slice(0, n);
+}
 
 const ROLES = { vos: "control total · todo editable", equipo: "ejecución del día · umbral bloqueado", cliente: "reporte limpio para compartir" };
 
@@ -103,6 +112,7 @@ export default function App() {
   const [tnStore, setTnStore] = useState("");
   const [tnSummary, setTnSummary] = useState(null);
   const [tnLoading, setTnLoading] = useState(false);
+  const [analysis, setAnalysis] = useState(null); // lectura del cerebro, persiste entre pestañas
   const [data, setData] = useState([]); // sin cliente elegido => vacío (no data de muestra)
   const [audiencias, setAudiencias] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -111,6 +121,8 @@ export default function App() {
   const [me, setMe] = useState(null);
   useEffect(() => { fetch("/api/accounts").then((r) => r.json()).then((j) => { setAccounts(j.accounts || []); setMe(j.me || null); setMetaErr(j.error && !(j.accounts || []).length ? j.error : ""); }).catch(() => setMetaErr("No se pudo conectar con Meta")); }, []);
   const logout = async () => { try { await fetch("/api/logout", { method: "POST" }); } finally { window.location.href = "/login"; } };
+  // la lectura del analista queda obsoleta si cambia el cliente/período/tienda → la limpiamos
+  useEffect(() => { setAnalysis(null); }, [account, preset, tnStore, cSince, cUntil]);
   useEffect(() => { fetch("/api/sheets/tabs").then((r) => r.json()).then((j) => setSheetTabs(j.tabs || [])).catch(() => {}); }, []);
   useEffect(() => { fetch("/api/tiendanube/stores").then((r) => r.json()).then((j) => setTnStores(j.stores || [])).catch(() => {}); }, []);
   useEffect(() => {
@@ -241,7 +253,7 @@ export default function App() {
         <span className="rdesc">{ROLES[role]}</span>
       </div>
 
-      {role === "cliente" ? (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Cliente withV={withV} u={ueff} stats={stats} goal={goal} />) : (
+      {role === "cliente" ? (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Cliente withV={withV} u={ueff} stats={stats} goal={goal} accountName={(accounts.find((a) => a.id === account) || {}).name || ""} factTienda={tnSummary ? tnSummary.facturacion : null} />) : (
         <>
           <nav className="nav">
             {role === "vos" && <button className={"tab" + (effView === "dash" ? " active" : "")} onClick={() => setView("dash")}>DASHBOARD</button>}
@@ -263,7 +275,7 @@ export default function App() {
             </section>
           )}
 
-          {effView === "an" && (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Analisis key={account + preset + tnStore} withV={withV} stats={stats} audiencias={audiencias} tnSummary={tnSummary} u={ueff} accountName={(accounts.find((a) => a.id === account) || {}).name || ""} periodo={preset === "custom" && cSince && cUntil ? cSince + " → " + cUntil : preset} />)}
+          {effView === "an" && (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Analisis withV={withV} stats={stats} audiencias={audiencias} tnSummary={tnSummary} u={ueff} accountName={(accounts.find((a) => a.id === account) || {}).name || ""} periodo={preset === "custom" && cSince && cUntil ? cSince + " → " + cUntil : preset} analysis={analysis} setAnalysis={setAnalysis} />)}
           {effView === "dash" && (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Dash stats={stats} goal={goal} setGoal={setGoal} factTienda={tnSummary ? tnSummary.facturacion : null} tnStore={tnStore} />)}
           {effView === "hoy" && (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Hoy acc={acciones} u={ueff} done={done} toggle={toggle} total={totalTasks} doneCount={doneCount} mantener={stats.counts.Mantener} />)}
           {effView === "top" && (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Top withV={withV} u={ueff} audData={audiencias} />)}
@@ -277,29 +289,27 @@ export default function App() {
 }
 
 // ─────────── Vista: CLIENTE (Parte 5) ───────────
-function Cliente({ withV, u, stats, goal }) {
-  const [tono, setTono] = useState(true);
+function Cliente({ withV, u, stats, goal, accountName, factTienda }) {
   const reliable = useMemo(() => withV.filter((r) => r.spend >= u.pisoSpend), [withV, u.pisoSpend]);
+  const facturado = factTienda != null ? factTienda : stats.revenue;
+  const pct = goal ? Math.min(100, (facturado / goal) * 100) : 0;
+  const mes = new Date().toLocaleDateString("es-AR", { month: "long", year: "numeric" }).toUpperCase();
   const topAng = aggregate(reliable, "ang")[0]?.key || "—";
-  const wins = [...reliable].sort((a, b) => b.roas - a.roas).slice(0, 4);
-  const pct = goal ? Math.min(100, (stats.revenue / goal) * 100) : 0;
-  const resumen = tono
-    ? `Mes sólido. La cuenta facturó ${short(stats.revenue)} con un ROAS de ${stats.accountRoas.toFixed(1)}x y ${nf.format(stats.ventasTotal)} ventas — al ${pct.toFixed(0)}% del objetivo del mes. El ángulo ${topAng} y los catálogos dinámicos lideraron el rendimiento, con varios anuncios listos para escalar en julio.`
-    : `En junio la cuenta facturó ${short(stats.revenue)} con un ROAS de ${stats.accountRoas.toFixed(1)}x y ${nf.format(stats.ventasTotal)} ventas (${pct.toFixed(0)}% del objetivo). Mayor aporte: el ángulo ${topAng} y los catálogos. Quedan oportunidades de optimización para el próximo mes.`;
+  const resumen = `La cuenta facturó ${short(facturado)} con un ROAS de ${stats.accountRoas.toFixed(1)}x y ${nf.format(stats.ventasTotal)} ventas${goal > 0 ? ` — al ${pct.toFixed(0)}% del objetivo` : ""}. El ángulo ${topAng} y los catálogos lideraron el rendimiento, con varios anuncios listos para escalar.`;
   return (
     <>
       <div className="repbar">
-        <div><div className="reptitle">REPORTE MENSUAL · JUNIO 2026</div><div className="repsub">JUANITA SHOES · preparado por tu agencia</div></div>
-        <div className="reptools">
-          <button className={"toggle" + (tono ? " on" : "")} onClick={() => setTono(!tono)}><span className="knob" /></button>
-          <span className="tlab">TONO POSITIVO</span>
-        </div>
+        <div><div className="reptitle">REPORTE MENSUAL · {mes}</div><div className="repsub">{accountName || "Cliente"} · preparado por tu agencia</div></div>
       </div>
 
       <section className="goal light">
         <div className="goalhead"><span className="goaltitle">OBJETIVO DEL MES</span><span className="repnote">→ exportable a PDF en la Parte 10</span></div>
-        <div className="goalbar"><span style={{ width: pct + "%" }} /></div>
-        <div className="goalnums"><div className="goalpct">{pct.toFixed(0)}<small>%</small></div><div className="goalstack"><div><b className="mono">{short(stats.revenue)}</b> <span className="soft">facturado de {short(goal)}</span></div></div></div>
+        {goal > 0 ? (<>
+          <div className="goalbar"><span style={{ width: pct + "%" }} /></div>
+          <div className="goalnums"><div className="goalpct">{pct.toFixed(0)}<small>%</small></div><div className="goalstack"><div><b className="mono">{short(facturado)}</b> <span className="soft">facturado de {short(goal)}</span></div></div></div>
+        </>) : (
+          <div className="goalnums"><div className="goalstack"><div><b className="mono">{short(facturado)}</b> <span className="soft">facturado · definí la meta del mes en el Dashboard</span></div></div></div>
+        )}
       </section>
 
       <section className="kpis repk">
@@ -350,7 +360,7 @@ function Top({ withV, u, audData }) {
   const ordered = [...data].sort((a, b) => valOf(b) - valOf(a));
   const ranked = ordered.slice(0, limit);
   const thin = ordered.slice(limit);
-  const top3 = useMemo(() => { const ok = reliable.filter((r) => r.ventas >= MINV); return [...(ok.length ? ok : reliable)].sort((a, b) => b.roas - a.roas).slice(0, 3); }, [reliable]);
+  const top3 = useMemo(() => topWinners(reliable, 3), [reliable]);
   const best = top3[0];
   const max = Math.max(...ranked.map((d) => valOf(d)), 1) || 1;
   const fmtVal = (d) => metric === "spend" ? short(d.spend) : metric === "ventas" ? nf.format(Math.round(d.ventas)) : metric === "ads" ? (d.n + " ad" + (d.n !== 1 ? "s" : "")) : (d.roas.toFixed(1) + "x");
@@ -444,8 +454,9 @@ function EmptyState({ account, loading, err }) {
 }
 
 // ─────────── Vista: ANÁLISIS (el "cerebro" read-only) ───────────
-function Analisis({ withV, stats, audiencias, tnSummary, u, accountName, periodo }) {
-  const [out, setOut] = useState(null);
+function Analisis({ withV, stats, audiencias, tnSummary, u, accountName, periodo, analysis, setAnalysis }) {
+  const out = analysis; // persiste en el padre: no se borra al cambiar de pestaña
+  const setOut = setAnalysis;
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
 
@@ -455,7 +466,9 @@ function Analisis({ withV, stats, audiencias, tnSummary, u, accountName, periodo
     const top = (dim) => aggregate(reliable, dim).slice(0, 5).map((g) => ({ k: g.key, roas: +g.roas.toFixed(1), spend: Math.round(g.spend), ventas: Math.round(g.ventas), ads: g.n }));
     const aud = (audiencias && audiencias.length ? audiencias : []).slice(0, 6).map((g) => ({ k: g.key, roas: g.spend ? +(g.revenue / g.spend).toFixed(1) : 0, spend: g.spend, ventas: g.ventas, ads: g.n }));
     const sangrado = [...withV].filter((r) => r.v === "Pausar").sort((a, b) => b.spend - a.spend).slice(0, 5).map((r) => ({ nombre: r.nombre, roas: r.roas, spend: r.spend, ventas: r.ventas, ya_pausado: r.activa === false }));
-    const b = [...reliable.filter((r) => r.ventas >= 5)].sort((x, y) => y.roas - x.roas)[0] || [...reliable].sort((x, y) => y.roas - x.roas)[0];
+    // top ROAS entre los que TODAVÍA están activos (ignora ganadores históricos/estacionales ya apagados)
+    const topActivos = [...reliable.filter((r) => r.activa !== false)].sort((x, y) => y.roas - x.roas).slice(0, 5).map((r) => ({ nombre: r.nombre, roas: r.roas, spend: r.spend, ventas: r.ventas, activa: true }));
+    const b = topWinners(reliable, 1)[0];
     return {
       cuenta: accountName || "—", periodo,
       inversion: stats.spendTotal, ventas: stats.ventasTotal, cpa: Math.round(stats.cpaProm), roas_cuenta: +stats.accountRoas.toFixed(1),
@@ -464,7 +477,8 @@ function Analisis({ withV, stats, audiencias, tnSummary, u, accountName, periodo
       umbral: { roas_min: u.roasMin || null, cpa_max: u.cpaMax === Infinity ? null : u.cpaMax, piso_spend: u.pisoSpend || null },
       ranking: { angulo_venta: top("ang"), categoria: top("cat"), hook: top("hook"), audiencia: aud, formato: top("fmt") },
       sangrando: sangrado,
-      receta_ganadora: b ? { angulo: b.sheet?.angulo || b.ang, categoria: b.ang, hook: b.sheet?.tipo_gancho || b.hook, audiencia: b.aud, formato: b.fmt, roas: b.roas, ventas: b.ventas, spend: b.spend } : null,
+      top_activos: topActivos,
+      receta_ganadora: b ? { angulo: b.sheet?.angulo || b.ang, categoria: b.ang, hook: b.sheet?.tipo_gancho || b.hook, audiencia: b.aud, formato: b.fmt, roas: b.roas, ventas: b.ventas, spend: b.spend, activa: b.activa !== false } : null,
     };
   }, [withV, stats, audiencias, tnSummary, u, accountName, periodo]);
 
@@ -527,8 +541,12 @@ function Dash({ stats, goal, setGoal, factTienda, tnStore }) {
     <>
       <section className="goal">
         <div className="goalhead"><span className="goaltitle">OBJETIVO DEL MES{fuenteTienda ? <span className="goalsrc">🛒 {tnStore}</span> : null}</span><label className="goaledit">META<span className="finput"><i>$</i><input type="text" inputMode="numeric" value={goal} onChange={(e) => { const n = parseInt(String(e.target.value).replace(/[^\d]/g, ""), 10); setGoal(isNaN(n) ? 0 : n); }} /></span></label></div>
-        <div className="goalbar"><span style={{ width: pct + "%" }} /></div>
-        <div className="goalnums"><div className="goalpct">{pct.toFixed(0)}<small>%</small></div><div className="goalstack"><div><b className="mono">{short(facturado)}</b> <span className="soft">{fuenteTienda ? "facturado (tienda) de " : "facturado de "}{short(goal)}</span></div><div className="soft mono">faltan {short(falta)} · quedan {diasRestan} días</div></div></div>
+        {goal > 0 ? (<>
+          <div className="goalbar"><span style={{ width: pct + "%" }} /></div>
+          <div className="goalnums"><div className="goalpct">{pct.toFixed(0)}<small>%</small></div><div className="goalstack"><div><b className="mono">{short(facturado)}</b> <span className="soft">{fuenteTienda ? "facturado (tienda) de " : "facturado de "}{short(goal)}</span></div><div className="soft mono">faltan {short(falta)} · quedan {diasRestan} días</div></div></div>
+        </>) : (
+          <div className="goalnums"><div className="goalstack"><div><b className="mono">{short(facturado)}</b> <span className="soft">{fuenteTienda ? "facturado (tienda)" : "facturado"} · cargá una META arriba para ver el progreso</span></div></div></div>
+        )}
       </section>
       <section className="kpis dashk">
         <Kpi lab="FACTURACIÓN" val={short(stats.revenue)} /><Kpi lab="INVERSIÓN" val={short(stats.spendTotal)} /><Kpi lab="ROAS CUENTA" val={stats.accountRoas.toFixed(1) + "x"} mod="grn" /><Kpi lab="CPA PROMEDIO" val={money(stats.cpaProm)} /><Kpi lab="VENTAS" val={nf.format(stats.ventasTotal)} />
@@ -617,6 +635,8 @@ function Biblioteca({ rows = [] }) {
   const [cat, setCat] = useState("Todas");
   const [estado, setEstado] = useState("Todos"); // Todos | Sin probar | Probados (filtro post-análisis)
   const [probados, setProbados] = useState(null); // Set de ids de la biblioteca ya probados
+  const [byTemplate, setByTemplate] = useState({}); // id template -> creativos que lo probaron
+  const [openHook, setOpenHook] = useState(null); // id template expandido
   const [mLoading, setMLoading] = useState(false);
   const [mErr, setMErr] = useState("");
   const [copied, setCopied] = useState(null);
@@ -625,15 +645,32 @@ function Biblioteca({ rows = [] }) {
 
   // (A) TUS GANADORES: hooks reales del cliente (texto_gancho del Sheet) ordenados por ROAS.
   const ganadores = useMemo(() => [...rows.filter((r) => r.spend > 0 && r.sheet && r.sheet.texto_gancho)].sort((a, b) => b.roas - a.roas).slice(0, 15), [rows]);
-  const realHooks = useMemo(() => Array.from(new Set(rows.filter((r) => r.spend > 0 && r.sheet && r.sheet.texto_gancho).map((r) => r.sheet.texto_gancho))).slice(0, 80), [rows]);
+  // Hooks reales únicos con los creativos que los usaron (nombre + timeframe), indexados.
+  const realHookList = useMemo(() => {
+    const map = new Map();
+    rows.filter((r) => r.spend > 0 && r.sheet && r.sheet.texto_gancho).forEach((r) => {
+      const t = r.sheet.texto_gancho;
+      if (!map.has(t)) map.set(t, []);
+      map.get(t).push({ nombre: r.nombre, tf: tf(r), roas: r.roas, activa: r.activa });
+    });
+    return Array.from(map.entries()).slice(0, 80).map(([text, creativos], i) => ({ i, text, creativos }));
+  }, [rows]);
 
   // (B) Mapa probado/sin-probar: matchea tus hooks reales contra la biblioteca (on-demand, IA).
   const analizar = async () => {
-    setMLoading(true); setMErr("");
+    setMLoading(true); setMErr(""); setOpenHook(null);
     try {
-      const res = await fetch("/api/match-hooks", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ realHooks, library: HOOKS.map((h) => ({ id: h[0], text: h[1] })) }) });
+      const res = await fetch("/api/match-hooks", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ realHooks: realHookList.map((h) => ({ i: h.i, text: h.text })), library: HOOKS.map((h) => ({ id: h[0], text: h[1] })) }) });
       const d = await res.json();
       if (d.error) throw new Error(d.error);
+      // template id -> creativos que lo probaron (dedup por nombre)
+      const bt = {};
+      (d.matches || []).forEach((m) => {
+        const cs = (realHookList[m.i] || {}).creativos || [];
+        (m.ids || []).forEach((id) => { bt[id] = (bt[id] || []).concat(cs); });
+      });
+      Object.keys(bt).forEach((id) => { const seen = new Set(); bt[id] = bt[id].filter((c) => !seen.has(c.nombre) && seen.add(c.nombre)); });
+      setByTemplate(bt);
       setProbados(new Set(d.probados || []));
     } catch (e) { setMErr("No se pudo analizar: " + e.message); } finally { setMLoading(false); }
   };
@@ -673,8 +710,8 @@ function Biblioteca({ rows = [] }) {
       ) : tab === "hooks" ? (
         <>
           <div className="matchbar">
-            <button className="matchbtn" onClick={analizar} disabled={mLoading || !realHooks.length}>{mLoading ? "● ANALIZANDO..." : probados ? "↻ RE-ANALIZAR" : "▶ ¿QUÉ YA PROBÉ?"}</button>
-            {!realHooks.length && <span className="matchhint">elegí un cliente con Sheet para cruzar tus hooks reales</span>}
+            <button className="matchbtn" onClick={analizar} disabled={mLoading || !realHookList.length}>{mLoading ? "● ANALIZANDO..." : probados ? "↻ RE-ANALIZAR" : "▶ ¿QUÉ YA PROBÉ?"}</button>
+            {!realHookList.length && <span className="matchhint">elegí un cliente con Sheet para cruzar tus hooks reales</span>}
             {probados && <span className="matchhint"><b>{nProb}</b> probados · <b>{HOOKS.length - nProb}</b> sin probar (de {HOOKS.length}) · ~aproximado</span>}
             {mErr && <span className="matchhint" style={{ color: "#8A1C12" }}>{mErr}</span>}
           </div>
@@ -683,12 +720,24 @@ function Biblioteca({ rows = [] }) {
             {ejes.map((e) => (<button key={e} className={"ejepill" + (eje === e ? " on" : "")} onClick={() => setEje(e)} style={eje === e && e !== "Todos" ? { background: EJECOLOR[e], borderColor: EJECOLOR[e], color: "#F3EBD9" } : null}>{e} <b>{ejeCount(e)}</b></button>))}
           </div>
           <div className="hooklist">
-            {shown.map((h) => (
-              <div className={"hookcard" + (probados && !probados.has(h[0]) ? " untested" : "")} key={h[0]} style={{ "--ec": EJECOLOR[h[3]] || "#857A66" }}>
-                <span className="hnum">{String(h[0]).padStart(3, "0")}</span>
-                <div className="hmid"><span className="htext">{h[1]}</span><span className="htags"><span className="ftag">{h[2]}</span><span className="ejetag" style={{ color: EJECOLOR[h[3]] }}>{h[3]}</span>{probados && (probados.has(h[0]) ? <span className="probtag">✓ probado</span> : <span className="sinprobtag">sin probar</span>)}</span></div>
-                <button className="copybtn" onClick={() => copy(h[1], "h" + h[0])}>{copied === "h" + h[0] ? "✓" : "⧉"}</button>
-              </div>))}
+            {shown.map((h) => {
+              const cre = byTemplate[h[0]] || [];
+              const isOpen = openHook === h[0];
+              return (
+              <div className="hookwrap" key={h[0]}>
+                <div className={"hookcard" + (probados && !probados.has(h[0]) ? " untested" : "")} style={{ "--ec": EJECOLOR[h[3]] || "#857A66" }}>
+                  <span className="hnum">{String(h[0]).padStart(3, "0")}</span>
+                  <div className="hmid"><span className="htext">{h[1]}</span><span className="htags"><span className="ftag">{h[2]}</span><span className="ejetag" style={{ color: EJECOLOR[h[3]] }}>{h[3]}</span>{probados && (probados.has(h[0]) ? <button className="probtag click" onClick={() => setOpenHook(isOpen ? null : h[0])}>✓ probado{cre.length ? ` (${cre.length}) ` + (isOpen ? "▾" : "▸") : ""}</button> : <span className="sinprobtag">sin probar</span>)}</span></div>
+                  <button className="copybtn" onClick={() => copy(h[1], "h" + h[0])}>{copied === "h" + h[0] ? "✓" : "⧉"}</button>
+                </div>
+                {isOpen && cre.length > 0 && (
+                  <div className="hookexp">
+                    <div className="hookexh">Probado con:</div>
+                    {cre.map((c, ci) => (<div className="hookexline" key={ci}><b>{c.nombre}</b>{c.tf ? <span className="tf">{c.tf}</span> : null} <span className="hookexkpi">{c.roas.toFixed(1)}x</span>{c.activa === false ? <span className="pausedtag">⏸ PAUSADA</span> : null}</div>))}
+                  </div>
+                )}
+              </div>);
+            })}
           </div>
           <div className="bibfoot">Mostrando {shown.length} de {fHooks.length}{fHooks.length > 80 ? " — refiná con el buscador o los filtros" : ""}. Los ejemplos completos de cada hook están en biblioteca_hooks.xlsx.</div>
         </>
@@ -748,11 +797,7 @@ const GEN_TIPOS = {
 function Generar({ rows = [], accountName = "" }) {
   // Receta ganadora = mayor ROAS entre creativos CONFIABLES (con spend real y al menos 5 ventas,
   // para no coronar un ROAS ruidoso de poca data). Si ninguno llega a 5 ventas, cae a los que tienen spend.
-  const best = useMemo(() => {
-    const conSpend = rows.filter((r) => r.spend > 0);
-    const confiables = conSpend.filter((r) => r.ventas >= 5);
-    return [...(confiables.length ? confiables : conSpend)].sort((a, b) => b.roas - a.roas)[0] || null;
-  }, [rows]);
+  const best = useMemo(() => topWinners(rows, 1)[0] || null, [rows]);
   const recipe = {
     angulo: best?.sheet?.angulo || best?.ang || "—",
     categoria: best?.ang || "—",
@@ -1103,6 +1148,12 @@ td{padding:11px 12px;vertical-align:middle;}.num{text-align:right;}.name{font-we
   .genform{grid-template-columns:1fr;align-items:stretch;}
   .gfield{align-items:stretch;}
   .phasebar{font-size:9px;letter-spacing:1px;}
+  /* filas que no entran → deslizables en vez de cortarse */
+  .kpis,.kpis.dashk,.kpis.repk,.topgrid{display:flex;grid-template-columns:none;overflow-x:auto;-webkit-overflow-scrolling:touch;scroll-snap-type:x proximity;padding-bottom:6px;}
+  .kpis>*{flex:0 0 62%;scroll-snap-align:start;}
+  .topgrid>*{flex:0 0 80%;scroll-snap-align:start;}
+  .tnstats{display:flex;overflow-x:auto;grid-template-columns:none;}
+  .tnstats>*{flex:0 0 78%;}
 }
 .ang{color:var(--ink);}.sec{color:var(--soft);}
 .split{font-family:'Space Mono',monospace;font-size:10px;color:var(--soft);background:var(--paper);border:1px solid var(--line);border-radius:3px;padding:1px 5px;margin-left:7px;}
@@ -1200,7 +1251,13 @@ td{padding:11px 12px;vertical-align:middle;}.num{text-align:right;}.name{font-we
 .matchhint{font-family:'Space Mono',monospace;font-size:11px;color:var(--soft);}
 .hookcard.untested{opacity:.55;}
 .probtag{font-family:'Space Mono',monospace;font-size:9px;font-weight:700;color:#0F6E56;background:#DFEAE4;border:1px solid #9CC6B5;border-radius:3px;padding:1px 6px;}
+.probtag.click{cursor:pointer;}
 .sinprobtag{font-family:'Space Mono',monospace;font-size:9px;color:var(--soft);border:1px dashed var(--line);border-radius:3px;padding:1px 6px;}
+.hookwrap{display:flex;flex-direction:column;}
+.hookexp{background:var(--paper2);border:2px solid var(--ink);border-top:none;border-radius:0 0 8px 8px;margin:-4px 0 0 6px;padding:8px 13px 10px;font-family:'Space Mono',monospace;}
+.hookexh{font-size:9px;letter-spacing:1.5px;color:var(--soft);margin-bottom:6px;}
+.hookexline{font-size:12px;color:var(--ink);padding:3px 0;display:flex;align-items:center;gap:6px;flex-wrap:wrap;}
+.hookexkpi{color:#2E8B6B;font-weight:700;}
 .promptlist{display:flex;flex-direction:column;gap:10px;}
 .pcard{background:var(--paper2);border:2px solid var(--ink);border-radius:9px;padding:13px 16px;box-shadow:3px 3px 0 var(--ink);}
 .pcardtop{display:flex;justify-content:space-between;align-items:center;}
