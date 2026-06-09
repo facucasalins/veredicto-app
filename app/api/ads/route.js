@@ -1,6 +1,6 @@
 import { cookies } from "next/headers";
-import { getAds } from "@/lib/meta";
-import { buildRows, buildAudienceRows } from "@/lib/nomenclatura";
+import { getAds, getAdsetTargeting } from "@/lib/meta";
+import { buildRows, buildAudienceRows, classifyTargeting } from "@/lib/nomenclatura";
 import { enrichWithSheet } from "@/lib/sheet";
 import { SESSION_COOKIE, verifySession, authDisabled, canSeeAccount } from "@/lib/auth";
 
@@ -19,10 +19,17 @@ export async function GET(req) {
   if (!sess) return Response.json({ error: "No autorizado" }, { status: 401 });
   if (!canSeeAccount(sess, account)) return Response.json({ error: "Sin acceso a esta cuenta" }, { status: 403 });
   try {
-    const ads = await getAds(account, preset, range);
-    let rows = buildRows(ads);
+    // Insights + targeting real en paralelo. Si el targeting falla, audMap queda vacío y se cae
+    // al parseo del nombre del conjunto (degradación elegante).
+    const [ads, targeting] = await Promise.all([
+      getAds(account, preset, range),
+      getAdsetTargeting(account).catch(() => ({})),
+    ]);
+    const audMap = {};
+    for (const id in targeting) { const lbl = classifyTargeting(targeting[id]); if (lbl) audMap[id] = lbl; }
+    let rows = buildRows(ads, audMap);
     rows = await enrichWithSheet(rows, tab); // si hay pestaña, cruza el Sheet; si no, devuelve las rows igual
-    return Response.json({ rows, audiencias: buildAudienceRows(ads) });
+    return Response.json({ rows, audiencias: buildAudienceRows(ads, audMap) });
   } catch (e) {
     return Response.json({ error: e.message }, { status: 500 });
   }

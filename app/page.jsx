@@ -416,7 +416,7 @@ function Top({ withV, u, audData }) {
                     <div className="rexad" key={m.id}>
                       <div className="rexhead"><b>{m.nombre}</b><TF r={m} /> <span className="rexkpi">{m.roas.toFixed(1)}x · {short(m.spend)} · {nf.format(m.ventas)} vtas</span></div>
                       {(m.breakdown || []).map((b, j) => (
-                        <div className="rexline" key={j}><span className="rexcamp">{b.campaign}</span> › <span className="rexset">{b.adset}</span><span className="rexmeta">{short(b.spend)} · {nf.format(b.ventas)} vtas · {b.roas.toFixed(1)}x</span></div>
+                        <div className="rexline" key={j}><span className="rexcamp">{b.campaign}</span> › <span className="rexset">{b.adset}</span>{b.aud ? <span className="rexaud">{b.aud}</span> : null}<span className="rexmeta">{short(b.spend)} · {nf.format(b.ventas)} vtas · {b.roas.toFixed(1)}x</span></div>
                       ))}
                     </div>
                   ))}
@@ -923,6 +923,7 @@ const CSS = `
 .rexline{font-size:11px;color:#6B6552;margin-top:4px;padding-left:8px;display:flex;flex-wrap:wrap;gap:5px;align-items:baseline;}
 .rexcamp{color:var(--ink);}
 .rexset{color:#8A8268;}
+.rexaud{font-size:9px;color:var(--soft);border:1px solid var(--line);border-radius:3px;padding:1px 5px;}
 .rexmeta{color:var(--soft);margin-left:auto;}
 .dimpills{display:flex;gap:7px;margin-bottom:12px;}
 .dimpill{font-family:'Space Mono',monospace;font-size:12px;letter-spacing:1px;color:var(--ink);background:var(--paper2);border:2px solid var(--ink);padding:6px 13px;border-radius:6px;cursor:pointer;}
