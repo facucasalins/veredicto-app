@@ -113,6 +113,7 @@ export default function App() {
   const [tnSummary, setTnSummary] = useState(null);
   const [tnLoading, setTnLoading] = useState(false);
   const [analysis, setAnalysis] = useState(null); // lectura del cerebro, persiste entre pestañas
+  const [hookMatch, setHookMatch] = useState(null); // {probados, byTemplate} del match de biblioteca, persiste
   const [data, setData] = useState([]); // sin cliente elegido => vacío (no data de muestra)
   const [audiencias, setAudiencias] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -122,7 +123,7 @@ export default function App() {
   useEffect(() => { fetch("/api/accounts").then((r) => r.json()).then((j) => { setAccounts(j.accounts || []); setMe(j.me || null); setMetaErr(j.error && !(j.accounts || []).length ? j.error : ""); }).catch(() => setMetaErr("No se pudo conectar con Meta")); }, []);
   const logout = async () => { try { await fetch("/api/logout", { method: "POST" }); } finally { window.location.href = "/login"; } };
   // la lectura del analista queda obsoleta si cambia el cliente/período/tienda → la limpiamos
-  useEffect(() => { setAnalysis(null); }, [account, preset, tnStore, cSince, cUntil]);
+  useEffect(() => { setAnalysis(null); setHookMatch(null); }, [account, preset, tnStore, cSince, cUntil]);
   useEffect(() => { fetch("/api/sheets/tabs").then((r) => r.json()).then((j) => setSheetTabs(j.tabs || [])).catch(() => {}); }, []);
   useEffect(() => { fetch("/api/tiendanube/stores").then((r) => r.json()).then((j) => setTnStores(j.stores || [])).catch(() => {}); }, []);
   useEffect(() => {
@@ -280,7 +281,7 @@ export default function App() {
           {effView === "hoy" && (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Hoy acc={acciones} u={ueff} done={done} toggle={toggle} total={totalTasks} doneCount={doneCount} mantener={stats.counts.Mantener} />)}
           {effView === "top" && (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Top withV={withV} u={ueff} audData={audiencias} />)}
           {effView === "panel" && (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Panel rows={rows} stats={stats} sort={sort} setSortKey={setSortKey} />)}
-          {effView === "bib" && <Biblioteca rows={withV} />}
+          {effView === "bib" && <Biblioteca rows={withV} hookMatch={hookMatch} setHookMatch={setHookMatch} />}
           {effView === "gen" && <Generar rows={withV} accountName={(accounts.find((a) => a.id === account) || {}).name || ""} />}
         </>
       )}
@@ -628,14 +629,14 @@ function Panel({ rows, stats, sort, setSortKey }) {
 }
 
 // ─────────── Vista: BIBLIOTECA (Parte 6) ───────────
-function Biblioteca({ rows = [] }) {
+function Biblioteca({ rows = [], hookMatch, setHookMatch }) {
   const [tab, setTab] = useState("hooks");
   const [q, setQ] = useState("");
   const [eje, setEje] = useState("Todos");
   const [cat, setCat] = useState("Todas");
   const [estado, setEstado] = useState("Todos"); // Todos | Sin probar | Probados (filtro post-análisis)
-  const [probados, setProbados] = useState(null); // Set de ids de la biblioteca ya probados
-  const [byTemplate, setByTemplate] = useState({}); // id template -> creativos que lo probaron
+  const probados = hookMatch ? new Set(hookMatch.probados) : null; // persiste en el padre
+  const byTemplate = (hookMatch && hookMatch.byTemplate) || {};
   const [openHook, setOpenHook] = useState(null); // id template expandido
   const [mLoading, setMLoading] = useState(false);
   const [mErr, setMErr] = useState("");
@@ -651,7 +652,7 @@ function Biblioteca({ rows = [] }) {
     rows.filter((r) => r.spend > 0 && r.sheet && r.sheet.texto_gancho).forEach((r) => {
       const t = r.sheet.texto_gancho;
       if (!map.has(t)) map.set(t, []);
-      map.get(t).push({ nombre: r.nombre, tf: tf(r), roas: r.roas, activa: r.activa });
+      map.get(t).push({ nombre: r.nombre, tf: tf(r), roas: r.roas, spend: r.spend, activa: r.activa });
     });
     return Array.from(map.entries()).slice(0, 80).map(([text, creativos], i) => ({ i, text, creativos }));
   }, [rows]);
@@ -663,15 +664,14 @@ function Biblioteca({ rows = [] }) {
       const res = await fetch("/api/match-hooks", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ realHooks: realHookList.map((h) => ({ i: h.i, text: h.text })), library: HOOKS.map((h) => ({ id: h[0], text: h[1] })) }) });
       const d = await res.json();
       if (d.error) throw new Error(d.error);
-      // template id -> creativos que lo probaron (dedup por nombre)
+      // template id -> creativos que lo probaron (con la razón del match, dedup por nombre)
       const bt = {};
       (d.matches || []).forEach((m) => {
-        const cs = (realHookList[m.i] || {}).creativos || [];
+        const cs = ((realHookList[m.i] || {}).creativos || []).map((c) => ({ ...c, razon: m.razon || "" }));
         (m.ids || []).forEach((id) => { bt[id] = (bt[id] || []).concat(cs); });
       });
       Object.keys(bt).forEach((id) => { const seen = new Set(); bt[id] = bt[id].filter((c) => !seen.has(c.nombre) && seen.add(c.nombre)); });
-      setByTemplate(bt);
-      setProbados(new Set(d.probados || []));
+      setHookMatch({ probados: d.probados || [], byTemplate: bt });
     } catch (e) { setMErr("No se pudo analizar: " + e.message); } finally { setMLoading(false); }
   };
 
@@ -733,7 +733,12 @@ function Biblioteca({ rows = [] }) {
                 {isOpen && cre.length > 0 && (
                   <div className="hookexp">
                     <div className="hookexh">Probado con:</div>
-                    {cre.map((c, ci) => (<div className="hookexline" key={ci}><b>{c.nombre}</b>{c.tf ? <span className="tf">{c.tf}</span> : null} <span className="hookexkpi">{c.roas.toFixed(1)}x</span>{c.activa === false ? <span className="pausedtag">⏸ PAUSADA</span> : null}</div>))}
+                    {cre.map((c, ci) => (
+                      <div className="hookexitem" key={ci}>
+                        <div className="hookexline"><b>{c.nombre}</b>{c.tf ? <span className="tf">{c.tf}</span> : null} <span className="hookexkpi">{c.roas.toFixed(1)}x</span> <span className="hookexspend">{short(c.spend)} spend</span>{c.activa === false ? <span className="pausedtag">⏸ PAUSADA</span> : null}</div>
+                        {c.razon ? <div className="hookexrazon">↳ {c.razon}</div> : null}
+                      </div>
+                    ))}
                   </div>
                 )}
               </div>);
@@ -1256,8 +1261,12 @@ td{padding:11px 12px;vertical-align:middle;}.num{text-align:right;}.name{font-we
 .hookwrap{display:flex;flex-direction:column;}
 .hookexp{background:var(--paper2);border:2px solid var(--ink);border-top:none;border-radius:0 0 8px 8px;margin:-4px 0 0 6px;padding:8px 13px 10px;font-family:'Space Mono',monospace;}
 .hookexh{font-size:9px;letter-spacing:1.5px;color:var(--soft);margin-bottom:6px;}
-.hookexline{font-size:12px;color:var(--ink);padding:3px 0;display:flex;align-items:center;gap:6px;flex-wrap:wrap;}
+.hookexitem{padding:5px 0;border-top:1px dashed var(--line);}
+.hookexitem:first-of-type{border-top:none;}
+.hookexline{font-size:12px;color:var(--ink);display:flex;align-items:center;gap:6px;flex-wrap:wrap;}
 .hookexkpi{color:#2E8B6B;font-weight:700;}
+.hookexspend{color:var(--soft);font-size:11px;}
+.hookexrazon{font-size:11px;color:var(--soft);margin-top:2px;padding-left:4px;line-height:1.4;}
 .promptlist{display:flex;flex-direction:column;gap:10px;}
 .pcard{background:var(--paper2);border:2px solid var(--ink);border-radius:9px;padding:13px 16px;box-shadow:3px 3px 0 var(--ink);}
 .pcardtop{display:flex;justify-content:space-between;align-items:center;}

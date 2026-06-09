@@ -8,7 +8,9 @@ export const dynamic = "force-dynamic";
 // "sin probar" queda como un backlog confiable de experimentos).
 const SYSTEM = `Sos analista de creativos publicitarios. Te paso (1) los HOOKS REALES que un cliente ya usó, numerados [i], y (2) una BIBLIOTECA de templates de hooks (patrones con huecos como "(beneficio)" o "[nicho]"). Para CADA hook real, identificá a qué template(s) de la biblioteca se parece en ESTRUCTURA e INTENCIÓN (no en palabras exactas). Sé estricto: si un hook real no sigue claramente el patrón de ningún template, devolvé ids vacío. Un hook real puede matchear más de un template.
 
-Devolvé EXCLUSIVAMENTE JSON válido sin markdown ni backticks, usando el índice i de cada hook real: {"matches":[{"i":<índice del hook real>,"ids":[<id template>, ...]}]}`;
+Para CADA hook real que matchee, dá una razón BREVE (máx ~12 palabras) de por qué encaja con ese/esos templates (qué estructura o intención comparten).
+
+Devolvé EXCLUSIVAMENTE JSON válido sin markdown ni backticks, usando el índice i de cada hook real: {"matches":[{"i":<índice del hook real>,"ids":[<id template>, ...],"razon":"<por qué, breve>"}]}`;
 
 export async function POST(req) {
   const sess = authDisabled() ? { admin: true } : await verifySession(cookies().get(SESSION_COOKIE)?.value);
@@ -27,7 +29,7 @@ export async function POST(req) {
     const r = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01" },
-      body: JSON.stringify({ model: process.env.ANTHROPIC_MODEL || "claude-sonnet-4-6", max_tokens: 2500, system: SYSTEM, messages: [{ role: "user", content: prompt }] }),
+      body: JSON.stringify({ model: process.env.ANTHROPIC_MODEL || "claude-sonnet-4-6", max_tokens: 3200, system: SYSTEM, messages: [{ role: "user", content: prompt }] }),
     });
     const data = await r.json();
     if (data.error) return Response.json({ error: data.error.message || "Error de Claude" }, { status: 500 });
