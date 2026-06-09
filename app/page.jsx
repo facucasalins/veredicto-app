@@ -243,6 +243,7 @@ export default function App() {
         <>
           <nav className="nav">
             {role === "vos" && <button className={"tab" + (effView === "dash" ? " active" : "")} onClick={() => setView("dash")}>DASHBOARD</button>}
+            <button className={"tab tabai" + (effView === "an" ? " active" : "")} onClick={() => setView("an")}>◆ ANÁLISIS</button>
             <button className={"tab" + (effView === "hoy" ? " active" : "")} onClick={() => setView("hoy")}>QUÉ HACER HOY {totalTasks ? <span className="tabn">{totalTasks}</span> : null}</button>
             <button className={"tab" + (effView === "top" ? " active" : "")} onClick={() => setView("top")}>TOP PERFORMERS</button>
             <button className={"tab" + (effView === "panel" ? " active" : "")} onClick={() => setView("panel")}>PANEL</button>
@@ -260,6 +261,7 @@ export default function App() {
             </section>
           )}
 
+          {effView === "an" && (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Analisis key={account + preset + tnStore} withV={withV} stats={stats} audiencias={audiencias} tnSummary={tnSummary} u={ueff} accountName={(accounts.find((a) => a.id === account) || {}).name || ""} periodo={preset === "custom" && cSince && cUntil ? cSince + " → " + cUntil : preset} />)}
           {effView === "dash" && (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Dash stats={stats} goal={goal} setGoal={setGoal} factTienda={tnSummary ? tnSummary.facturacion : null} tnStore={tnStore} />)}
           {effView === "hoy" && (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Hoy acc={acciones} u={ueff} done={done} toggle={toggle} total={totalTasks} doneCount={doneCount} mantener={stats.counts.Mantener} />)}
           {effView === "top" && (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Top withV={withV} u={ueff} audData={audiencias} />)}
@@ -435,6 +437,76 @@ function EmptyState({ account, loading, err }) {
       <div className="emptymark">◆</div>
       <div className="emptytitle">{loading ? "Cargando…" : !account ? "Elegí un cliente para empezar" : (err || "Sin datos en este período")}</div>
       {!account && !loading && <div className="emptysub">El panel se llena con los creativos de la cuenta que selecciones arriba.</div>}
+    </section>
+  );
+}
+
+// ─────────── Vista: ANÁLISIS (el "cerebro" read-only) ───────────
+function Analisis({ withV, stats, audiencias, tnSummary, u, accountName, periodo }) {
+  const [out, setOut] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState("");
+
+  // Resumen COMPACTO calculado acá (no mandamos anuncios crudos → pocos tokens).
+  const snapshot = useMemo(() => {
+    const reliable = withV.filter((r) => r.spend >= u.pisoSpend);
+    const top = (dim) => aggregate(reliable, dim).slice(0, 5).map((g) => ({ k: g.key, roas: +g.roas.toFixed(1), spend: Math.round(g.spend), ventas: Math.round(g.ventas), ads: g.n }));
+    const aud = (audiencias && audiencias.length ? audiencias : []).slice(0, 6).map((g) => ({ k: g.key, roas: g.spend ? +(g.revenue / g.spend).toFixed(1) : 0, spend: g.spend, ventas: g.ventas, ads: g.n }));
+    const sangrado = [...withV].filter((r) => r.v === "Pausar").sort((a, b) => b.spend - a.spend).slice(0, 5).map((r) => ({ nombre: r.nombre, roas: r.roas, spend: r.spend, ventas: r.ventas }));
+    const b = [...reliable.filter((r) => r.ventas >= 5)].sort((x, y) => y.roas - x.roas)[0] || [...reliable].sort((x, y) => y.roas - x.roas)[0];
+    return {
+      cuenta: accountName || "—", periodo,
+      inversion: stats.spendTotal, ventas: stats.ventasTotal, cpa: Math.round(stats.cpaProm), roas_cuenta: +stats.accountRoas.toFixed(1),
+      tienda: tnSummary ? { facturacion: tnSummary.facturacion, mer: tnSummary.mer, roas_pixel: +(tnSummary.roasMeta || 0).toFixed(1) } : null,
+      veredictos: stats.counts,
+      umbral: { roas_min: u.roasMin || null, cpa_max: u.cpaMax === Infinity ? null : u.cpaMax, piso_spend: u.pisoSpend || null },
+      ranking: { angulo_venta: top("ang"), categoria: top("cat"), hook: top("hook"), audiencia: aud, formato: top("fmt") },
+      sangrando: sangrado,
+      receta_ganadora: b ? { angulo: b.sheet?.angulo || b.ang, categoria: b.ang, hook: b.sheet?.tipo_gancho || b.hook, audiencia: b.aud, formato: b.fmt, roas: b.roas, ventas: b.ventas, spend: b.spend } : null,
+    };
+  }, [withV, stats, audiencias, tnSummary, u, accountName, periodo]);
+
+  const pedir = async () => {
+    setLoading(true); setErr(""); setOut(null);
+    try {
+      const res = await fetch("/api/analyze", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ snapshot }) });
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      setOut(data.analysis);
+    } catch (e) { setErr("No se pudo analizar: " + e.message); } finally { setLoading(false); }
+  };
+
+  const PR = { alta: "#C0392B", media: "#E0852E", baja: "#857A66" };
+  return (
+    <section className="an">
+      <div className="anhead">
+        <div><div className="antitle">◆ LECTURA DEL ANALISTA</div><div className="ansub">Claude mira toda la cuenta ({snapshot.cuenta} · {periodo}) y te dice qué pasa y qué hacer. Read-only, no toca nada.</div></div>
+        <button className="anbtn" onClick={pedir} disabled={loading}>{loading ? "● PENSANDO..." : out ? "↻ VOLVER A LEER" : "▶ PEDIR LECTURA"}</button>
+      </div>
+      {err && <div className="generr">{err}</div>}
+      {!out && !loading && !err && <div className="anplaceholder">Apretá <b>“Pedir lectura”</b> y el analista cruza tus rankings, el MER vs ROAS del pixel, qué escalar, qué sangra y qué te falta probar. Cada lectura cuesta ~2 centavos de IA y corre solo cuando vos la pedís.</div>}
+      {out && (
+        <div className="anout">
+          <div className="antop">{out.titular}</div>
+          <div className="andiag">{out.diagnostico}</div>
+          {Array.isArray(out.acciones) && out.acciones.length > 0 && (
+            <div className="anblock"><div className="anbh">ACCIONES</div>
+              {out.acciones.map((a, i) => (
+                <div className="anaccion" key={i}>
+                  <span className="anprio" style={{ background: PR[a.prioridad] || "#857A66" }}>{(a.prioridad || "").toUpperCase()}</span>
+                  <div><div className="anacc">{a.accion}</div><div className="anporque">{a.porque}</div></div>
+                </div>
+              ))}
+            </div>
+          )}
+          {Array.isArray(out.explorar) && out.explorar.length > 0 && (
+            <div className="anblock"><div className="anbh">PARA EXPLORAR</div>{out.explorar.map((e, i) => <div className="anitem" key={i}>↗ {e}</div>)}</div>
+          )}
+          {Array.isArray(out.riesgos) && out.riesgos.length > 0 && (
+            <div className="anblock"><div className="anbh">RIESGOS</div>{out.riesgos.map((e, i) => <div className="anitem riesgo" key={i}>⚠ {e}</div>)}</div>
+          )}
+        </div>
+      )}
     </section>
   );
 }
@@ -1002,6 +1074,26 @@ td{padding:11px 12px;vertical-align:middle;}.num{text-align:right;}.name{font-we
 .outmeta.over{color:#C5362B;font-weight:700;}
 .thinnote{margin-top:14px;font-family:'Space Mono',monospace;font-size:11px;line-height:1.5;color:var(--soft);font-style:italic;border-top:1px dashed var(--line);padding-top:11px;}
 .cselect{font-family:'Space Mono',monospace;font-size:13px;border:2px solid var(--ink);border-radius:6px;padding:5px 9px;background:var(--paper);color:var(--ink);max-width:230px;margin:4px 0;cursor:pointer;}
+.an{margin-top:4px;}
+.anhead{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap;margin-bottom:16px;}
+.antitle{font-family:'Anton',Impact,sans-serif;font-size:22px;letter-spacing:1.5px;color:var(--ink);}
+.ansub{font-family:'Space Mono',monospace;font-size:11.5px;color:var(--soft);margin-top:5px;max-width:560px;line-height:1.5;}
+.anbtn{font-family:'Anton',Impact,sans-serif;font-size:15px;letter-spacing:1.5px;color:var(--paper);background:var(--ink);border:2px solid var(--ink);border-radius:9px;padding:11px 20px;cursor:pointer;box-shadow:4px 4px 0 var(--c6);white-space:nowrap;}
+.anbtn:hover{transform:translate(-1px,-1px);}.anbtn:disabled{opacity:.6;cursor:default;}
+.anplaceholder{background:var(--paper2);border:2px dashed var(--line);border-radius:12px;padding:26px;font-family:'Space Mono',monospace;font-size:13px;color:var(--soft);line-height:1.6;}
+.anout{display:flex;flex-direction:column;gap:16px;}
+.antop{font-family:'Anton',Impact,sans-serif;font-size:20px;letter-spacing:.5px;color:var(--ink);background:linear-gradient(90deg,var(--paper2),transparent);border-left:4px solid var(--c4);padding:12px 16px;border-radius:0 8px 8px 0;}
+.andiag{font-size:14.5px;line-height:1.6;color:var(--ink);}
+.anblock{background:var(--paper2);border:2px solid var(--ink);border-radius:12px;padding:14px 16px;box-shadow:4px 4px 0 var(--ink);}
+.anbh{font-family:'Space Mono',monospace;font-size:10px;letter-spacing:2px;color:var(--soft);margin-bottom:10px;}
+.anaccion{display:flex;gap:11px;align-items:flex-start;padding:9px 0;border-top:1px solid var(--line);}
+.anaccion:first-of-type{border-top:none;}
+.anprio{font-family:'Space Mono',monospace;font-size:9px;font-weight:700;letter-spacing:1px;color:#fff;border-radius:4px;padding:3px 7px;flex-shrink:0;margin-top:1px;}
+.anacc{font-size:14px;font-weight:600;color:var(--ink);line-height:1.4;}
+.anporque{font-family:'Space Mono',monospace;font-size:11.5px;color:var(--soft);margin-top:3px;line-height:1.45;}
+.anitem{font-size:13.5px;color:var(--ink);padding:6px 0;line-height:1.5;}
+.anitem.riesgo{color:#8A1C12;}
+.tabai.active{background:var(--c6);border-color:var(--c6);}
 .empty{margin-top:40px;padding:60px 24px;text-align:center;border:2px dashed var(--line);border-radius:14px;background:var(--paper2);}
 .emptymark{font-size:34px;color:var(--soft);opacity:.5;margin-bottom:14px;}
 .emptytitle{font-family:'Anton',Impact,sans-serif;font-size:24px;letter-spacing:1px;color:var(--ink);}
