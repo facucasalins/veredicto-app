@@ -83,7 +83,7 @@ export default function App() {
   const [u, setU] = useState({ roasMin: 20, cpaMax: 3000, pisoSpend: 50000 });
   const [goal, setGoal] = useState(42000000);
   const [sort, setSort] = useState({ key: "veredicto", dir: "asc" });
-  const [view, setView] = useState("panel");
+  const [view, setView] = useState("dash");
   const [role, setRole] = useState("vos");
   const [done, setDone] = useState(() => new Set());
   const toggle = (id) => setDone((d) => { const n = new Set(d); n.has(id) ? n.delete(id) : n.add(id); return n; });
@@ -331,12 +331,16 @@ function Top({ withV, u, audData }) {
   const reliable = useMemo(() => withV.filter((r) => r.spend >= u.pisoSpend), [withV, u.pisoSpend]);
   const MINV = 5;
   const data = useMemo(() => {
-    if (dim === "aud" && audData && audData.length) return audData.map((g) => ({ ...g, roas: g.spend ? g.revenue / g.spend : 0 }));
-    return aggregate(reliable, dim);
+    const arr = (dim === "aud" && audData && audData.length)
+      ? audData.map((g) => ({ ...g, roas: g.spend ? g.revenue / g.spend : 0 }))
+      : aggregate(reliable, dim);
+    return [...arr].sort((a, b) => b.roas - a.roas);
   }, [reliable, dim, audData]);
-  const rankable = (g) => g.spend >= u.pisoSpend && g.ventas >= MINV;
-  const ranked = data.filter(rankable);
-  const thin = data.filter((g) => !rankable(g));
+  // Cuántos mostrar por dimensión. Audiencia = todas; el resto, un top.
+  const LIMITS = { ang: 5, cat: 5, aud: Infinity, hook: 10, fmt: 8 };
+  const limit = LIMITS[dim] ?? 5;
+  const ranked = data.slice(0, limit);
+  const thin = data.slice(limit);
   const top3 = useMemo(() => { const ok = reliable.filter((r) => r.ventas >= MINV); return [...(ok.length ? ok : reliable)].sort((a, b) => b.roas - a.roas).slice(0, 3); }, [reliable]);
   const best = top3[0];
   const max = Math.max(...ranked.map((d) => d.roas), 1);
@@ -383,7 +387,7 @@ function Top({ withV, u, audData }) {
               <span className="rmeta">{short(d.spend)} · {nf.format(Math.round(d.ventas))} vtas · {d.n} ad{d.n !== 1 ? "s" : ""}</span>
             </div>))}
         </div>
-        {thin.length > 0 && <div className="thinnote">⚠ Datos insuficientes para rankear ({u.pisoSpend ? <>{"<"} {short(u.pisoSpend)} de spend ó </> : null}{"<"} {MINV} ventas): {thin.map((g) => g.key).join(", ")}. Necesitan más inversión antes de declararlos ganadores o perdedores — no los muestro arriba para que el ranking tenga sentido.</div>}
+        {thin.length > 0 && <div className="thinnote">+ {thin.length} fuera del top {limit}: {thin.map((g) => g.key).join(", ")}.</div>}
       </section>
     </>
   );
