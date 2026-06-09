@@ -268,7 +268,7 @@ export default function App() {
           {effView === "hoy" && (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Hoy acc={acciones} u={ueff} done={done} toggle={toggle} total={totalTasks} doneCount={doneCount} mantener={stats.counts.Mantener} />)}
           {effView === "top" && (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Top withV={withV} u={ueff} audData={audiencias} />)}
           {effView === "panel" && (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Panel rows={rows} stats={stats} sort={sort} setSortKey={setSortKey} />)}
-          {effView === "bib" && <Biblioteca />}
+          {effView === "bib" && <Biblioteca rows={withV} />}
           {effView === "gen" && <Generar rows={withV} accountName={(accounts.find((a) => a.id === account) || {}).name || ""} />}
         </>
       )}
@@ -610,37 +610,83 @@ function Panel({ rows, stats, sort, setSortKey }) {
 }
 
 // ─────────── Vista: BIBLIOTECA (Parte 6) ───────────
-function Biblioteca() {
+function Biblioteca({ rows = [] }) {
   const [tab, setTab] = useState("hooks");
   const [q, setQ] = useState("");
   const [eje, setEje] = useState("Todos");
   const [cat, setCat] = useState("Todas");
+  const [estado, setEstado] = useState("Todos"); // Todos | Sin probar | Probados (filtro post-análisis)
+  const [probados, setProbados] = useState(null); // Set de ids de la biblioteca ya probados
+  const [mLoading, setMLoading] = useState(false);
+  const [mErr, setMErr] = useState("");
   const [copied, setCopied] = useState(null);
   const copy = (text, id) => { try { navigator.clipboard.writeText(text); } catch (e) {} setCopied(id); setTimeout(() => setCopied(null), 1200); };
   const ql = q.trim().toLowerCase();
+
+  // (A) TUS GANADORES: hooks reales del cliente (texto_gancho del Sheet) ordenados por ROAS.
+  const ganadores = useMemo(() => [...rows.filter((r) => r.spend > 0 && r.sheet && r.sheet.texto_gancho)].sort((a, b) => b.roas - a.roas).slice(0, 15), [rows]);
+  const realHooks = useMemo(() => Array.from(new Set(rows.filter((r) => r.spend > 0 && r.sheet && r.sheet.texto_gancho).map((r) => r.sheet.texto_gancho))).slice(0, 80), [rows]);
+
+  // (B) Mapa probado/sin-probar: matchea tus hooks reales contra la biblioteca (on-demand, IA).
+  const analizar = async () => {
+    setMLoading(true); setMErr("");
+    try {
+      const res = await fetch("/api/match-hooks", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ realHooks, library: HOOKS.map((h) => ({ id: h[0], text: h[1] })) }) });
+      const d = await res.json();
+      if (d.error) throw new Error(d.error);
+      setProbados(new Set(d.probados || []));
+    } catch (e) { setMErr("No se pudo analizar: " + e.message); } finally { setMLoading(false); }
+  };
+
   const ejes = ["Todos", "Identidad", "Ruptura", "Pérdida", "Evidencia"];
   const ejeCount = (e) => HOOKS.filter((h) => e === "Todos" || h[3] === e).length;
-  const fHooks = HOOKS.filter((h) => (eje === "Todos" || h[3] === eje) && (!ql || h[1].toLowerCase().includes(ql) || h[2].toLowerCase().includes(ql)));
+  const estadoOk = (h) => !probados || estado === "Todos" || (estado === "Probados" ? probados.has(h[0]) : !probados.has(h[0]));
+  const fHooks = HOOKS.filter((h) => (eje === "Todos" || h[3] === eje) && estadoOk(h) && (!ql || h[1].toLowerCase().includes(ql) || h[2].toLowerCase().includes(ql)));
   const shown = fHooks.slice(0, 80);
+  const nProb = probados ? HOOKS.filter((h) => probados.has(h[0])).length : 0;
   const cats = ["Todas"].concat(Array.from(new Set(PROMPTS.map((p) => p.cat))));
   const fProm = PROMPTS.filter((p) => (cat === "Todas" || p.cat === cat) && (!ql || p.title.toLowerCase().includes(ql) || p.text.toLowerCase().includes(ql)));
   return (
     <section className="bib">
       <div className="bibtabs">
+        <button className={"bibtab" + (tab === "ganadores" ? " on" : "")} onClick={() => { setTab("ganadores"); setQ(""); }}>★ TUS GANADORES <span className="bibn">{ganadores.length}</span></button>
         <button className={"bibtab" + (tab === "hooks" ? " on" : "")} onClick={() => { setTab("hooks"); setQ(""); }}>HOOKS <span className="bibn">{HOOKS.length}</span></button>
         <button className={"bibtab" + (tab === "prompts" ? " on" : "")} onClick={() => { setTab("prompts"); setQ(""); }}>PROMPTS <span className="bibn">{PROMPTS.length}</span></button>
-        <input className="search" placeholder={tab === "hooks" ? "buscar hook o familia..." : "buscar prompt..."} value={q} onChange={(e) => setQ(e.target.value)} />
+        {tab !== "ganadores" && <input className="search" placeholder={tab === "hooks" ? "buscar hook o familia..." : "buscar prompt..."} value={q} onChange={(e) => setQ(e.target.value)} />}
       </div>
-      {tab === "hooks" ? (
+      {tab === "ganadores" ? (
         <>
+          <div className="bibintro">Los hooks que <b>ya te funcionaron</b> — texto real de tus creativos top por ROAS, con su tipo, ángulo y estado. La base concreta para iterar.</div>
+          {ganadores.length === 0 ? (
+            <div className="anplaceholder">Elegí un cliente con cruce de Sheet para ver sus hooks ganadores reales.</div>
+          ) : (
+            <div className="hooklist">
+              {ganadores.map((r, i) => (
+                <div className="gancard" key={r.id}>
+                  <span className="hnum">{String(i + 1).padStart(2, "0")}</span>
+                  <div className="hmid"><span className="htext">{r.sheet.texto_gancho}</span><span className="htags"><span className="ftag">{r.sheet.tipo_gancho || "nd"}</span><span className="ftag">{r.sheet.angulo || r.ang}</span><span className="ganroas">{r.roas.toFixed(1)}x · {short(r.spend)} · {nf.format(r.ventas)} vtas</span><Paused r={r} /></span></div>
+                  <button className="copybtn" onClick={() => copy(r.sheet.texto_gancho, "g" + r.id)}>{copied === "g" + r.id ? "✓" : "⧉"}</button>
+                </div>))}
+            </div>
+          )}
+        </>
+      ) : tab === "hooks" ? (
+        <>
+          <div className="matchbar">
+            <button className="matchbtn" onClick={analizar} disabled={mLoading || !realHooks.length}>{mLoading ? "● ANALIZANDO..." : probados ? "↻ RE-ANALIZAR" : "▶ ¿QUÉ YA PROBÉ?"}</button>
+            {!realHooks.length && <span className="matchhint">elegí un cliente con Sheet para cruzar tus hooks reales</span>}
+            {probados && <span className="matchhint"><b>{nProb}</b> probados · <b>{HOOKS.length - nProb}</b> sin probar (de {HOOKS.length}) · ~aproximado</span>}
+            {mErr && <span className="matchhint" style={{ color: "#8A1C12" }}>{mErr}</span>}
+          </div>
+          {probados && <div className="ejefilt">{["Todos", "Sin probar", "Probados"].map((e) => <button key={e} className={"ejepill" + (estado === e ? " on" : "")} onClick={() => setEstado(e)}>{e}</button>)}</div>}
           <div className="ejefilt">
             {ejes.map((e) => (<button key={e} className={"ejepill" + (eje === e ? " on" : "")} onClick={() => setEje(e)} style={eje === e && e !== "Todos" ? { background: EJECOLOR[e], borderColor: EJECOLOR[e], color: "#F3EBD9" } : null}>{e} <b>{ejeCount(e)}</b></button>))}
           </div>
           <div className="hooklist">
             {shown.map((h) => (
-              <div className="hookcard" key={h[0]} style={{ "--ec": EJECOLOR[h[3]] || "#857A66" }}>
+              <div className={"hookcard" + (probados && !probados.has(h[0]) ? " untested" : "")} key={h[0]} style={{ "--ec": EJECOLOR[h[3]] || "#857A66" }}>
                 <span className="hnum">{String(h[0]).padStart(3, "0")}</span>
-                <div className="hmid"><span className="htext">{h[1]}</span><span className="htags"><span className="ftag">{h[2]}</span><span className="ejetag" style={{ color: EJECOLOR[h[3]] }}>{h[3]}</span></span></div>
+                <div className="hmid"><span className="htext">{h[1]}</span><span className="htags"><span className="ftag">{h[2]}</span><span className="ejetag" style={{ color: EJECOLOR[h[3]] }}>{h[3]}</span>{probados && (probados.has(h[0]) ? <span className="probtag">✓ probado</span> : <span className="sinprobtag">sin probar</span>)}</span></div>
                 <button className="copybtn" onClick={() => copy(h[1], "h" + h[0])}>{copied === "h" + h[0] ? "✓" : "⧉"}</button>
               </div>))}
           </div>
@@ -1128,6 +1174,16 @@ td{padding:11px 12px;vertical-align:middle;}.num{text-align:right;}.name{font-we
 .copybtn{font-family:'Space Mono',monospace;font-size:12px;font-weight:700;background:var(--paper);border:2px solid var(--ink);border-radius:6px;padding:5px 9px;cursor:pointer;color:var(--ink);white-space:nowrap;flex:none;}
 .copybtn:hover{background:var(--c1);}
 .bibfoot{margin-top:12px;font-family:'Space Mono',monospace;font-size:11px;color:var(--soft);font-style:italic;}
+.bibintro{font-family:'Space Mono',monospace;font-size:12px;color:var(--soft);margin-bottom:14px;line-height:1.5;}
+.gancard{display:flex;align-items:center;gap:11px;background:var(--paper2);border:2px solid var(--ink);border-left:6px solid #2E8B6B;border-radius:8px;padding:10px 13px;box-shadow:2px 2px 0 var(--ink);}
+.ganroas{font-family:'Space Mono',monospace;font-size:9.5px;color:#2E8B6B;font-weight:700;}
+.matchbar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px;}
+.matchbtn{font-family:'Anton',Impact,sans-serif;font-size:14px;letter-spacing:1px;color:var(--paper);background:var(--ink);border:2px solid var(--ink);border-radius:8px;padding:9px 16px;cursor:pointer;box-shadow:3px 3px 0 var(--c6);}
+.matchbtn:disabled{opacity:.5;cursor:default;}
+.matchhint{font-family:'Space Mono',monospace;font-size:11px;color:var(--soft);}
+.hookcard.untested{opacity:.55;}
+.probtag{font-family:'Space Mono',monospace;font-size:9px;font-weight:700;color:#0F6E56;background:#DFEAE4;border:1px solid #9CC6B5;border-radius:3px;padding:1px 6px;}
+.sinprobtag{font-family:'Space Mono',monospace;font-size:9px;color:var(--soft);border:1px dashed var(--line);border-radius:3px;padding:1px 6px;}
 .promptlist{display:flex;flex-direction:column;gap:10px;}
 .pcard{background:var(--paper2);border:2px solid var(--ink);border-radius:9px;padding:13px 16px;box-shadow:3px 3px 0 var(--ink);}
 .pcardtop{display:flex;justify-content:space-between;align-items:center;}
