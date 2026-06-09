@@ -8,22 +8,6 @@ import { useState, useMemo, useEffect } from "react";
 // ─────────────────────────────────────────────────────────────
 
 
-const [tabs, setTabs] = useState([]);
-const [tab, setTab] = useState("");
-
-useEffect(() => {
-  fetch("/api/sheets/tabs").then(r => r.json()).then(d => setTabs(d.tabs || []));
-}, []);
-
-// en el JSX:
-<select value={tab} onChange={e => setTab(e.target.value)}>
-  <option value="">— pestaña del sheet —</option>
-  {tabs.map(t => <option key={t.gid} value={t.title}>{t.title}</option>)}
-</select>
-
-// y al pedir los ads, sumás &tab=:
-fetch(`/api/ads?account=${accountId}&period=${period}&tab=${encodeURIComponent(tab)}`)
-
 const SAMPLE = [
   { id: 1,  nombre: "02-06 · Catálogo Dinámico",  fecha: "02-06-26", spend: 558000, roas: 21.2, cpa: 2122, ventas: 263, ang: "Catálogo", sec: "—",            split: "100/0", aud: "Advantage+",  hook: "—",           fmt: "CAT" },
   { id: 2,  nombre: "31-05 · HotSaleBotas",        fecha: "31-05-26", spend: 210000, roas: 24.6, cpa: 2187, ventas: 96,  ang: "HotSale",  sec: "Urgencia",     split: "70/30", aud: "Amplio",      hook: "HotSale",     fmt: "VID" },
@@ -96,16 +80,19 @@ export default function App() {
   const [accounts, setAccounts] = useState([]);
   const [account, setAccount] = useState("");
   const [preset, setPreset] = useState("last_30d");
+  const [sheetTabs, setSheetTabs] = useState([]);
+  const [sheetTab, setSheetTab] = useState("");
   const [data, setData] = useState(SAMPLE);
   const [audiencias, setAudiencias] = useState([]);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
   useEffect(() => { fetch("/api/accounts").then((r) => r.json()).then((j) => setAccounts(j.accounts || [])).catch(() => {}); }, []);
+  useEffect(() => { fetch("/api/sheets/tabs").then((r) => r.json()).then((j) => setSheetTabs(j.tabs || [])).catch(() => {}); }, []);
   useEffect(() => {
     if (!account) { setData(SAMPLE); setAudiencias([]); setErr(""); return; }
     let cancelled = false;
     setLoading(true); setErr("");
-    fetch("/api/ads?account=" + account + "&preset=" + preset)
+    fetch("/api/ads?account=" + account + "&preset=" + preset + (sheetTab ? "&tab=" + encodeURIComponent(sheetTab) : ""))
       .then((r) => r.json())
       .then((j) => {
         if (cancelled) return;
@@ -117,7 +104,7 @@ export default function App() {
       .catch((e) => { if (!cancelled) setErr(e.message); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [account, preset]);
+  }, [account, preset, sheetTab]);
 
   const withV = useMemo(() => data.map((r) => ({ ...r, v: veredicto(r, u) })), [data, u]);
 
@@ -171,7 +158,7 @@ export default function App() {
             <div className="mark">◆</div>
             <div><div className="bname">NUSA APP</div><div className="bsub"><span className="rec">● REC</span> PANEL DE CREATIVOS · MOTOR DE DECISIÓN</div></div>
           </div>
-          <div className="client"><div className="clabel">▦ CLIENTE</div><select className="cselect" value={account} onChange={(e) => setAccount(e.target.value)}><option value="">— elegí un cliente —</option>{accounts.map((a) => <option key={a.id} value={a.id}>{a.name || a.id}</option>)}</select><select className="cselect" value={preset} onChange={(e) => setPreset(e.target.value)}>{PRESETS.map((p) => <option key={p.v} value={p.v}>{p.l}</option>)}</select><div className="cmeta">{loading ? "cargando…" : err ? err : account ? ("● data en vivo · " + data.length + " creativos") : "data de muestra"}</div></div>
+          <div className="client"><div className="clabel">▦ CLIENTE</div><select className="cselect" value={account} onChange={(e) => setAccount(e.target.value)}><option value="">— elegí un cliente —</option>{accounts.map((a) => <option key={a.id} value={a.id}>{a.name || a.id}</option>)}</select><select className="cselect" value={sheetTab} onChange={(e) => setSheetTab(e.target.value)}><option value="">— pestaña sheet —</option>{sheetTabs.map((t) => <option key={t.gid} value={t.title}>{t.title}</option>)}</select><div className="cmeta">{loading ? "cargando…" : err ? err : account ? ("● data en vivo · " + data.length + " creativos") : "data de muestra"}</div></div>
         </div>
         <div className="stripe"><i/><i/><i/><i/><i/><i/></div>
         <div className="phasebar"><span>FASE 01 — HIGH GRADE</span><span>HQ ▮▮▮</span></div>
