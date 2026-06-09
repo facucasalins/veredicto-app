@@ -339,11 +339,17 @@ function Top({ withV, u, audData }) {
   // Cuántos mostrar por dimensión. Audiencia = todas; el resto, un top.
   const LIMITS = { ang: 5, cat: 5, aud: Infinity, hook: 10, fmt: 8 };
   const limit = LIMITS[dim] ?? 5;
-  const ranked = data.slice(0, limit);
-  const thin = data.slice(limit);
+  // Métrica de orden: ROAS (default), Spend, Ventas o Ads.
+  const [metric, setMetric] = useState("roas");
+  const METRICS = [["roas", "ROAS"], ["spend", "Spend"], ["ventas", "Ventas"], ["ads", "Ads"]];
+  const valOf = (d) => metric === "spend" ? d.spend : metric === "ventas" ? d.ventas : metric === "ads" ? d.n : d.roas;
+  const ordered = [...data].sort((a, b) => valOf(b) - valOf(a));
+  const ranked = ordered.slice(0, limit);
+  const thin = ordered.slice(limit);
   const top3 = useMemo(() => { const ok = reliable.filter((r) => r.ventas >= MINV); return [...(ok.length ? ok : reliable)].sort((a, b) => b.roas - a.roas).slice(0, 3); }, [reliable]);
   const best = top3[0];
-  const max = Math.max(...ranked.map((d) => d.roas), 1);
+  const max = Math.max(...ranked.map((d) => valOf(d)), 1) || 1;
+  const fmtVal = (d) => metric === "spend" ? short(d.spend) : metric === "ventas" ? nf.format(Math.round(d.ventas)) : metric === "ads" ? (d.n + " ad" + (d.n !== 1 ? "s" : "")) : (d.roas.toFixed(1) + "x");
   const colorFor = (roas) => roas >= u.roasMin ? BUCKETS.Escalar.color : roas >= u.roasMin * 0.85 ? BUCKETS.Mantener.color : BUCKETS.Pausar.color;
   const dims = [["ang", "Ángulo"], ["cat", "Categoría"], ["aud", "Audiencia"], ["hook", "Hook"], ["fmt", "Formato"]];
   // Acordeón: solo para ángulo, categoría y hook (no audiencia/formato). Lista qué creativos
@@ -384,6 +390,7 @@ function Top({ withV, u, audData }) {
       <section className="sect">
         <div className="secthead"><span className="sverb" style={{ background: "#1E1812", color: "#F4C24A" }}><span className="sq" style={{ background: "#F4C24A" }} />RANK</span><span className="stitle">TOP PERFORMERS</span><span className="scount">spend ≥ piso</span></div>
         <div className="dimpills">{dims.map(([k, l]) => <button key={k} className={"dimpill" + (dim === k ? " on" : "")} onClick={() => setDim(k)}>{l}</button>)}</div>
+        <div className="metricpills"><span className="mplabel">ordenar por</span>{METRICS.map(([k, l]) => <button key={k} className={"metricpill" + (metric === k ? " on" : "")} onClick={() => setMetric(k)}>{l}</button>)}</div>
         {dim === "cat" && <div className="dedup">▦ Ponderado por <b>split</b> (categoría primaria/secundaria) — sin doble conteo. Un anuncio 70/30 suma 70% a su categoría principal y 30% a la secundaria, no el total a cada una.</div>}
         {dim === "ang" && <div className="dedup">▦ Ángulo de venta (columna <b>angulo_de_venta</b> del Sheet).</div>}
         {dim === "hook" && <div className="dedup">▦ Tipo de gancho (columna <b>tipo_gancho</b> del Sheet).</div>}
@@ -397,9 +404,9 @@ function Top({ withV, u, audData }) {
               <div className={"rankrow" + (expandable ? " clickable" : "") + (isOpen ? " open" : "")} onClick={expandable ? () => setOpen(isOpen ? null : d.key) : undefined}>
                 {expandable && <span className="rcaret">{isOpen ? "▾" : "▸"}</span>}
                 <span className="rrank">{String(i + 1).padStart(2, "0")}</span><span className="rname">{d.key}</span>
-                <div className="rbar"><span className="rfill" style={{ width: (d.roas / max) * 100 + "%", background: colorFor(d.roas) }} /></div>
-                <span className="rval" style={{ color: colorFor(d.roas) }}>{d.roas.toFixed(1)}x</span>
-                <span className="rmeta">{short(d.spend)} · {nf.format(Math.round(d.ventas))} vtas · {d.n} ad{d.n !== 1 ? "s" : ""}</span>
+                <div className="rbar"><span className="rfill" style={{ width: (valOf(d) / max) * 100 + "%", background: colorFor(d.roas) }} /></div>
+                <span className="rval" style={{ color: colorFor(d.roas) }}>{fmtVal(d)}</span>
+                <span className="rmeta">{metric !== "roas" ? d.roas.toFixed(1) + "x · " : ""}{short(d.spend)} · {nf.format(Math.round(d.ventas))} vtas · {d.n} ad{d.n !== 1 ? "s" : ""}</span>
               </div>
               {isOpen && (
                 <div className="rexp">
@@ -777,6 +784,10 @@ const CSS = `
 .dimpills{display:flex;gap:7px;margin-bottom:12px;}
 .dimpill{font-family:'Space Mono',monospace;font-size:12px;letter-spacing:1px;color:var(--ink);background:var(--paper2);border:2px solid var(--ink);padding:6px 13px;border-radius:6px;cursor:pointer;}
 .dimpill.on{background:var(--ink);color:var(--paper);}
+.metricpills{display:flex;gap:6px;align-items:center;margin-bottom:14px;}
+.mplabel{font-family:'Space Mono',monospace;font-size:10px;letter-spacing:1px;color:var(--soft);text-transform:uppercase;margin-right:4px;}
+.metricpill{font-family:'Space Mono',monospace;font-size:11px;letter-spacing:.5px;color:var(--soft);background:transparent;border:1px solid var(--line);padding:3px 10px;border-radius:5px;cursor:pointer;}
+.metricpill.on{background:#F4C24A;color:#1A1A17;border-color:#1A1A17;font-weight:700;}
 .dedup{background:#F3E3C0;border:2px solid var(--ink);border-radius:8px;padding:9px 13px;font-size:11.5px;color:#5A4A2A;font-family:'Space Mono',monospace;margin-bottom:12px;}.dedup b{color:var(--ink);}
 .ranklist{background:var(--paper2);border:2px solid var(--ink);border-radius:10px;padding:6px 16px;box-shadow:4px 4px 0 var(--ink);}
 .rankrow{display:flex;align-items:center;gap:13px;padding:9px 0;border-bottom:1px solid var(--line);}.rankrow:last-child{border-bottom:none;}
