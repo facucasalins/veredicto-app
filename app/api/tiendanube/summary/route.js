@@ -19,7 +19,8 @@ export async function GET(req) {
   if (!sess) return Response.json({ error: "No autorizado" }, { status: 401 });
   if (account && !canSeeAccount(sess, account)) return Response.json({ error: "Sin acceso a esta cuenta" }, { status: 403 });
 
-  const { since, until } = presetToRange(preset);
+  const qsSince = searchParams.get("since"), qsUntil = searchParams.get("until");
+  const { since, until } = qsSince && qsUntil ? { since: qsSince, until: qsUntil } : presetToRange(preset);
   try {
     const tienda = await getStoreRevenue(store, since, until);
     let inversion = 0, roasMeta = 0, ventasMeta = 0;

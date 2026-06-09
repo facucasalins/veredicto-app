@@ -83,6 +83,10 @@ export default function App() {
   const [accounts, setAccounts] = useState([]);
   const [account, setAccount] = useState("");
   const [preset, setPreset] = useState("last_30d");
+  const [cSince, setCSince] = useState("");
+  const [cUntil, setCUntil] = useState("");
+  // Rango personalizado activo solo si elegiste "custom" y cargaste las dos fechas.
+  const customRange = preset === "custom" && cSince && cUntil ? "&since=" + cSince + "&until=" + cUntil : "";
   const [sheetTabs, setSheetTabs] = useState([]);
   const [sheetTab, setSheetTab] = useState("");
   const [tnStores, setTnStores] = useState([]);
@@ -103,18 +107,19 @@ export default function App() {
     if (!tnStore) { setTnSummary(null); return; }
     let cancelled = false;
     setTnLoading(true);
-    fetch("/api/tiendanube/summary?store=" + encodeURIComponent(tnStore) + "&preset=" + preset + (account ? "&account=" + account : ""))
+    fetch("/api/tiendanube/summary?store=" + encodeURIComponent(tnStore) + "&preset=" + preset + (account ? "&account=" + account : "") + customRange)
       .then((r) => r.json())
       .then((j) => { if (!cancelled) setTnSummary(j.error ? null : j); })
       .catch(() => { if (!cancelled) setTnSummary(null); })
       .finally(() => { if (!cancelled) setTnLoading(false); });
     return () => { cancelled = true; };
-  }, [tnStore, account, preset]);
+  }, [tnStore, account, preset, customRange]);
   useEffect(() => {
     if (!account) { setData(SAMPLE); setAudiencias([]); setErr(""); return; }
+    if (preset === "custom" && !(cSince && cUntil)) return; // esperá a que cargue las dos fechas
     let cancelled = false;
     setLoading(true); setErr("");
-    fetch("/api/ads?account=" + account + "&preset=" + preset + (sheetTab ? "&tab=" + encodeURIComponent(sheetTab) : ""))
+    fetch("/api/ads?account=" + account + "&preset=" + preset + (sheetTab ? "&tab=" + encodeURIComponent(sheetTab) : "") + customRange)
       .then((r) => r.json())
       .then((j) => {
         if (cancelled) return;
@@ -126,9 +131,16 @@ export default function App() {
       .catch((e) => { if (!cancelled) setErr(e.message); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [account, preset, sheetTab]);
+  }, [account, preset, sheetTab, customRange]);
 
-  const withV = useMemo(() => data.map((r) => ({ ...r, v: veredicto(r, u) })), [data, u]);
+  // Umbral EFECTIVO: un umbral vacío (null) deja de ser condición. roasMin→0 (sin mínimo),
+  // cpaMax→∞ (sin tope), pisoSpend→0 (sin piso). Así filtrás solo por los que cargaste.
+  const ueff = useMemo(() => ({
+    roasMin: u.roasMin == null ? 0 : u.roasMin,
+    cpaMax: u.cpaMax == null ? Infinity : u.cpaMax,
+    pisoSpend: u.pisoSpend == null ? 0 : u.pisoSpend,
+  }), [u]);
+  const withV = useMemo(() => data.map((r) => ({ ...r, v: veredicto(r, ueff) })), [data, ueff]);
 
   const rows = useMemo(() => {
     const { key, dir } = sort, sign = dir === "asc" ? 1 : -1;
@@ -144,24 +156,24 @@ export default function App() {
     let spendTotal = 0, simpleSum = 0, wSpend = 0, wRoas = 0, revenue = 0, ventasTotal = 0;
     withV.forEach((r) => {
       counts[r.v]++; spendTotal += r.spend; simpleSum += r.roas; revenue += r.spend * r.roas; ventasTotal += r.ventas;
-      if (r.spend >= u.pisoSpend) { wSpend += r.spend; wRoas += r.spend * r.roas; }
+      if (r.spend >= ueff.pisoSpend) { wSpend += r.spend; wRoas += r.spend * r.roas; }
     });
-    const topAds = [...withV].filter((r) => r.spend >= u.pisoSpend).sort((a, b) => b.roas - a.roas).slice(0, 6);
+    const topAds = [...withV].filter((r) => r.spend >= ueff.pisoSpend).sort((a, b) => b.roas - a.roas).slice(0, 6);
     return { counts, spendTotal, revenue, ventasTotal, roasSimple: simpleSum / withV.length, roasConfiable: wSpend ? wRoas / wSpend : 0, cpaProm: ventasTotal ? spendTotal / ventasTotal : 0, accountRoas: spendTotal ? revenue / spendTotal : 0, topAds };
-  }, [withV, u.pisoSpend]);
+  }, [withV, ueff.pisoSpend]);
 
   const acciones = useMemo(() => {
     const escalar = [], apagar = [], validar = [], esperar = [];
     const bestAng = [...withV].filter((r) => r.v === "Escalar").sort((a, b) => b.roas - a.roas)[0]?.ang || "Reseña";
     withV.forEach((r) => {
       if (r.v === "Escalar") escalar.push({ ...r, nuevo: r.spend * 1.25 });
-      else if (r.v === "Pausar") apagar.push({ ...r, modo: r.roas / u.roasMin < 0.5 ? "apagar" : "iterar", bestAng });
-      else if (r.v === "Observación" && r.roas >= u.roasMin) validar.push(r);
+      else if (r.v === "Pausar") apagar.push({ ...r, modo: ueff.roasMin && r.roas / ueff.roasMin < 0.5 ? "apagar" : "iterar", bestAng });
+      else if (r.v === "Observación" && r.roas >= ueff.roasMin) validar.push(r);
       else if (r.v === "Observación") esperar.push(r);
     });
     escalar.sort((a, b) => b.spend - a.spend); apagar.sort((a, b) => b.spend - a.spend);
     return { escalar, apagar, validar, esperar };
-  }, [withV, u.roasMin]);
+  }, [withV, ueff.roasMin]);
 
   const totalTasks = acciones.escalar.length + acciones.apagar.length + acciones.validar.length;
   const doneCount = [...acciones.escalar, ...acciones.apagar, ...acciones.validar].filter((r) => done.has(r.id)).length;
@@ -181,7 +193,7 @@ export default function App() {
             <div><div className="bname">NUSA APP</div><div className="bsub"><span className="rec">● REC</span> PANEL DE CREATIVOS · MOTOR DE DECISIÓN</div></div>
             {me && <div className="userbox"><span className="uname">▸ {me.u}{me.admin ? " · admin" : ""}</span><button className="logout" onClick={logout}>salir</button></div>}
           </div>
-          <div className="client"><div className="clabel">▦ CLIENTE</div><select className="cselect" value={account} onChange={(e) => setAccount(e.target.value)}><option value="">— elegí un cliente —</option>{accounts.map((a) => <option key={a.id} value={a.id}>{a.name || a.id}</option>)}</select><select className="cselect" value={sheetTab} onChange={(e) => setSheetTab(e.target.value)}><option value="">— pestaña sheet —</option>{sheetTabs.map((t) => <option key={t.gid} value={t.title}>{t.title}</option>)}</select><select className="cselect" value={preset} onChange={(e) => setPreset(e.target.value)}><option value="today">Hoy</option><option value="yesterday">Ayer</option><option value="last_7d">Últimos 7 días</option><option value="last_14d">Últimos 14 días</option><option value="last_30d">Últimos 30 días</option><option value="last_90d">Últimos 90 días</option><option value="this_month">Este mes</option><option value="last_month">Mes pasado</option><option value="maximum">Máximo</option></select>{tnStores.length > 0 && <select className="cselect" value={tnStore} onChange={(e) => setTnStore(e.target.value)}><option value="">— sin tienda nube —</option>{tnStores.map((s) => <option key={s.name} value={s.name}>🛒 {s.name}</option>)}</select>}<div className="cmeta">{loading ? "cargando…" : err ? err : account ? ("● data en vivo · " + data.length + " creativos") : "data de muestra"}</div></div>
+          <div className="client"><div className="clabel">▦ CLIENTE</div><select className="cselect" value={account} onChange={(e) => setAccount(e.target.value)}><option value="">— elegí un cliente —</option>{accounts.map((a) => <option key={a.id} value={a.id}>{a.name || a.id}</option>)}</select><select className="cselect" value={sheetTab} onChange={(e) => setSheetTab(e.target.value)}><option value="">— pestaña sheet —</option>{sheetTabs.map((t) => <option key={t.gid} value={t.title}>{t.title}</option>)}</select><select className="cselect" value={preset} onChange={(e) => setPreset(e.target.value)}><option value="today">Hoy</option><option value="yesterday">Ayer</option><option value="last_7d">Últimos 7 días</option><option value="last_14d">Últimos 14 días</option><option value="last_30d">Últimos 30 días</option><option value="last_90d">Últimos 90 días</option><option value="this_month">Este mes</option><option value="last_month">Mes pasado</option><option value="maximum">Máximo</option><option value="custom">Personalizado…</option></select>{preset === "custom" && <span className="daterange"><input type="date" className="cdate" value={cSince} max={cUntil || undefined} onChange={(e) => setCSince(e.target.value)} /><i>→</i><input type="date" className="cdate" value={cUntil} min={cSince || undefined} onChange={(e) => setCUntil(e.target.value)} /></span>}{tnStores.length > 0 &&<select className="cselect" value={tnStore} onChange={(e) => setTnStore(e.target.value)}><option value="">— sin tienda nube —</option>{tnStores.map((s) => <option key={s.name} value={s.name}>🛒 {s.name}</option>)}</select>}<div className="cmeta">{loading ? "cargando…" : err ? err : account ? ("● data en vivo · " + data.length + " creativos") : "data de muestra"}</div></div>
         </div>
         <div className="stripe"><i/><i/><i/><i/><i/><i/></div>
         <div className="phasebar"><span>FASE 01 — HIGH GRADE</span><span>HQ ▮▮▮</span></div>
@@ -219,7 +231,7 @@ export default function App() {
         <span className="rdesc">{ROLES[role]}</span>
       </div>
 
-      {role === "cliente" ? <Cliente withV={withV} u={u} stats={stats} goal={goal} /> : (
+      {role === "cliente" ? <Cliente withV={withV} u={ueff} stats={stats} goal={goal} /> : (
         <>
           <nav className="nav">
             {role === "vos" && <button className={"tab" + (effView === "dash" ? " active" : "")} onClick={() => setView("dash")}>DASHBOARD</button>}
@@ -239,8 +251,8 @@ export default function App() {
           </section>
 
           {effView === "dash" && <Dash stats={stats} goal={goal} setGoal={setGoal} />}
-          {effView === "hoy" && <Hoy acc={acciones} u={u} done={done} toggle={toggle} total={totalTasks} doneCount={doneCount} mantener={stats.counts.Mantener} />}
-          {effView === "top" && <Top withV={withV} u={u} audData={audiencias} />}
+          {effView === "hoy" && <Hoy acc={acciones} u={ueff} done={done} toggle={toggle} total={totalTasks} doneCount={doneCount} mantener={stats.counts.Mantener} />}
+          {effView === "top" && <Top withV={withV} u={ueff} audData={audiencias} />}
           {effView === "panel" && <Panel rows={rows} stats={stats} sort={sort} setSortKey={setSortKey} />}
           {effView === "bib" && <Biblioteca />}
           {effView === "gen" && <Generar />}
@@ -346,7 +358,7 @@ function Top({ withV, u, audData }) {
               <span className="rmeta">{short(d.spend)} · {nf.format(Math.round(d.ventas))} vtas · {d.n} ad{d.n !== 1 ? "s" : ""}</span>
             </div>))}
         </div>
-        {thin.length > 0 && <div className="thinnote">⚠ Datos insuficientes para rankear ({"<"} {short(u.pisoSpend)} de spend ó {"<"} {MINV} ventas): {thin.map((g) => g.key).join(", ")}. Necesitan más inversión antes de declararlos ganadores o perdedores — no los muestro arriba para que el ranking tenga sentido.</div>}
+        {thin.length > 0 && <div className="thinnote">⚠ Datos insuficientes para rankear ({u.pisoSpend ? <>{"<"} {short(u.pisoSpend)} de spend ó </> : null}{"<"} {MINV} ventas): {thin.map((g) => g.key).join(", ")}. Necesitan más inversión antes de declararlos ganadores o perdedores — no los muestro arriba para que el ranking tenga sentido.</div>}
       </section>
     </>
   );
@@ -394,7 +406,7 @@ function Hoy({ acc, u, done, toggle, total, doneCount, mantener }) {
         {acc.escalar.map((r) => (<Item key={r.id} r={r} done={done.has(r.id)} toggle={toggle} c={BUCKETS.Escalar} reason={`ROAS ${r.roas.toFixed(1)}x · CPA ${money(r.cpa)} · spend ${money(r.spend)}`} act={`Subí ~+25% el budget del conjunto/campaña donde corre este creativo (o duplicalo en más conjuntos)`} />))}
       </Section>
       <Section title="PAUSÁ O ITERÁ" verb="Pausar" b={BUCKETS.Pausar} empty="Nada sangrando hoy 👌">
-        {acc.apagar.map((r) => (<Item key={r.id} r={r} done={done.has(r.id)} toggle={toggle} c={BUCKETS.Pausar} reason={`ROAS ${r.roas.toFixed(1)}x — debajo de ${u.roasMin}x · spend ${money(r.spend)}`} act={r.modo === "apagar" ? "Pausá el anuncio" : `Iterá: ${r.ang} no rinde — probá ${r.bestAng}`} />))}
+        {acc.apagar.map((r) => (<Item key={r.id} r={r} done={done.has(r.id)} toggle={toggle} c={BUCKETS.Pausar} reason={u.roasMin ? `ROAS ${r.roas.toFixed(1)}x — debajo de ${u.roasMin}x · spend ${money(r.spend)}` : `CPA ${money(r.cpa)} — arriba del tope · spend ${money(r.spend)}`} act={r.modo === "apagar" ? "Pausá el anuncio" : `Iterá: ${r.ang} no rinde — probá ${r.bestAng}`} />))}
       </Section>
       <Section title="VALIDÁ" verb="Observación" b={{ color: "#0F6E56", bg: "#DFEAE4" }} empty="Sin promesas pendientes.">
         {acc.validar.map((r) => (<Item key={r.id} r={r} done={done.has(r.id)} toggle={toggle} c={{ color: "#0F6E56", bg: "#DFEAE4" }} reason={`ROAS ${r.roas.toFixed(1)}x prometedor, pero solo ${money(r.spend)} (bajo el piso)`} act={`Dale más budget al conjunto hasta cruzar ${money(u.pisoSpend)} y reevaluar`} />))}
@@ -575,10 +587,10 @@ Devolvé EXCLUSIVAMENTE un objeto JSON válido (sin markdown, sin explicaciones,
 }
 
 function Field({ label, value, onChange, prefix, suffix, step, locked }) {
-  const [txt, setTxt] = useState(String(value));
-  if (locked) return (<label className="field"><span className="flab">{label}</span><span className="fstatic">{prefix || ""}{value}{suffix || ""}</span></label>);
+  const [txt, setTxt] = useState(value == null ? "" : String(value));
+  if (locked) return (<label className="field"><span className="flab">{label}</span><span className="fstatic">{value == null ? "—" : (prefix || "") + value + (suffix || "")}</span></label>);
   return (<label className="field"><span className="flab">{label}</span>
-    <span className="finput">{prefix && <i>{prefix}</i>}<input type="text" inputMode="decimal" value={txt} onChange={(e) => { const raw = e.target.value; setTxt(raw); const n = parseFloat(raw.replace(",", ".")); if (!isNaN(n)) onChange(n); }} />{suffix && <i>{suffix}</i>}</span>
+    <span className="finput">{prefix && <i>{prefix}</i>}<input type="text" inputMode="decimal" placeholder="—" value={txt} onChange={(e) => { const raw = e.target.value; setTxt(raw); if (raw.trim() === "") { onChange(null); return; } const n = parseFloat(raw.replace(",", ".")); if (!isNaN(n)) onChange(n); }} />{suffix && <i>{suffix}</i>}</span>
   </label>);
 }
 function Th({ label, k, sort, on, align = "right" }) {
@@ -797,6 +809,9 @@ td{padding:11px 12px;vertical-align:middle;}.num{text-align:right;}.name{font-we
 .outmeta.over{color:#C5362B;font-weight:700;}
 .thinnote{margin-top:14px;font-family:'Space Mono',monospace;font-size:11px;line-height:1.5;color:var(--soft);font-style:italic;border-top:1px dashed var(--line);padding-top:11px;}
 .cselect{font-family:'Space Mono',monospace;font-size:13px;border:2px solid var(--ink);border-radius:6px;padding:5px 9px;background:var(--paper);color:var(--ink);max-width:230px;margin:4px 0;cursor:pointer;}
+.daterange{display:inline-flex;align-items:center;gap:6px;margin:4px 0;}
+.daterange i{color:var(--soft);font-style:normal;}
+.cdate{font-family:'Space Mono',monospace;font-size:12px;border:2px solid var(--ink);border-radius:6px;padding:4px 7px;background:var(--paper);color:var(--ink);cursor:pointer;}
 
 /* BIBLIOTECA */
 .bibtabs{display:flex;gap:8px;align-items:center;margin-bottom:14px;}
