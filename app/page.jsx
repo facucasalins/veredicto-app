@@ -101,7 +101,7 @@ export default function App() {
   const [tnStore, setTnStore] = useState("");
   const [tnSummary, setTnSummary] = useState(null);
   const [tnLoading, setTnLoading] = useState(false);
-  const [data, setData] = useState(SAMPLE);
+  const [data, setData] = useState([]); // sin cliente elegido => vacío (no data de muestra)
   const [audiencias, setAudiencias] = useState([]);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
@@ -123,7 +123,7 @@ export default function App() {
     return () => { cancelled = true; };
   }, [tnStore, account, preset, customRange]);
   useEffect(() => {
-    if (!account) { setData(SAMPLE); setAudiencias([]); setErr(""); return; }
+    if (!account) { setData([]); setAudiencias([]); setErr(""); return; }
     if (preset === "custom" && !(cSince && cUntil)) return; // esperá a que cargue las dos fechas
     let cancelled = false;
     setLoading(true); setErr("");
@@ -132,7 +132,7 @@ export default function App() {
       .then((j) => {
         if (cancelled) return;
         if (j.error) throw new Error(j.error);
-        setData(j.rows && j.rows.length ? j.rows : SAMPLE);
+        setData(j.rows || []);
         setAudiencias(j.audiencias || []);
         if (!j.rows || !j.rows.length) setErr("sin datos en el rango");
       })
@@ -201,7 +201,7 @@ export default function App() {
             <div><div className="bname">NUSA APP</div><div className="bsub"><span className="rec">● REC</span> PANEL DE CREATIVOS · MOTOR DE DECISIÓN</div></div>
             {me && <div className="userbox"><span className="uname">▸ {me.u}{me.admin ? " · admin" : ""}</span><button className="logout" onClick={logout}>salir</button></div>}
           </div>
-          <div className="client"><div className="clabel">▦ CLIENTE</div><select className="cselect" value={account} onChange={(e) => setAccount(e.target.value)}><option value="">— elegí un cliente —</option>{accounts.map((a) => <option key={a.id} value={a.id}>{a.name || a.id}</option>)}</select><select className="cselect" value={sheetTab} onChange={(e) => setSheetTab(e.target.value)}><option value="">— pestaña sheet —</option>{sheetTabs.map((t) => <option key={t.gid} value={t.title}>{t.title}</option>)}</select><select className="cselect" value={preset} onChange={(e) => setPreset(e.target.value)}><option value="today">Hoy</option><option value="yesterday">Ayer</option><option value="last_7d">Últimos 7 días</option><option value="last_14d">Últimos 14 días</option><option value="last_30d">Últimos 30 días</option><option value="last_90d">Últimos 90 días</option><option value="this_month">Este mes</option><option value="last_month">Mes pasado</option><option value="maximum">Máximo</option><option value="custom">Personalizado…</option></select>{preset === "custom" && <span className="daterange"><input type="date" className="cdate" value={cSince} max={cUntil || undefined} onChange={(e) => setCSince(e.target.value)} /><i>→</i><input type="date" className="cdate" value={cUntil} min={cSince || undefined} onChange={(e) => setCUntil(e.target.value)} /></span>}{tnStores.length > 0 &&<select className="cselect" value={tnStore} onChange={(e) => setTnStore(e.target.value)}><option value="">— sin tienda nube —</option>{tnStores.map((s) => <option key={s.name} value={s.name}>🛒 {s.name}</option>)}</select>}<div className="cmeta">{loading ? "cargando…" : err ? err : account ? ("● data en vivo · " + data.length + " creativos") : "data de muestra"}</div></div>
+          <div className="client"><div className="clabel">▦ CLIENTE</div><select className="cselect" value={account} onChange={(e) => setAccount(e.target.value)}><option value="">— elegí un cliente —</option>{accounts.map((a) => <option key={a.id} value={a.id}>{a.name || a.id}</option>)}</select><select className="cselect" value={sheetTab} onChange={(e) => setSheetTab(e.target.value)}><option value="">— pestaña sheet —</option>{sheetTabs.map((t) => <option key={t.gid} value={t.title}>{t.title}</option>)}</select><select className="cselect" value={preset} onChange={(e) => setPreset(e.target.value)}><option value="today">Hoy</option><option value="yesterday">Ayer</option><option value="last_7d">Últimos 7 días</option><option value="last_14d">Últimos 14 días</option><option value="last_30d">Últimos 30 días</option><option value="last_90d">Últimos 90 días</option><option value="this_month">Este mes</option><option value="last_month">Mes pasado</option><option value="maximum">Máximo</option><option value="custom">Personalizado…</option></select>{preset === "custom" && <span className="daterange"><input type="date" className="cdate" value={cSince} max={cUntil || undefined} onChange={(e) => setCSince(e.target.value)} /><i>→</i><input type="date" className="cdate" value={cUntil} min={cSince || undefined} onChange={(e) => setCUntil(e.target.value)} /></span>}{tnStores.length > 0 &&<select className="cselect" value={tnStore} onChange={(e) => setTnStore(e.target.value)}><option value="">— sin tienda nube —</option>{tnStores.map((s) => <option key={s.name} value={s.name}>🛒 {s.name}</option>)}</select>}<div className="cmeta">{loading ? "cargando…" : err ? err : account ? ("● data en vivo · " + data.length + " creativos") : "— elegí un cliente —"}</div></div>
         </div>
         <div className="stripe"><i/><i/><i/><i/><i/><i/></div>
         <div className="phasebar"><span>FASE 01 — HIGH GRADE</span><span>HQ ▮▮▮</span></div>
@@ -239,7 +239,7 @@ export default function App() {
         <span className="rdesc">{ROLES[role]}</span>
       </div>
 
-      {role === "cliente" ? <Cliente withV={withV} u={ueff} stats={stats} goal={goal} /> : (
+      {role === "cliente" ? (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Cliente withV={withV} u={ueff} stats={stats} goal={goal} />) : (
         <>
           <nav className="nav">
             {role === "vos" && <button className={"tab" + (effView === "dash" ? " active" : "")} onClick={() => setView("dash")}>DASHBOARD</button>}
@@ -250,18 +250,20 @@ export default function App() {
             <button className={"tab" + (effView === "gen" ? " active" : "")} onClick={() => setView("gen")}>GENERAR</button>
           </nav>
 
-          <section className="umbral">
-            <div className="ulabel">UMBRAL<br/>DEL CLIENTE</div>
-            <Field label="ROAS mínimo" suffix="x" value={u.roasMin} step={0.5} locked={locked} onChange={(v) => setU({ ...u, roasMin: v })} />
-            <Field label="CPA máximo" prefix="$" value={u.cpaMax} step={100} locked={locked} onChange={(v) => setU({ ...u, cpaMax: v })} />
-            <Field label="Piso de spend" prefix="$" value={u.pisoSpend} step={5000} locked={locked} onChange={(v) => setU({ ...u, pisoSpend: v })} />
-            <div className="uhint">{locked ? "🔒 definido por la cuenta · no editable" : "cambiá los valores · todo recalcula en vivo"}</div>
-          </section>
+          {!!withV.length && (
+            <section className="umbral">
+              <div className="ulabel">UMBRAL<br/>DEL CLIENTE</div>
+              <Field label="ROAS mínimo" suffix="x" value={u.roasMin} step={0.5} locked={locked} onChange={(v) => setU({ ...u, roasMin: v })} />
+              <Field label="CPA máximo" prefix="$" value={u.cpaMax} step={100} locked={locked} onChange={(v) => setU({ ...u, cpaMax: v })} />
+              <Field label="Piso de spend" prefix="$" value={u.pisoSpend} step={5000} locked={locked} onChange={(v) => setU({ ...u, pisoSpend: v })} />
+              <div className="uhint">{locked ? "🔒 definido por la cuenta · no editable" : "cambiá los valores · todo recalcula en vivo"}</div>
+            </section>
+          )}
 
-          {effView === "dash" && <Dash stats={stats} goal={goal} setGoal={setGoal} factTienda={tnSummary ? tnSummary.facturacion : null} tnStore={tnStore} />}
-          {effView === "hoy" && <Hoy acc={acciones} u={ueff} done={done} toggle={toggle} total={totalTasks} doneCount={doneCount} mantener={stats.counts.Mantener} />}
-          {effView === "top" && <Top withV={withV} u={ueff} audData={audiencias} />}
-          {effView === "panel" && <Panel rows={rows} stats={stats} sort={sort} setSortKey={setSortKey} />}
+          {effView === "dash" && (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Dash stats={stats} goal={goal} setGoal={setGoal} factTienda={tnSummary ? tnSummary.facturacion : null} tnStore={tnStore} />)}
+          {effView === "hoy" && (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Hoy acc={acciones} u={ueff} done={done} toggle={toggle} total={totalTasks} doneCount={doneCount} mantener={stats.counts.Mantener} />)}
+          {effView === "top" && (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Top withV={withV} u={ueff} audData={audiencias} />)}
+          {effView === "panel" && (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Panel rows={rows} stats={stats} sort={sort} setSortKey={setSortKey} />)}
           {effView === "bib" && <Biblioteca />}
           {effView === "gen" && <Generar />}
         </>
@@ -387,6 +389,15 @@ function Top({ withV, u, audData }) {
   );
 }
 function Rec({ k, v }) { return <div className="recchip"><span className="reck">{k}</span><span className="recv">{v}</span></div>; }
+function EmptyState({ account, loading, err }) {
+  return (
+    <section className="empty">
+      <div className="emptymark">◆</div>
+      <div className="emptytitle">{loading ? "Cargando…" : !account ? "Elegí un cliente para empezar" : (err || "Sin datos en este período")}</div>
+      {!account && !loading && <div className="emptysub">El panel se llena con los creativos de la cuenta que selecciones arriba.</div>}
+    </section>
+  );
+}
 
 // ─────────── Vista: DASHBOARD (Parte 3) ───────────
 function Dash({ stats, goal, setGoal, factTienda, tnStore }) {
@@ -845,6 +856,10 @@ td{padding:11px 12px;vertical-align:middle;}.num{text-align:right;}.name{font-we
 .outmeta.over{color:#C5362B;font-weight:700;}
 .thinnote{margin-top:14px;font-family:'Space Mono',monospace;font-size:11px;line-height:1.5;color:var(--soft);font-style:italic;border-top:1px dashed var(--line);padding-top:11px;}
 .cselect{font-family:'Space Mono',monospace;font-size:13px;border:2px solid var(--ink);border-radius:6px;padding:5px 9px;background:var(--paper);color:var(--ink);max-width:230px;margin:4px 0;cursor:pointer;}
+.empty{margin-top:40px;padding:60px 24px;text-align:center;border:2px dashed var(--line);border-radius:14px;background:var(--paper2);}
+.emptymark{font-size:34px;color:var(--soft);opacity:.5;margin-bottom:14px;}
+.emptytitle{font-family:'Anton',Impact,sans-serif;font-size:24px;letter-spacing:1px;color:var(--ink);}
+.emptysub{font-family:'Space Mono',monospace;font-size:12.5px;color:var(--soft);margin-top:10px;}
 .daterange{display:inline-flex;align-items:center;gap:6px;margin:4px 0;}
 .daterange i{color:var(--soft);font-style:normal;}
 .cdate{font-family:'Space Mono',monospace;font-size:12px;border:2px solid var(--ink);border-radius:6px;padding:4px 7px;background:var(--paper);color:var(--ink);cursor:pointer;}
