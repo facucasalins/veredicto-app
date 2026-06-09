@@ -40,18 +40,26 @@ function veredicto(r, u) {
   return "Pausar";
 }
 
+// Dimensiones del ranking. Las del Sheet (ang/hook) leen de r.sheet; con fallback al campo legacy
+// si no hay cruce. "cat" (categoría) usa categoria_primaria/secundaria (r.ang/r.sec) ponderado por split.
 function aggregate(rows, dim) {
   const m = {};
   const add = (key, w, r) => {
-    if (!key || key === "—") return;
+    if (!key || key === "—" || key === "nd") return;
     if (!m[key]) m[key] = { key, spend: 0, revenue: 0, ventas: 0, n: 0 };
     m[key].spend += r.spend * w; m[key].revenue += r.spend * r.roas * w; m[key].ventas += r.ventas * w; m[key].n += 1;
   };
   rows.forEach((r) => {
-    if (dim === "ang") {
+    if (dim === "cat") {
       const [p, s] = (r.split || "100/0").split("/").map(Number);
       add(r.ang, p / 100, r); if (r.sec && r.sec !== "—") add(r.sec, s / 100, r);
-    } else add(dim === "aud" ? r.aud : dim === "hook" ? r.hook : r.fmt, 1, r);
+    } else {
+      const key = dim === "aud" ? r.aud
+        : dim === "hook" ? (r.sheet?.tipo_gancho || r.hook)
+        : dim === "ang" ? (r.sheet?.angulo || r.ang)
+        : r.fmt;
+      add(key, 1, r);
+    }
   });
   return Object.values(m).map((g) => ({ ...g, roas: g.spend ? g.revenue / g.spend : 0 })).sort((a, b) => b.roas - a.roas);
 }
@@ -250,7 +258,7 @@ export default function App() {
             <div className="uhint">{locked ? "🔒 definido por la cuenta · no editable" : "cambiá los valores · todo recalcula en vivo"}</div>
           </section>
 
-          {effView === "dash" && <Dash stats={stats} goal={goal} setGoal={setGoal} />}
+          {effView === "dash" && <Dash stats={stats} goal={goal} setGoal={setGoal} factTienda={tnSummary ? tnSummary.facturacion : null} tnStore={tnStore} />}
           {effView === "hoy" && <Hoy acc={acciones} u={ueff} done={done} toggle={toggle} total={totalTasks} doneCount={doneCount} mantener={stats.counts.Mantener} />}
           {effView === "top" && <Top withV={withV} u={ueff} audData={audiencias} />}
           {effView === "panel" && <Panel rows={rows} stats={stats} sort={sort} setSortKey={setSortKey} />}
@@ -327,26 +335,41 @@ function Top({ withV, u, audData }) {
   const rankable = (g) => g.spend >= u.pisoSpend && g.ventas >= MINV;
   const ranked = data.filter(rankable);
   const thin = data.filter((g) => !rankable(g));
-  const best = useMemo(() => { const ok = reliable.filter((r) => r.ventas >= MINV); return (ok.length ? ok : reliable).sort((a, b) => b.roas - a.roas)[0]; }, [reliable]);
+  const top3 = useMemo(() => { const ok = reliable.filter((r) => r.ventas >= MINV); return [...(ok.length ? ok : reliable)].sort((a, b) => b.roas - a.roas).slice(0, 3); }, [reliable]);
+  const best = top3[0];
   const max = Math.max(...ranked.map((d) => d.roas), 1);
   const colorFor = (roas) => roas >= u.roasMin ? BUCKETS.Escalar.color : roas >= u.roasMin * 0.85 ? BUCKETS.Mantener.color : BUCKETS.Pausar.color;
-  const dims = [["ang", "Ángulo"], ["aud", "Audiencia"], ["hook", "Hook"], ["fmt", "Formato"]];
+  const dims = [["ang", "Ángulo"], ["cat", "Categoría"], ["aud", "Audiencia"], ["hook", "Hook"], ["fmt", "Formato"]];
   return (
     <>
       {best && (
         <section className="combo">
-          <div className="combohead"><span className="combotag">★ TU MEJOR COMBINACIÓN</span><span className="comboname">{best.nombre}</span><TF r={best} /></div>
+          <div className="combohead"><span className="combotag">★ TUS 3 MEJORES COMBINACIONES</span><span className="comboname">{best.nombre}</span><TF r={best} /></div>
           <div className="comborow">
             <div className="comboroas">{best.roas.toFixed(1)}<small>x</small></div>
-            <div className="comborec"><Rec k="ÁNGULO" v={best.ang} /><Rec k="AUDIENCIA" v={best.aud} /><Rec k="HOOK" v={best.hook} /><Rec k="FORMATO" v={best.fmt} /></div>
+            <div className="comborec"><Rec k="ÁNGULO" v={best.sheet?.angulo || best.ang} /><Rec k="AUDIENCIA" v={best.aud} /><Rec k="HOOK" v={best.sheet?.tipo_gancho || best.hook} /><Rec k="FORMATO" v={best.fmt} /></div>
           </div>
-          <div className="combonote">Tu receta más rentable. Es la base ideal para el próximo creativo → la cableamos al generador en la <b>Parte 7</b>.</div>
+          {top3.length > 1 && (
+            <div className="combomore">
+              {top3.slice(1).map((r, i) => (
+                <div className="comboalt" key={r.id}>
+                  <span className="caltrank">{String(i + 2).padStart(2, "0")}</span>
+                  <span className="caltroas">{r.roas.toFixed(1)}x</span>
+                  <span className="caltname">{r.nombre}</span><TF r={r} />
+                  <span className="caltmeta">{(r.sheet?.angulo || r.ang)} · {(r.sheet?.tipo_gancho || r.hook)} · {r.aud} · {r.fmt}</span>
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="combonote">Tus 3 recetas más rentables. La #1 es la base ideal para el próximo creativo → la cableamos al generador en la <b>Parte 7</b>.</div>
         </section>
       )}
       <section className="sect">
         <div className="secthead"><span className="sverb" style={{ background: "#1E1812", color: "#F4C24A" }}><span className="sq" style={{ background: "#F4C24A" }} />RANK</span><span className="stitle">TOP PERFORMERS</span><span className="scount">spend ≥ piso</span></div>
         <div className="dimpills">{dims.map(([k, l]) => <button key={k} className={"dimpill" + (dim === k ? " on" : "")} onClick={() => setDim(k)}>{l}</button>)}</div>
-        {dim === "ang" && <div className="dedup">▦ Ponderado por <b>split</b> (primaria/secundaria) — sin doble conteo. Un anuncio 70/30 suma 70% a su ángulo principal y 30% al secundario, no el total a cada uno.</div>}
+        {dim === "cat" && <div className="dedup">▦ Ponderado por <b>split</b> (categoría primaria/secundaria) — sin doble conteo. Un anuncio 70/30 suma 70% a su categoría principal y 30% a la secundaria, no el total a cada una.</div>}
+        {dim === "ang" && <div className="dedup">▦ Ángulo de venta (columna <b>angulo_de_venta</b> del Sheet).</div>}
+        {dim === "hook" && <div className="dedup">▦ Tipo de gancho (columna <b>tipo_gancho</b> del Sheet).</div>}
         {dim === "aud" && audData && audData.length > 0 && <div className="dedup">▦ Audiencia tomada del nombre del conjunto (RMKT, LAL, Advantage+, etc.) y agregada a nivel anuncio — el mismo creativo corre en varias audiencias.</div>}
         {dim === "aud" && (!audData || !audData.length) && <div className="dedup">▦ La audiencia vive en el conjunto, no en el nombre del anuncio. Con datos en vivo se completa automáticamente.</div>}
         <div className="ranklist">
@@ -366,15 +389,21 @@ function Top({ withV, u, audData }) {
 function Rec({ k, v }) { return <div className="recchip"><span className="reck">{k}</span><span className="recv">{v}</span></div>; }
 
 // ─────────── Vista: DASHBOARD (Parte 3) ───────────
-function Dash({ stats, goal, setGoal }) {
-  const pct = goal ? Math.min(100, (stats.revenue / goal) * 100) : 0;
-  const falta = Math.max(0, goal - stats.revenue);
+function Dash({ stats, goal, setGoal, factTienda, tnStore }) {
+  // El objetivo lo marca la facturación de Tienda Nube si hay tienda elegida; si no, la revenue de Meta.
+  const facturado = factTienda != null ? factTienda : stats.revenue;
+  const fuenteTienda = factTienda != null;
+  const pct = goal ? Math.min(100, (facturado / goal) * 100) : 0;
+  const falta = Math.max(0, goal - facturado);
+  const hoy = new Date();
+  const diasMes = new Date(hoy.getFullYear(), hoy.getMonth() + 1, 0).getDate();
+  const diasRestan = diasMes - hoy.getDate();
   return (
     <>
       <section className="goal">
-        <div className="goalhead"><span className="goaltitle">OBJETIVO DEL MES · JUNIO</span><label className="goaledit">META<span className="finput"><i>$</i><input type="text" inputMode="numeric" value={goal} onChange={(e) => { const n = parseInt(String(e.target.value).replace(/[^\d]/g, ""), 10); setGoal(isNaN(n) ? 0 : n); }} /></span></label></div>
+        <div className="goalhead"><span className="goaltitle">OBJETIVO DEL MES{fuenteTienda ? <span className="goalsrc">🛒 {tnStore}</span> : null}</span><label className="goaledit">META<span className="finput"><i>$</i><input type="text" inputMode="numeric" value={goal} onChange={(e) => { const n = parseInt(String(e.target.value).replace(/[^\d]/g, ""), 10); setGoal(isNaN(n) ? 0 : n); }} /></span></label></div>
         <div className="goalbar"><span style={{ width: pct + "%" }} /></div>
-        <div className="goalnums"><div className="goalpct">{pct.toFixed(0)}<small>%</small></div><div className="goalstack"><div><b className="mono">{short(stats.revenue)}</b> <span className="soft">facturado de {short(goal)}</span></div><div className="soft mono">faltan {short(falta)} · quedan 23 días</div></div></div>
+        <div className="goalnums"><div className="goalpct">{pct.toFixed(0)}<small>%</small></div><div className="goalstack"><div><b className="mono">{short(facturado)}</b> <span className="soft">{fuenteTienda ? "facturado (tienda) de " : "facturado de "}{short(goal)}</span></div><div className="soft mono">faltan {short(falta)} · quedan {diasRestan} días</div></div></div>
       </section>
       <section className="kpis dashk">
         <Kpi lab="FACTURACIÓN" val={short(stats.revenue)} /><Kpi lab="INVERSIÓN" val={short(stats.spendTotal)} /><Kpi lab="ROAS CUENTA" val={stats.accountRoas.toFixed(1) + "x"} mod="grn" /><Kpi lab="CPA PROMEDIO" val={money(stats.cpaProm)} /><Kpi lab="VENTAS" val={nf.format(stats.ventasTotal)} />
@@ -680,6 +709,12 @@ const CSS = `
 .reck{font-family:'Space Mono',monospace;font-size:9px;letter-spacing:1.5px;color:#9C9079;}
 .recv{font-family:'Anton',Impact,sans-serif;font-size:18px;letter-spacing:1px;color:var(--paper);}
 .combonote{margin-top:14px;font-size:12px;color:#C7BBA2;font-family:'Space Mono',monospace;border-top:1px solid #3A3128;padding-top:10px;}.combonote b{color:var(--c1);}
+.combomore{margin-top:14px;border-top:1px solid #3A3128;padding-top:12px;display:flex;flex-direction:column;gap:8px;}
+.comboalt{display:flex;align-items:baseline;gap:10px;font-family:'Space Mono',monospace;font-size:12px;color:#E9DEC8;flex-wrap:wrap;}
+.caltrank{color:#7A7259;font-size:11px;}
+.caltroas{color:#F4C24A;font-weight:700;min-width:48px;}
+.caltname{color:#F2EBD9;font-weight:700;}
+.caltmeta{color:#9A937F;font-size:11px;}
 .dimpills{display:flex;gap:7px;margin-bottom:12px;}
 .dimpill{font-family:'Space Mono',monospace;font-size:12px;letter-spacing:1px;color:var(--ink);background:var(--paper2);border:2px solid var(--ink);padding:6px 13px;border-radius:6px;cursor:pointer;}
 .dimpill.on{background:var(--ink);color:var(--paper);}
@@ -698,6 +733,7 @@ const CSS = `
 .goal.light{background:var(--paper2);color:var(--ink);}
 .goalhead{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;}
 .goaltitle{font-family:'Anton',Impact,sans-serif;font-size:17px;letter-spacing:2px;color:var(--paper);}
+.goalsrc{font-family:'Space Mono',monospace;font-size:10px;letter-spacing:1px;color:#9A937F;margin-left:12px;border:1px solid #3A3128;border-radius:4px;padding:2px 7px;vertical-align:middle;}
 .goal.light .goaltitle{color:var(--ink);}
 .goaledit{display:flex;align-items:center;gap:8px;font-family:'Space Mono',monospace;font-size:10px;letter-spacing:1px;color:#C7BBA2;}
 .goaledit .finput{border-color:var(--paper);background:#2A231C;}.goaledit .finput i{color:#C7BBA2;}.goaledit .finput input{color:var(--paper);width:96px;font-size:16px;}
