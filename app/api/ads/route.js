@@ -1,3 +1,7 @@
+import { enrichWithSheet } from "../../../lib/sheet";
+const tab = searchParams.get("tab"); // la pestaña elegida en el dropdown
+// ...después de armar las rows:
+rows = await enrichWithSheet(rows, tab);
 import { getAds } from "@/lib/meta";
 import { buildRows, buildAudienceRows } from "@/lib/nomenclatura";
 export const dynamic = "force-dynamic";
