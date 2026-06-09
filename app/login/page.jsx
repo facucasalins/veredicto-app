@@ -35,7 +35,7 @@ export default function Login() {
         {err && <div className="err">{err}</div>}
         <button className="btn" disabled={loading}>{loading ? "entrando…" : "Entrar"}</button>
       </form>
-      <style>{`
+      <style dangerouslySetInnerHTML={{ __html: `
         .wrap{min-height:100vh;display:flex;align-items:center;justify-content:center;background:#E9DEC8;font-family:'Space Mono',ui-monospace,monospace;padding:24px;}
         .card{background:#F2EBD9;border:2px solid #1A1A17;border-radius:14px;box-shadow:6px 6px 0 #1A1A17;padding:34px 30px;width:100%;max-width:340px;display:flex;flex-direction:column;gap:12px;}
         .mark{font-size:26px;color:#C0392B;}
@@ -46,7 +46,7 @@ export default function Login() {
         .err{color:#8A1C12;font-size:12px;}
         .btn{font-family:inherit;font-weight:700;font-size:14px;border:2px solid #1A1A17;border-radius:7px;padding:11px;background:#1A1A17;color:#F2EBD9;cursor:pointer;margin-top:4px;}
         .btn:disabled{opacity:.5;cursor:default;}
-      `}</style>
+      ` }} />
     </div>
   );
 }
