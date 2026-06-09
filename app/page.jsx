@@ -70,6 +70,8 @@ const short = (n) => { n = Math.round(n); if (Math.abs(n) >= 1e6) return "$" + (
 // Fingerprint de tiempo (HH.MM.SS) que identifica cada creativo. Vive en row.id ("concepto (HH.MM.SS)").
 const tf = (r) => { const m = String(r?.id || "").match(/\((\d{1,2}\.\d{2}\.\d{2})\)/); return m ? m[1] : null; };
 const TF = ({ r }) => tf(r) ? <span className="tf">{tf(r)}</span> : null;
+// Tag de estado: solo aparece si SABEMOS que el creativo está pausado (activa === false).
+const Paused = ({ r }) => r && r.activa === false ? <span className="pausedtag">⏸ PAUSADA</span> : null;
 
 const ROLES = { vos: "control total · todo editable", equipo: "ejecución del día · umbral bloqueado", cliente: "reporte limpio para compartir" };
 
@@ -312,7 +314,7 @@ function Cliente({ withV, u, stats, goal }) {
           {wins.map((r, i) => (
             <div className="topcard" key={r.id} style={{ "--bar": "#2E8B6B" }}>
               <div className="tcardtop"><span className="trank">{String(i + 1).padStart(2, "0")}</span><span className="winstar">★</span></div>
-              <div className="tname">{r.nombre} <span className="fmt">{r.fmt}</span><TF r={r} /></div>
+              <div className="tname">{r.nombre} <span className="fmt">{r.fmt}</span><TF r={r} /><Paused r={r} /></div>
               <div className="troas grn">{r.roas.toFixed(1)}<small>x</small></div>
               <div className="tmeta mono">{r.ang} · {r.aud}</div>
             </div>))}
@@ -396,8 +398,8 @@ function Top({ withV, u, audData }) {
         {dim === "cat" && <div className="dedup">▦ Ponderado por <b>split</b> (categoría primaria/secundaria) — sin doble conteo. Un anuncio 70/30 suma 70% a su categoría principal y 30% a la secundaria, no el total a cada una.</div>}
         {dim === "ang" && <div className="dedup">▦ Ángulo de venta (columna <b>angulo_de_venta</b> del Sheet).</div>}
         {dim === "hook" && <div className="dedup">▦ Tipo de gancho (columna <b>tipo_gancho</b> del Sheet).</div>}
-        {dim === "aud" && audData && audData.length > 0 && <div className="dedup">▦ Audiencia tomada del nombre del conjunto (RMKT, LAL, Advantage+, etc.) y agregada a nivel anuncio — el mismo creativo corre en varias audiencias.</div>}
-        {dim === "aud" && (!audData || !audData.length) && <div className="dedup">▦ La audiencia vive en el conjunto, no en el nombre del anuncio. Con datos en vivo se completa automáticamente.</div>}
+        {dim === "aud" && audData && audData.length > 0 && <div className="dedup">▦ Audiencia leída del <b>targeting real</b> de cada conjunto (audiencias custom, lookalikes, intereses, Advantage+). Hot/Tibio según la intención de las audiencias. Si falla, cae al nombre del conjunto.</div>}
+        {dim === "aud" && (!audData || !audData.length) && <div className="dedup">▦ La audiencia se lee del targeting real del conjunto. Con datos en vivo se completa automáticamente.</div>}
         <div className="ranklist">
           {ranked.map((d, i) => {
             const isOpen = expandable && open === d.key;
@@ -414,7 +416,7 @@ function Top({ withV, u, audData }) {
                 <div className="rexp">
                   {membersFor(d.key).sort((a, b) => b.spend - a.spend).map((m) => (
                     <div className="rexad" key={m.id}>
-                      <div className="rexhead"><b>{m.nombre}</b><TF r={m} /> <span className="rexkpi">{m.roas.toFixed(1)}x · {short(m.spend)} · {nf.format(m.ventas)} vtas</span></div>
+                      <div className="rexhead"><b>{m.nombre}</b><TF r={m} /><Paused r={m} /> <span className="rexkpi">{m.roas.toFixed(1)}x · {short(m.spend)} · {nf.format(m.ventas)} vtas</span></div>
                       {(m.breakdown || []).map((b, j) => (
                         <div className="rexline" key={j}><span className="rexcamp">{b.campaign}</span> › <span className="rexset">{b.adset}</span>{b.aud ? <span className="rexaud">{b.aud}</span> : null}<span className="rexmeta">{short(b.spend)} · {nf.format(b.ventas)} vtas · {b.roas.toFixed(1)}x</span></div>
                       ))}
@@ -452,7 +454,7 @@ function Analisis({ withV, stats, audiencias, tnSummary, u, accountName, periodo
     const reliable = withV.filter((r) => r.spend >= u.pisoSpend);
     const top = (dim) => aggregate(reliable, dim).slice(0, 5).map((g) => ({ k: g.key, roas: +g.roas.toFixed(1), spend: Math.round(g.spend), ventas: Math.round(g.ventas), ads: g.n }));
     const aud = (audiencias && audiencias.length ? audiencias : []).slice(0, 6).map((g) => ({ k: g.key, roas: g.spend ? +(g.revenue / g.spend).toFixed(1) : 0, spend: g.spend, ventas: g.ventas, ads: g.n }));
-    const sangrado = [...withV].filter((r) => r.v === "Pausar").sort((a, b) => b.spend - a.spend).slice(0, 5).map((r) => ({ nombre: r.nombre, roas: r.roas, spend: r.spend, ventas: r.ventas }));
+    const sangrado = [...withV].filter((r) => r.v === "Pausar").sort((a, b) => b.spend - a.spend).slice(0, 5).map((r) => ({ nombre: r.nombre, roas: r.roas, spend: r.spend, ventas: r.ventas, ya_pausado: r.activa === false }));
     const b = [...reliable.filter((r) => r.ventas >= 5)].sort((x, y) => y.roas - x.roas)[0] || [...reliable].sort((x, y) => y.roas - x.roas)[0];
     return {
       cuenta: accountName || "—", periodo,
@@ -537,7 +539,7 @@ function Dash({ stats, goal, setGoal, factTienda, tnStore }) {
           {stats.topAds.map((r, i) => { const b = BUCKETS[r.v]; return (
             <div className="topcard" key={r.id} style={{ "--bar": b.color }}>
               <div className="tcardtop"><span className="trank">{String(i + 1).padStart(2, "0")}</span><span className="badge" style={{ background: b.bg, color: b.color }}><span className="sq" style={{ background: b.color }} />{r.v}</span></div>
-              <div className="tname">{r.nombre} <span className="fmt">{r.fmt}</span><TF r={r} /></div><div className="troas">{r.roas.toFixed(1)}<small>x</small></div><div className="tmeta mono">{short(r.spend)} spend · {r.ang}</div>
+              <div className="tname">{r.nombre} <span className="fmt">{r.fmt}</span><TF r={r} /><Paused r={r} /></div><div className="troas">{r.roas.toFixed(1)}<small>x</small></div><div className="tmeta mono">{short(r.spend)} spend · {r.ang}</div>
             </div>); })}
         </div>
       </section>
@@ -572,7 +574,7 @@ function Section({ title, verb, b, empty, children }) {
   return (<section className="sect"><div className="secthead"><span className="sverb" style={{ background: b.bg, color: b.color }}><span className="sq" style={{ background: b.color }} />{verb}</span><span className="stitle">{title}</span><span className="scount">{String(items.length).padStart(2, "0")}</span></div>{items.length ? <div className="items">{items}</div> : <div className="sempty">{empty}</div>}</section>);
 }
 function Item({ r, done, toggle, reason, act, c }) {
-  return (<div className={"item" + (done ? " done" : "")} style={{ "--bar": c.color }}><button className={"check" + (done ? " on" : "")} onClick={() => toggle(r.id)} style={{ "--c": c.color }}>{done ? "✓" : ""}</button><div className="ibody"><div className="iname">{r.nombre} <span className="fmt">{r.fmt}</span><TF r={r} /></div><div className="ireason">{reason}</div></div><span className="act" style={{ background: c.bg, color: c.color }}>{act}</span></div>);
+  return (<div className={"item" + (done ? " done" : "")} style={{ "--bar": c.color }}><button className={"check" + (done ? " on" : "")} onClick={() => toggle(r.id)} style={{ "--c": c.color }}>{done ? "✓" : ""}</button><div className="ibody"><div className="iname">{r.nombre} <span className="fmt">{r.fmt}</span><TF r={r} /><Paused r={r} /></div><div className="ireason">{reason}</div></div><span className="act" style={{ background: c.bg, color: c.color }}>{act}</span></div>);
 }
 
 // ─────────── Vista: PANEL DE CREATIVOS (Parte 1) ───────────
@@ -594,7 +596,7 @@ function Panel({ rows, stats, sort, setSortKey }) {
           <tbody>
             {rows.map((r) => { const b = BUCKETS[r.v]; return (
               <tr key={r.id} style={{ "--bar": b.color }}>
-                <td className="name">{r.nombre} <span className="fmt">{r.fmt}</span><TF r={r} /></td>
+                <td className="name">{r.nombre} <span className="fmt">{r.fmt}</span><TF r={r} /><Paused r={r} /></td>
                 <td className="ang">{r.ang}{r.sec !== "—" ? <span className="sec"> / {r.sec}</span> : null}<span className="split">{r.split}</span></td>
                 <td className="aud">{r.aud}</td><td className="mono num">{money(r.spend)}</td><td className="mono num strong">{r.roas.toFixed(1)}x</td><td className="mono num">{money(r.cpa)}</td>
                 <td><span className="badge" style={{ background: b.bg, color: b.color }}><span className="sq" style={{ background: b.color }} />{r.v}</span></td>
@@ -1013,6 +1015,7 @@ tbody tr:hover{background:#EFE6D2;}tbody tr:last-child{border-bottom:none;}
 td{padding:11px 12px;vertical-align:middle;}.num{text-align:right;}.name{font-weight:700;}
 .fmt{font-size:9px;color:var(--soft);border:1px solid var(--line);border-radius:3px;padding:1px 5px;margin-left:6px;font-family:'Space Mono',monospace;letter-spacing:1px;}
 .tf{font-size:9px;color:var(--soft);background:rgba(0,0,0,.04);border:1px solid var(--line);border-radius:3px;padding:1px 5px;margin-left:6px;font-family:'Space Mono',monospace;letter-spacing:.5px;white-space:nowrap;}
+.pausedtag{font-size:9px;color:#8A1C12;background:#FBE8E6;border:1px solid #E0A59E;border-radius:3px;padding:1px 5px;margin-left:6px;font-family:'Space Mono',monospace;letter-spacing:.5px;white-space:nowrap;font-weight:700;}
 .metaerr{background:#FBE8E6;color:#8A1C12;border-top:2px solid #C0392B;padding:9px 22px;font-size:12.5px;line-height:1.45;font-family:'Space Mono',monospace;}
 .metaerr-sample{color:#B05A50;}
 .userbox{display:flex;align-items:center;gap:8px;margin-left:14px;}
