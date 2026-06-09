@@ -761,6 +761,7 @@ function Generar({ rows = [], accountName = "" }) {
     formato: best?.fmt || "—",
   };
   const [tipo, setTipo] = useState("hooks");
+  const [modo, setModo] = useState("iterar"); // iterar (explotar) | explorar (salir de la caja)
   const [producto, setProducto] = useState(accountName);
   const [emoji, setEmoji] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -773,9 +774,14 @@ function Generar({ rows = [], accountName = "" }) {
     setLoading(true); setErr(""); setOut(null);
     const cfg = GEN_TIPOS[tipo];
     const hookLib = tipo === "hooks" ? "\n\nBiblioteca de patrones de gancho (referencia estructural):\n" + HOOKS.slice(0, 30).map((h) => "- " + h[1]).join("\n") : "";
+    const modoTxt = modo === "explorar"
+      ? "MODO EXPLORAR (salir de la caja): NO repitas la receta ganadora — usala solo como contraste de lo YA probado. Proponé enfoques, ganchos y ángulos NUEVOS y bien distintos para abrir vetas no exploradas, manteniendo coherencia con el producto y la marca."
+      : "MODO ITERAR (escalar lo que funciona): generá variaciones CERCANAS a la receta ganadora — mismo ángulo/gancho/formato que ya rinde, con cambios incrementales para exprimirlo más.";
     const prompt = `Marca / producto: ${producto || "(no especificado)"}
 
-Receta ganadora actual (lo que mejor rinde, úsala como base):
+${modoTxt}
+
+Receta ganadora actual (lo que mejor rinde):
 - Ángulo de venta: ${recipe.angulo}
 - Categoría: ${recipe.categoria}
 - Tipo de gancho que funciona: ${recipe.hook}
@@ -844,6 +850,12 @@ ${emoji ? "Podés usar emojis con moderación." : "Sin emojis."}${hookLib}`;
         <span className="recipechip">HOOK · {recipe.hook}</span>
         <span className="recipechip">AUDIENCIA · {recipe.audiencia}</span>
         <span className="recipechip">FORMATO · {recipe.formato}</span>
+      </div>
+      <div className="genmodo">
+        <span className="genmodolab">MODO</span>
+        <button className={"modopill" + (modo === "iterar" ? " on" : "")} onClick={() => { setModo("iterar"); setOut(null); }}>↻ Iterar ganadores</button>
+        <button className={"modopill" + (modo === "explorar" ? " on" : "")} onClick={() => { setModo("explorar"); setOut(null); }}>↗ Explorar nuevo</button>
+        <span className="genmodohint">{modo === "explorar" ? "salir de la caja — enfoques nuevos sin probar" : "escalar lo que ya funciona — variaciones cercanas"}</span>
       </div>
       <div className="genform">
         <label className="gfield"><span className="flab">Qué generar</span><select className="gensel" value={tipo} onChange={(e) => { setTipo(e.target.value); setOut(null); }}>{Object.entries(GEN_TIPOS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}</select></label>
@@ -1102,6 +1114,11 @@ td{padding:11px 12px;vertical-align:middle;}.num{text-align:right;}.name{font-we
 /* GENERAR */
 .genintro{font-family:'Space Mono',monospace;font-size:12px;color:var(--soft);margin-bottom:14px;}
 .reciperow{display:flex;flex-wrap:wrap;gap:7px;margin-bottom:14px;}
+.genmodo{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:14px;}
+.genmodolab{font-family:'Space Mono',monospace;font-size:10px;letter-spacing:1.5px;color:var(--soft);}
+.modopill{font-family:'Space Mono',monospace;font-size:12px;color:var(--ink);background:var(--paper);border:2px solid var(--ink);border-radius:6px;padding:5px 12px;cursor:pointer;}
+.modopill.on{background:var(--ink);color:var(--paper);}
+.genmodohint{font-family:'Space Mono',monospace;font-size:11px;color:var(--soft);font-style:italic;}
 .recipechip{font-family:'Space Mono',monospace;font-size:10.5px;letter-spacing:.5px;color:var(--ink);background:var(--paper2);border:1px solid var(--ink);border-radius:5px;padding:4px 9px;}
 .genguion{font-family:'Space Mono',monospace;font-size:12.5px;line-height:1.6;color:var(--ink);white-space:pre-wrap;margin:0;padding:4px 2px;}
 .genform{display:grid;grid-template-columns:1fr 1fr auto;align-items:end;gap:14px 18px;background:var(--paper2);border:2px solid var(--ink);border-radius:10px;padding:16px 18px;box-shadow:4px 4px 0 var(--ink);margin-bottom:16px;}
