@@ -346,6 +346,16 @@ function Top({ withV, u, audData }) {
   const max = Math.max(...ranked.map((d) => d.roas), 1);
   const colorFor = (roas) => roas >= u.roasMin ? BUCKETS.Escalar.color : roas >= u.roasMin * 0.85 ? BUCKETS.Mantener.color : BUCKETS.Pausar.color;
   const dims = [["ang", "Ángulo"], ["cat", "Categoría"], ["aud", "Audiencia"], ["hook", "Hook"], ["fmt", "Formato"]];
+  // Acordeón: solo para ángulo, categoría y hook (no audiencia/formato). Lista qué creativos
+  // componen cada fila y, dentro de cada uno, en qué campañas/adsets corren.
+  const expandable = dim === "ang" || dim === "cat" || dim === "hook";
+  const [open, setOpen] = useState(null);
+  const membersFor = (key) => {
+    if (dim === "ang") return reliable.filter((r) => (r.sheet?.angulo || r.ang) === key);
+    if (dim === "hook") return reliable.filter((r) => (r.sheet?.tipo_gancho || r.hook) === key);
+    if (dim === "cat") return reliable.filter((r) => r.ang === key || r.sec === key);
+    return [];
+  };
   return (
     <>
       {best && (
@@ -355,6 +365,7 @@ function Top({ withV, u, audData }) {
             <div className="comboroas">{best.roas.toFixed(1)}<small>x</small></div>
             <div className="comborec"><Rec k="ÁNGULO" v={best.sheet?.angulo || best.ang} /><Rec k="AUDIENCIA" v={best.aud} /><Rec k="HOOK" v={best.sheet?.tipo_gancho || best.hook} /><Rec k="FORMATO" v={best.fmt} /></div>
           </div>
+          <div className="combostats">{nf.format(best.ventas)} ventas · {short(best.spend)} spend</div>
           {top3.length > 1 && (
             <div className="combomore">
               {top3.slice(1).map((r, i) => (
@@ -362,7 +373,7 @@ function Top({ withV, u, audData }) {
                   <span className="caltrank">{String(i + 2).padStart(2, "0")}</span>
                   <span className="caltroas">{r.roas.toFixed(1)}x</span>
                   <span className="caltname">{r.nombre}</span><TF r={r} />
-                  <span className="caltmeta">{(r.sheet?.angulo || r.ang)} · {(r.sheet?.tipo_gancho || r.hook)} · {r.aud} · {r.fmt}</span>
+                  <span className="caltmeta">{(r.sheet?.angulo || r.ang)} · {(r.sheet?.tipo_gancho || r.hook)} · {r.aud} · {r.fmt} · {nf.format(r.ventas)} vtas · {short(r.spend)}</span>
                 </div>
               ))}
             </div>
@@ -379,13 +390,31 @@ function Top({ withV, u, audData }) {
         {dim === "aud" && audData && audData.length > 0 && <div className="dedup">▦ Audiencia tomada del nombre del conjunto (RMKT, LAL, Advantage+, etc.) y agregada a nivel anuncio — el mismo creativo corre en varias audiencias.</div>}
         {dim === "aud" && (!audData || !audData.length) && <div className="dedup">▦ La audiencia vive en el conjunto, no en el nombre del anuncio. Con datos en vivo se completa automáticamente.</div>}
         <div className="ranklist">
-          {ranked.map((d, i) => (
-            <div className="rankrow" key={d.key}>
-              <span className="rrank">{String(i + 1).padStart(2, "0")}</span><span className="rname">{d.key}</span>
-              <div className="rbar"><span className="rfill" style={{ width: (d.roas / max) * 100 + "%", background: colorFor(d.roas) }} /></div>
-              <span className="rval" style={{ color: colorFor(d.roas) }}>{d.roas.toFixed(1)}x</span>
-              <span className="rmeta">{short(d.spend)} · {nf.format(Math.round(d.ventas))} vtas · {d.n} ad{d.n !== 1 ? "s" : ""}</span>
-            </div>))}
+          {ranked.map((d, i) => {
+            const isOpen = expandable && open === d.key;
+            return (
+            <div className="rankwrap" key={d.key}>
+              <div className={"rankrow" + (expandable ? " clickable" : "") + (isOpen ? " open" : "")} onClick={expandable ? () => setOpen(isOpen ? null : d.key) : undefined}>
+                {expandable && <span className="rcaret">{isOpen ? "▾" : "▸"}</span>}
+                <span className="rrank">{String(i + 1).padStart(2, "0")}</span><span className="rname">{d.key}</span>
+                <div className="rbar"><span className="rfill" style={{ width: (d.roas / max) * 100 + "%", background: colorFor(d.roas) }} /></div>
+                <span className="rval" style={{ color: colorFor(d.roas) }}>{d.roas.toFixed(1)}x</span>
+                <span className="rmeta">{short(d.spend)} · {nf.format(Math.round(d.ventas))} vtas · {d.n} ad{d.n !== 1 ? "s" : ""}</span>
+              </div>
+              {isOpen && (
+                <div className="rexp">
+                  {membersFor(d.key).sort((a, b) => b.spend - a.spend).map((m) => (
+                    <div className="rexad" key={m.id}>
+                      <div className="rexhead"><b>{m.nombre}</b><TF r={m} /> <span className="rexkpi">{m.roas.toFixed(1)}x · {short(m.spend)} · {nf.format(m.ventas)} vtas</span></div>
+                      {(m.breakdown || []).map((b, j) => (
+                        <div className="rexline" key={j}><span className="rexcamp">{b.campaign}</span> › <span className="rexset">{b.adset}</span><span className="rexmeta">{short(b.spend)} · {nf.format(b.ventas)} vtas · {b.roas.toFixed(1)}x</span></div>
+                      ))}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>);
+          })}
         </div>
         {thin.length > 0 && <div className="thinnote">+ {thin.length} fuera del top {limit}: {thin.map((g) => g.key).join(", ")}.</div>}
       </section>
@@ -730,6 +759,21 @@ const CSS = `
 .caltroas{color:#F4C24A;font-weight:700;min-width:48px;}
 .caltname{color:#F2EBD9;font-weight:700;}
 .caltmeta{color:#9A937F;font-size:11px;}
+.combostats{margin-top:10px;font-family:'Space Mono',monospace;font-size:12px;color:#F4C24A;}
+.rankwrap{border-bottom:1px solid var(--line);}
+.rankrow.clickable{cursor:pointer;}
+.rankrow.clickable:hover{background:rgba(0,0,0,.03);}
+.rcaret{color:var(--soft);font-size:11px;width:14px;display:inline-block;}
+.rankrow.open{background:rgba(0,0,0,.04);}
+.rexp{padding:8px 14px 14px 30px;background:rgba(0,0,0,.025);font-family:'Space Mono',monospace;}
+.rexad{padding:8px 0;border-top:1px dashed var(--line);}
+.rexad:first-child{border-top:none;}
+.rexhead{font-size:12.5px;color:var(--ink);display:flex;align-items:center;gap:6px;flex-wrap:wrap;}
+.rexkpi{color:var(--soft);font-size:11px;font-weight:400;}
+.rexline{font-size:11px;color:#6B6552;margin-top:4px;padding-left:8px;display:flex;flex-wrap:wrap;gap:5px;align-items:baseline;}
+.rexcamp{color:var(--ink);}
+.rexset{color:#8A8268;}
+.rexmeta{color:var(--soft);margin-left:auto;}
 .dimpills{display:flex;gap:7px;margin-bottom:12px;}
 .dimpill{font-family:'Space Mono',monospace;font-size:12px;letter-spacing:1px;color:var(--ink);background:var(--paper2);border:2px solid var(--ink);padding:6px 13px;border-radius:6px;cursor:pointer;}
 .dimpill.on{background:var(--ink);color:var(--paper);}
