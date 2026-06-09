@@ -81,7 +81,7 @@ const PRESETS = [{ v: "today", l: "Hoy" }, { v: "last_7d", l: "Últimos 7 días"
 
 export default function App() {
   const [u, setU] = useState({ roasMin: 20, cpaMax: 3000, pisoSpend: 50000 });
-  const [goal, setGoal] = useState(42000000);
+  const [goal, setGoal] = useState(0);
   const [sort, setSort] = useState({ key: "veredicto", dir: "asc" });
   const [view, setView] = useState("dash");
   const [role, setRole] = useState("vos");
@@ -198,7 +198,7 @@ export default function App() {
         <div className="topinner">
           <div className="brand">
             <div className="mark">◆</div>
-            <div><div className="bname">NUSA APP</div><div className="bsub"><span className="rec">● REC</span> PANEL DE CREATIVOS · MOTOR DE DECISIÓN</div></div>
+            <div><div className="bname">NUSA APP</div><div className="bsub">{account && data.length > 0 && !loading && <span className="rec">● REC</span>}PANEL DE CREATIVOS · MOTOR DE DECISIÓN</div></div>
             {me && <div className="userbox"><span className="uname">▸ {me.u}{me.admin ? " · admin" : ""}</span><button className="logout" onClick={logout}>salir</button></div>}
           </div>
           <div className="client"><div className="clabel">▦ CLIENTE</div><select className="cselect" value={account} onChange={(e) => setAccount(e.target.value)}><option value="">— elegí un cliente —</option>{accounts.map((a) => <option key={a.id} value={a.id}>{a.name || a.id}</option>)}</select><select className="cselect" value={sheetTab} onChange={(e) => setSheetTab(e.target.value)}><option value="">— pestaña sheet —</option>{sheetTabs.map((t) => <option key={t.gid} value={t.title}>{t.title}</option>)}</select><select className="cselect" value={preset} onChange={(e) => setPreset(e.target.value)}><option value="today">Hoy</option><option value="yesterday">Ayer</option><option value="last_7d">Últimos 7 días</option><option value="last_14d">Últimos 14 días</option><option value="last_30d">Últimos 30 días</option><option value="last_90d">Últimos 90 días</option><option value="this_month">Este mes</option><option value="last_month">Mes pasado</option><option value="maximum">Máximo</option><option value="custom">Personalizado…</option></select>{preset === "custom" && <span className="daterange"><input type="date" className="cdate" value={cSince} max={cUntil || undefined} onChange={(e) => setCSince(e.target.value)} /><i>→</i><input type="date" className="cdate" value={cUntil} min={cSince || undefined} onChange={(e) => setCUntil(e.target.value)} /></span>}{tnStores.length > 0 &&<select className="cselect" value={tnStore} onChange={(e) => setTnStore(e.target.value)}><option value="">— sin tienda nube —</option>{tnStores.map((s) => <option key={s.name} value={s.name}>🛒 {s.name}</option>)}</select>}<div className="cmeta">{loading ? "cargando…" : err ? err : account ? ("● data en vivo · " + data.length + " creativos") : "— elegí un cliente —"}</div></div>
@@ -752,10 +752,10 @@ const CSS = `
 .root::after{content:"";position:fixed;inset:0;pointer-events:none;z-index:9999;opacity:.10;mix-blend-mode:multiply;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");}
 .mono{font-family:'Space Mono',ui-monospace,monospace;font-variant-numeric:tabular-nums;}.soft{color:var(--soft);}
 
-.top{background:var(--ink);border:2px solid var(--ink);border-radius:12px;overflow:hidden;box-shadow:5px 5px 0 #1e181233;}
+.top{background:var(--ink);border:2px solid var(--ink);border-radius:12px;overflow:hidden;box-shadow:5px 5px 0 #1e181233;margin-bottom:18px;}
 .topinner{display:flex;justify-content:space-between;align-items:center;padding:16px 20px;color:var(--paper);}
 .brand{display:flex;gap:15px;align-items:center;}
-.mark{width:42px;height:42px;display:grid;place-items:center;border:2px solid var(--paper);color:var(--paper);border-radius:8px;font-size:18px;}
+.mark{width:42px;height:42px;flex:0 0 42px;display:grid;place-items:center;border:2px solid var(--paper);color:var(--paper);border-radius:8px;font-size:18px;}
 .bname{font-family:'Anton',Impact,sans-serif;font-size:34px;letter-spacing:3px;line-height:.9;background:linear-gradient(90deg,var(--c1),var(--c2),var(--c3),var(--c4),var(--c5),var(--c6));-webkit-background-clip:text;background-clip:text;color:transparent;}
 .bsub{color:#D8CDB6;font-size:11px;letter-spacing:1.5px;margin-top:5px;}
 .rec{color:#FF5A4D;font-weight:700;margin-right:8px;animation:blink 1.4s steps(1) infinite;}@keyframes blink{50%{opacity:.25}}
@@ -940,7 +940,7 @@ td{padding:11px 12px;vertical-align:middle;}.num{text-align:right;}.name{font-we
 .uname{font-family:'Space Mono',monospace;font-size:11px;color:var(--soft);letter-spacing:.5px;}
 .logout{font-family:'Space Mono',monospace;font-size:11px;color:var(--ink);background:transparent;border:1px solid var(--line);border-radius:5px;padding:3px 9px;cursor:pointer;}
 .logout:hover{background:rgba(0,0,0,.05);}
-.tnband{background:#1A1A17;color:#F2EBD9;padding:16px 22px 14px;border-bottom:3px solid #C0392B;}
+.tnband{background:#1A1A17;color:#F2EBD9;padding:16px 22px 16px;border:2px solid var(--ink);border-top:4px solid #C0392B;border-radius:12px;box-shadow:5px 5px 0 #1e181233;margin-bottom:18px;}
 .tnband-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;}
 .tntag{font-family:'Space Mono',monospace;font-size:12px;letter-spacing:1.5px;color:#E9DEC8;}
 .tnrange{font-family:'Space Mono',monospace;font-size:11px;color:#9A937F;}
@@ -951,7 +951,19 @@ td{padding:11px 12px;vertical-align:middle;}.num{text-align:right;}.name{font-we
 .tnval{font-weight:700;font-size:26px;line-height:1;letter-spacing:-.5px;}
 .tnsub{font-family:'Space Mono',monospace;font-size:10.5px;color:#9A937F;margin-top:6px;}
 .tnnote{font-family:'Space Mono',monospace;font-size:10.5px;color:#7A7259;margin-top:11px;line-height:1.4;}
-@media(max-width:680px){.tnstats{grid-template-columns:1fr;}}
+@media(max-width:760px){
+  .root{padding:14px 12px 32px;}
+  .topinner{flex-direction:column;align-items:stretch;gap:14px;}
+  .brand{align-items:center;}
+  .bname{font-size:26px;letter-spacing:2px;}
+  .client{text-align:left;}
+  .cselect{max-width:100%;}
+  .daterange{flex-wrap:wrap;}
+  .tnstats{grid-template-columns:1fr;}
+  .genform{grid-template-columns:1fr;align-items:stretch;}
+  .gfield{align-items:stretch;}
+  .phasebar{font-size:9px;letter-spacing:1px;}
+}
 .ang{color:var(--ink);}.sec{color:var(--soft);}
 .split{font-family:'Space Mono',monospace;font-size:10px;color:var(--soft);background:var(--paper);border:1px solid var(--line);border-radius:3px;padding:1px 5px;margin-left:7px;}
 .aud{color:var(--soft);font-size:12px;}.strong{font-weight:700;}
@@ -964,8 +976,9 @@ td{padding:11px 12px;vertical-align:middle;}.num{text-align:right;}.name{font-we
 .reciperow{display:flex;flex-wrap:wrap;gap:7px;margin-bottom:14px;}
 .recipechip{font-family:'Space Mono',monospace;font-size:10.5px;letter-spacing:.5px;color:var(--ink);background:var(--paper2);border:1px solid var(--ink);border-radius:5px;padding:4px 9px;}
 .genguion{font-family:'Space Mono',monospace;font-size:12.5px;line-height:1.6;color:var(--ink);white-space:pre-wrap;margin:0;padding:4px 2px;}
-.genform{display:grid;grid-template-columns:repeat(3,1fr);gap:14px 16px;background:var(--paper2);border:2px solid var(--ink);border-radius:10px;padding:16px 18px;box-shadow:4px 4px 0 var(--ink);margin-bottom:16px;}
-.gfield{display:flex;flex-direction:column;gap:6px;align-items:flex-start;}
+.genform{display:grid;grid-template-columns:1fr 1fr auto;align-items:end;gap:14px 18px;background:var(--paper2);border:2px solid var(--ink);border-radius:10px;padding:16px 18px;box-shadow:4px 4px 0 var(--ink);margin-bottom:16px;}
+.gfield{display:flex;flex-direction:column;gap:6px;align-items:flex-start;min-width:0;}
+.gfield input,.gfield select{max-width:100%;}
 .gentext,.gensel{font-family:'Archivo',sans-serif;font-size:14px;border:2px solid var(--ink);border-radius:7px;padding:7px 10px;background:var(--paper);color:var(--ink);outline:none;width:100%;}
 .gensel{cursor:pointer;}
 .genbtn{font-family:'Anton',Impact,sans-serif;font-size:18px;letter-spacing:2px;color:var(--paper);background:var(--ink);border:2px solid var(--ink);border-radius:9px;padding:12px 26px;cursor:pointer;box-shadow:4px 4px 0 var(--c3);transition:transform .08s,box-shadow .08s;}
