@@ -296,6 +296,7 @@ function Cliente({ withV, u, stats, goal, accountName, factTienda }) {
   const pct = goal ? Math.min(100, (facturado / goal) * 100) : 0;
   const mes = new Date().toLocaleDateString("es-AR", { month: "long", year: "numeric" }).toUpperCase();
   const topAng = aggregate(reliable, "ang")[0]?.key || "—";
+  const wins = [...reliable].sort((a, b) => b.roas - a.roas).slice(0, 4);
   const resumen = `La cuenta facturó ${short(facturado)} con un ROAS de ${stats.accountRoas.toFixed(1)}x y ${nf.format(stats.ventasTotal)} ventas${goal > 0 ? ` — al ${pct.toFixed(0)}% del objetivo` : ""}. El ángulo ${topAng} y los catálogos lideraron el rendimiento, con varios anuncios listos para escalar.`;
   return (
     <>
