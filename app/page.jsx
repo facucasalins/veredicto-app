@@ -265,7 +265,7 @@ export default function App() {
           {effView === "top" && (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Top withV={withV} u={ueff} audData={audiencias} />)}
           {effView === "panel" && (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Panel rows={rows} stats={stats} sort={sort} setSortKey={setSortKey} />)}
           {effView === "bib" && <Biblioteca />}
-          {effView === "gen" && <Generar />}
+          {effView === "gen" && <Generar rows={withV} accountName={(accounts.find((a) => a.id === account) || {}).name || ""} />}
         </>
       )}
     </div>
@@ -595,10 +595,48 @@ const FORMULAS = ["AIDA", "PAS", "BAB", "FAB", "4C", "4U", "El Testimonio", "El 
 const HOOKSTYLES = ["automático", "Identidad", "Ruptura", "Pérdida", "Evidencia"];
 const STYLEDESC = { Identidad: "que el lector se sienta identificado ('ese soy yo')", Ruptura: "rompé el patrón: empezá normal y terminá inesperado", "Pérdida": "apuntá al dolor evitable (plata/tiempo perdido)", Evidencia: "mostrá pruebas y resultados ('mostrame')" };
 
-function Generar() {
-  const angles = Array.from(new Set(SAMPLE.map((r) => r.ang)));
-  const auds = Array.from(new Set(SAMPLE.map((r) => r.aud)));
-  const [f, setF] = useState({ producto: "Botas texanas", angulo: "Reseña", audiencia: "Retargeting", hookStyle: "Evidencia", formula: "AIDA", emoji: false });
+// Persona compartida por todos los generadores. Trabaja SIEMPRE sobre la receta ganadora.
+const GEN_PERSONA = `Sos director creativo y copywriter senior de respuesta directa para ecommerce en Argentina. Escribís en español rioplatense, tratando de "vos", con tono natural, directo y cero acartonado. Dominás Meta Ads, el scroll en mobile y la psicología de compra. Trabajás SIEMPRE sobre lo que ya le funciona a la marca (la receta ganadora que te paso), no inventás de cero.`;
+
+const GEN_TIPOS = {
+  hooks: {
+    label: "Hooks (ganchos 0-3s)",
+    btn: "GENERAR HOOKS",
+    max: 1200,
+    system: `${GEN_PERSONA}\n\nTu tarea: generar 10 HOOKS — la frase de los primeros 0-3 segundos del video, lo que frena el scroll. Tenés una biblioteca de patrones de gancho probados como referencia: usalos como inspiración ESTRUCTURAL, no los copies literal, adaptalos al producto y al ángulo ganador. Cada hook: una sola frase corta, hablada, concreta, que genere tensión o curiosidad inmediata. Nada genérico ni publicitario. Devolvé EXCLUSIVAMENTE JSON válido, sin markdown ni backticks: {"hooks":["...", "...", ... 10 items]}`,
+  },
+  guion: {
+    label: "Guion de video",
+    btn: "GENERAR GUION",
+    max: 2000,
+    system: `${GEN_PERSONA}\n\nTu tarea: escribir un guion de video UGC de 20-35 segundos para Reels/Meta, basado en la receta ganadora. Estructura: HOOK (0-3s) → desarrollo según el ángulo (problema, beneficio o demostración) → CTA claro al final. Para cada beat indicá el texto hablado (a cámara o voz en off) y entre [corchetes] una breve indicación visual. Ritmo rápido, creíble, conversacional. Devolvé EXCLUSIVAMENTE JSON válido, sin markdown ni backticks: {"guion":"texto completo del guion con saltos de línea \\n"}`,
+  },
+  copy: {
+    label: "Copy del anuncio",
+    btn: "GENERAR COPY",
+    max: 1500,
+    system: `${GEN_PERSONA}\n\nTu tarea: escribir copy de anuncio de Meta para tráfico frío, alineado a la receta ganadora. Respetá los límites de Meta: headline ≤40 caracteres, description ≤40, primary text ≤125. Variá los ángulos de entrada entre las opciones. Devolvé EXCLUSIVAMENTE JSON válido, sin markdown ni backticks: {"headlines":["h1","h2","h3","h4","h5"],"descriptions":["d1","d2","d3","d4","d5"],"primary_texts":["p1","p2","p3"]}`,
+  },
+  angulos: {
+    label: "Ángulos nuevos",
+    btn: "GENERAR ÁNGULOS",
+    max: 1500,
+    system: `${GEN_PERSONA}\n\nTu tarea: proponer 6 ÁNGULOS DE VENTA NUEVOS para testear, distintos a los que la marca ya usa pero coherentes con el producto y con lo que funciona. Para cada uno: un nombre corto y una explicación de 1-2 oraciones de por qué podría funcionar y cómo se ejecutaría en un creativo. Devolvé EXCLUSIVAMENTE JSON válido, sin markdown ni backticks: {"angulos":[{"nombre":"...","desc":"..."}, ... 6 items]}`,
+  },
+};
+
+function Generar({ rows = [], accountName = "" }) {
+  const best = useMemo(() => [...rows.filter((r) => r.spend > 0)].sort((a, b) => b.roas - a.roas)[0] || null, [rows]);
+  const recipe = {
+    angulo: best?.sheet?.angulo || best?.ang || "—",
+    categoria: best?.ang || "—",
+    hook: best?.sheet?.tipo_gancho || best?.hook || "—",
+    audiencia: best?.aud || "—",
+    formato: best?.fmt || "—",
+  };
+  const [tipo, setTipo] = useState("hooks");
+  const [producto, setProducto] = useState(accountName);
+  const [emoji, setEmoji] = useState(false);
   const [loading, setLoading] = useState(false);
   const [out, setOut] = useState(null);
   const [err, setErr] = useState("");
@@ -607,61 +645,88 @@ function Generar() {
 
   const generar = async () => {
     setLoading(true); setErr(""); setOut(null);
-    const estilo = f.hookStyle === "automático" ? "el que mejor funcione para este ángulo" : f.hookStyle + " — " + STYLEDESC[f.hookStyle];
-    const prompt = `Sos un copywriter senior de respuesta directa para Meta Ads de ecommerce en Argentina (tono porteño, tratá de "vos"). Generá copy de alto rendimiento para tráfico frío.
+    const cfg = GEN_TIPOS[tipo];
+    const hookLib = tipo === "hooks" ? "\n\nBiblioteca de patrones de gancho (referencia estructural):\n" + HOOKS.slice(0, 30).map((h) => "- " + h[1]).join("\n") : "";
+    const prompt = `Marca / producto: ${producto || "(no especificado)"}
 
-Producto: ${f.producto}
-Ángulo publicitario: ${f.angulo}
-Audiencia: ${f.audiencia}
-Estilo de hook: ${estilo}
-Fórmula de copy: ${f.formula}
-Emojis: ${f.emoji ? "usá emojis con moderación" : "sin emojis"}
+Receta ganadora actual (lo que mejor rinde, úsala como base):
+- Ángulo de venta: ${recipe.angulo}
+- Categoría: ${recipe.categoria}
+- Tipo de gancho que funciona: ${recipe.hook}
+- Audiencia top: ${recipe.audiencia}
+- Formato: ${recipe.formato}
 
-Respetá los límites de Meta: Headline máx 40 caracteres, Description máx 40, Primary Text máx 125.
-Devolvé EXCLUSIVAMENTE un objeto JSON válido (sin markdown, sin explicaciones, sin backticks) con esta forma exacta:
-{"headlines":["h1","h2","h3","h4","h5"],"descriptions":["d1","d2","d3","d4","d5"],"primary_texts":["p1","p2","p3"]}`;
+${emoji ? "Podés usar emojis con moderación." : "Sin emojis."}${hookLib}`;
     try {
       const res = await fetch("/api/copy", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt }),
+        body: JSON.stringify({ prompt, system: cfg.system, max_tokens: cfg.max, model: "claude-sonnet-4-6" }),
       });
       const data = await res.json();
+      if (data.error) throw new Error(data.error.message || data.error);
       const text = (data.content || []).filter((b) => b.type === "text").map((b) => b.text).join("\n");
       const clean = text.replace(/```json|```/g, "").trim();
-      setOut(JSON.parse(clean));
+      setOut({ tipo, data: JSON.parse(clean) });
     } catch (e) {
-      setErr("No se pudo generar. El generador usa IA y corre dentro de la app de Claude — probalo desde ahí. (" + e.message + ")");
+      setErr("No se pudo generar: " + e.message);
     } finally { setLoading(false); }
   };
 
   const block = (title, items, limit, pre) => items && (
     <div className="genblock" key={pre}>
-      <div className="genblockh">{title} <span className="gblim">máx {limit}</span></div>
-      {items.map((t, i) => { const over = t.length > limit; return (
+      <div className="genblockh">{title}{limit ? <span className="gblim">máx {limit}</span> : null}</div>
+      {items.map((t, i) => { const over = limit && t.length > limit; return (
         <div className="outitem" key={pre + i}>
           <span className="outtext">{t}</span>
-          <span className={"outmeta" + (over ? " over" : "")}>{t.length}/{limit}</span>
+          {limit ? <span className={"outmeta" + (over ? " over" : "")}>{t.length}/{limit}</span> : null}
           <button className="copybtn" onClick={() => copy(t, pre + i)}>{copied === pre + i ? "✓" : "⧉"}</button>
         </div>); })}
     </div>
   );
 
-  const sel = (key, opts) => (<select className="gensel" value={f[key]} onChange={(e) => setF({ ...f, [key]: e.target.value })}>{opts.map((o) => <option key={o} value={o}>{o}</option>)}</select>);
+  const render = () => {
+    if (!out) return null;
+    const d = out.data;
+    if (out.tipo === "copy") return <>{block("HEADLINES", d.headlines, 40, "h")}{block("DESCRIPTIONS", d.descriptions, 40, "d")}{block("PRIMARY TEXTS", d.primary_texts, 125, "p")}</>;
+    if (out.tipo === "hooks") return block("HOOKS", d.hooks, 0, "k");
+    if (out.tipo === "angulos") return (
+      <div className="genblock">
+        <div className="genblockh">ÁNGULOS NUEVOS</div>
+        {(d.angulos || []).map((a, i) => (
+          <div className="outitem" key={"a" + i}>
+            <span className="outtext"><b>{a.nombre}</b> — {a.desc}</span>
+            <button className="copybtn" onClick={() => copy(a.nombre + " — " + a.desc, "a" + i)}>{copied === "a" + i ? "✓" : "⧉"}</button>
+          </div>
+        ))}
+      </div>
+    );
+    if (out.tipo === "guion") return (
+      <div className="genblock">
+        <div className="genblockh">GUION <button className="copybtn" onClick={() => copy(d.guion || "", "g")}>{copied === "g" ? "✓" : "⧉"}</button></div>
+        <pre className="genguion">{d.guion}</pre>
+      </div>
+    );
+    return null;
+  };
 
   return (
     <section className="gen">
-      <div className="genintro">Generá copy con IA usando lo que ya te funciona. Viene cargado con tu mejor combinación; ajustá y dale a generar.</div>
-      <div className="genform">
-        <label className="gfield"><span className="flab">Producto</span><input className="gentext" value={f.producto} onChange={(e) => setF({ ...f, producto: e.target.value })} /></label>
-        <label className="gfield"><span className="flab">Ángulo</span>{sel("angulo", angles)}</label>
-        <label className="gfield"><span className="flab">Audiencia</span>{sel("audiencia", auds)}</label>
-        <label className="gfield"><span className="flab">Estilo de hook</span>{sel("hookStyle", HOOKSTYLES)}</label>
-        <label className="gfield"><span className="flab">Fórmula</span>{sel("formula", FORMULAS)}</label>
-        <label className="gfield"><span className="flab">Emojis</span><button className={"toggle" + (f.emoji ? " on" : "")} onClick={() => setF({ ...f, emoji: !f.emoji })}><span className="knob" /></button></label>
+      <div className="genintro">Generá con IA (Claude Sonnet 4.6) usando tu <b>receta ganadora</b>{best ? "" : " — elegí un cliente para cargarla"}. Elegí qué querés generar y dale.</div>
+      <div className="reciperow">
+        <span className="recipechip">ÁNGULO · {recipe.angulo}</span>
+        <span className="recipechip">CATEGORÍA · {recipe.categoria}</span>
+        <span className="recipechip">HOOK · {recipe.hook}</span>
+        <span className="recipechip">AUDIENCIA · {recipe.audiencia}</span>
+        <span className="recipechip">FORMATO · {recipe.formato}</span>
       </div>
-      <button className="genbtn" onClick={generar} disabled={loading}>{loading ? "● GENERANDO..." : "▶ GENERAR COPY"}</button>
+      <div className="genform">
+        <label className="gfield"><span className="flab">Qué generar</span><select className="gensel" value={tipo} onChange={(e) => { setTipo(e.target.value); setOut(null); }}>{Object.entries(GEN_TIPOS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}</select></label>
+        <label className="gfield"><span className="flab">Producto / marca</span><input className="gentext" value={producto} onChange={(e) => setProducto(e.target.value)} placeholder="ej: botas texanas Juanita" /></label>
+        <label className="gfield"><span className="flab">Emojis</span><button className={"toggle" + (emoji ? " on" : "")} onClick={() => setEmoji(!emoji)}><span className="knob" /></button></label>
+      </div>
+      <button className="genbtn" onClick={generar} disabled={loading}>{loading ? "● GENERANDO..." : "▶ " + GEN_TIPOS[tipo].btn}</button>
       {err && <div className="generr">{err}</div>}
-      {out && <div className="genout">{block("HEADLINES", out.headlines, 40, "h")}{block("DESCRIPTIONS", out.descriptions, 40, "d")}{block("PRIMARY TEXTS", out.primary_texts, 125, "p")}</div>}
+      {out && <div className="genout">{render()}</div>}
     </section>
   );
 }
@@ -896,6 +961,9 @@ td{padding:11px 12px;vertical-align:middle;}.num{text-align:right;}.name{font-we
 .leg{display:flex;align-items:center;gap:7px;font-size:11.5px;color:var(--soft);font-family:'Space Mono',monospace;}.leg b{margin-right:2px;}
 /* GENERAR */
 .genintro{font-family:'Space Mono',monospace;font-size:12px;color:var(--soft);margin-bottom:14px;}
+.reciperow{display:flex;flex-wrap:wrap;gap:7px;margin-bottom:14px;}
+.recipechip{font-family:'Space Mono',monospace;font-size:10.5px;letter-spacing:.5px;color:var(--ink);background:var(--paper2);border:1px solid var(--ink);border-radius:5px;padding:4px 9px;}
+.genguion{font-family:'Space Mono',monospace;font-size:12.5px;line-height:1.6;color:var(--ink);white-space:pre-wrap;margin:0;padding:4px 2px;}
 .genform{display:grid;grid-template-columns:repeat(3,1fr);gap:14px 16px;background:var(--paper2);border:2px solid var(--ink);border-radius:10px;padding:16px 18px;box-shadow:4px 4px 0 var(--ink);margin-bottom:16px;}
 .gfield{display:flex;flex-direction:column;gap:6px;align-items:flex-start;}
 .gentext,.gensel{font-family:'Archivo',sans-serif;font-size:14px;border:2px solid var(--ink);border-radius:7px;padding:7px 10px;background:var(--paper);color:var(--ink);outline:none;width:100%;}
