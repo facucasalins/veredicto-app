@@ -59,6 +59,9 @@ function aggregate(rows, dim) {
 const nf = new Intl.NumberFormat("es-AR");
 const money = (n) => "$" + nf.format(Math.round(n));
 const short = (n) => { n = Math.round(n); if (Math.abs(n) >= 1e6) return "$" + (n / 1e6).toFixed(1).replace(".0", "") + "M"; if (Math.abs(n) >= 1e3) return "$" + Math.round(n / 1e3) + "k"; return "$" + nf.format(n); };
+// Fingerprint de tiempo (HH.MM.SS) que identifica cada creativo. Vive en row.id ("concepto (HH.MM.SS)").
+const tf = (r) => { const m = String(r?.id || "").match(/\((\d{1,2}\.\d{2}\.\d{2})\)/); return m ? m[1] : null; };
+const TF = ({ r }) => tf(r) ? <span className="tf">{tf(r)}</span> : null;
 
 const ROLES = { vos: "control total · todo editable", equipo: "ejecución del día · umbral bloqueado", cliente: "reporte limpio para compartir" };
 
@@ -158,7 +161,7 @@ export default function App() {
             <div className="mark">◆</div>
             <div><div className="bname">NUSA APP</div><div className="bsub"><span className="rec">● REC</span> PANEL DE CREATIVOS · MOTOR DE DECISIÓN</div></div>
           </div>
-          <div className="client"><div className="clabel">▦ CLIENTE</div><select className="cselect" value={account} onChange={(e) => setAccount(e.target.value)}><option value="">— elegí un cliente —</option>{accounts.map((a) => <option key={a.id} value={a.id}>{a.name || a.id}</option>)}</select><select className="cselect" value={sheetTab} onChange={(e) => setSheetTab(e.target.value)}><option value="">— pestaña sheet —</option>{sheetTabs.map((t) => <option key={t.gid} value={t.title}>{t.title}</option>)}</select><div className="cmeta">{loading ? "cargando…" : err ? err : account ? ("● data en vivo · " + data.length + " creativos") : "data de muestra"}</div></div>
+          <div className="client"><div className="clabel">▦ CLIENTE</div><select className="cselect" value={account} onChange={(e) => setAccount(e.target.value)}><option value="">— elegí un cliente —</option>{accounts.map((a) => <option key={a.id} value={a.id}>{a.name || a.id}</option>)}</select><select className="cselect" value={sheetTab} onChange={(e) => setSheetTab(e.target.value)}><option value="">— pestaña sheet —</option>{sheetTabs.map((t) => <option key={t.gid} value={t.title}>{t.title}</option>)}</select><select className="cselect" value={preset} onChange={(e) => setPreset(e.target.value)}><option value="today">Hoy</option><option value="yesterday">Ayer</option><option value="last_7d">Últimos 7 días</option><option value="last_14d">Últimos 14 días</option><option value="last_30d">Últimos 30 días</option><option value="last_90d">Últimos 90 días</option><option value="this_month">Este mes</option><option value="last_month">Mes pasado</option><option value="maximum">Máximo</option></select><div className="cmeta">{loading ? "cargando…" : err ? err : account ? ("● data en vivo · " + data.length + " creativos") : "data de muestra"}</div></div>
         </div>
         <div className="stripe"><i/><i/><i/><i/><i/><i/></div>
         <div className="phasebar"><span>FASE 01 — HIGH GRADE</span><span>HQ ▮▮▮</span></div>
@@ -241,7 +244,7 @@ function Cliente({ withV, u, stats, goal }) {
           {wins.map((r, i) => (
             <div className="topcard" key={r.id} style={{ "--bar": "#2E8B6B" }}>
               <div className="tcardtop"><span className="trank">{String(i + 1).padStart(2, "0")}</span><span className="winstar">★</span></div>
-              <div className="tname">{r.nombre} <span className="fmt">{r.fmt}</span></div>
+              <div className="tname">{r.nombre} <span className="fmt">{r.fmt}</span><TF r={r} /></div>
               <div className="troas grn">{r.roas.toFixed(1)}<small>x</small></div>
               <div className="tmeta mono">{r.ang} · {r.aud}</div>
             </div>))}
@@ -276,7 +279,7 @@ function Top({ withV, u, audData }) {
     <>
       {best && (
         <section className="combo">
-          <div className="combohead"><span className="combotag">★ TU MEJOR COMBINACIÓN</span><span className="comboname">{best.nombre}</span></div>
+          <div className="combohead"><span className="combotag">★ TU MEJOR COMBINACIÓN</span><span className="comboname">{best.nombre}</span><TF r={best} /></div>
           <div className="comborow">
             <div className="comboroas">{best.roas.toFixed(1)}<small>x</small></div>
             <div className="comborec"><Rec k="ÁNGULO" v={best.ang} /><Rec k="AUDIENCIA" v={best.aud} /><Rec k="HOOK" v={best.hook} /><Rec k="FORMATO" v={best.fmt} /></div>
@@ -326,7 +329,7 @@ function Dash({ stats, goal, setGoal }) {
           {stats.topAds.map((r, i) => { const b = BUCKETS[r.v]; return (
             <div className="topcard" key={r.id} style={{ "--bar": b.color }}>
               <div className="tcardtop"><span className="trank">{String(i + 1).padStart(2, "0")}</span><span className="badge" style={{ background: b.bg, color: b.color }}><span className="sq" style={{ background: b.color }} />{r.v}</span></div>
-              <div className="tname">{r.nombre} <span className="fmt">{r.fmt}</span></div><div className="troas">{r.roas.toFixed(1)}<small>x</small></div><div className="tmeta mono">{short(r.spend)} spend · {r.ang}</div>
+              <div className="tname">{r.nombre} <span className="fmt">{r.fmt}</span><TF r={r} /></div><div className="troas">{r.roas.toFixed(1)}<small>x</small></div><div className="tmeta mono">{short(r.spend)} spend · {r.ang}</div>
             </div>); })}
         </div>
       </section>
@@ -361,7 +364,7 @@ function Section({ title, verb, b, empty, children }) {
   return (<section className="sect"><div className="secthead"><span className="sverb" style={{ background: b.bg, color: b.color }}><span className="sq" style={{ background: b.color }} />{verb}</span><span className="stitle">{title}</span><span className="scount">{String(items.length).padStart(2, "0")}</span></div>{items.length ? <div className="items">{items}</div> : <div className="sempty">{empty}</div>}</section>);
 }
 function Item({ r, done, toggle, reason, act, c }) {
-  return (<div className={"item" + (done ? " done" : "")} style={{ "--bar": c.color }}><button className={"check" + (done ? " on" : "")} onClick={() => toggle(r.id)} style={{ "--c": c.color }}>{done ? "✓" : ""}</button><div className="ibody"><div className="iname">{r.nombre} <span className="fmt">{r.fmt}</span></div><div className="ireason">{reason}</div></div><span className="act" style={{ background: c.bg, color: c.color }}>{act}</span></div>);
+  return (<div className={"item" + (done ? " done" : "")} style={{ "--bar": c.color }}><button className={"check" + (done ? " on" : "")} onClick={() => toggle(r.id)} style={{ "--c": c.color }}>{done ? "✓" : ""}</button><div className="ibody"><div className="iname">{r.nombre} <span className="fmt">{r.fmt}</span><TF r={r} /></div><div className="ireason">{reason}</div></div><span className="act" style={{ background: c.bg, color: c.color }}>{act}</span></div>);
 }
 
 // ─────────── Vista: PANEL DE CREATIVOS (Parte 1) ───────────
@@ -383,7 +386,7 @@ function Panel({ rows, stats, sort, setSortKey }) {
           <tbody>
             {rows.map((r) => { const b = BUCKETS[r.v]; return (
               <tr key={r.id} style={{ "--bar": b.color }}>
-                <td className="name">{r.nombre} <span className="fmt">{r.fmt}</span></td>
+                <td className="name">{r.nombre} <span className="fmt">{r.fmt}</span><TF r={r} /></td>
                 <td className="ang">{r.ang}{r.sec !== "—" ? <span className="sec"> / {r.sec}</span> : null}<span className="split">{r.split}</span></td>
                 <td className="aud">{r.aud}</td><td className="mono num">{money(r.spend)}</td><td className="mono num strong">{r.roas.toFixed(1)}x</td><td className="mono num">{money(r.cpa)}</td>
                 <td><span className="badge" style={{ background: b.bg, color: b.color }}><span className="sq" style={{ background: b.color }} />{r.v}</span></td>
@@ -703,6 +706,7 @@ tbody tr{border-bottom:1px solid var(--line);box-shadow:inset 5px 0 0 var(--bar)
 tbody tr:hover{background:#EFE6D2;}tbody tr:last-child{border-bottom:none;}
 td{padding:11px 12px;vertical-align:middle;}.num{text-align:right;}.name{font-weight:700;}
 .fmt{font-size:9px;color:var(--soft);border:1px solid var(--line);border-radius:3px;padding:1px 5px;margin-left:6px;font-family:'Space Mono',monospace;letter-spacing:1px;}
+.tf{font-size:9px;color:var(--soft);background:rgba(0,0,0,.04);border:1px solid var(--line);border-radius:3px;padding:1px 5px;margin-left:6px;font-family:'Space Mono',monospace;letter-spacing:.5px;white-space:nowrap;}
 .ang{color:var(--ink);}.sec{color:var(--soft);}
 .split{font-family:'Space Mono',monospace;font-size:10px;color:var(--soft);background:var(--paper);border:1px solid var(--line);border-radius:3px;padding:1px 5px;margin-left:7px;}
 .aud{color:var(--soft);font-size:12px;}.strong{font-weight:700;}
