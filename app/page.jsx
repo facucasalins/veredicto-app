@@ -85,12 +85,31 @@ export default function App() {
   const [preset, setPreset] = useState("last_30d");
   const [sheetTabs, setSheetTabs] = useState([]);
   const [sheetTab, setSheetTab] = useState("");
+  const [tnStores, setTnStores] = useState([]);
+  const [tnStore, setTnStore] = useState("");
+  const [tnSummary, setTnSummary] = useState(null);
+  const [tnLoading, setTnLoading] = useState(false);
   const [data, setData] = useState(SAMPLE);
   const [audiencias, setAudiencias] = useState([]);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
-  useEffect(() => { fetch("/api/accounts").then((r) => r.json()).then((j) => setAccounts(j.accounts || [])).catch(() => {}); }, []);
+  const [metaErr, setMetaErr] = useState("");
+  const [me, setMe] = useState(null);
+  useEffect(() => { fetch("/api/accounts").then((r) => r.json()).then((j) => { setAccounts(j.accounts || []); setMe(j.me || null); setMetaErr(j.error && !(j.accounts || []).length ? j.error : ""); }).catch(() => setMetaErr("No se pudo conectar con Meta")); }, []);
+  const logout = async () => { try { await fetch("/api/logout", { method: "POST" }); } finally { window.location.href = "/login"; } };
   useEffect(() => { fetch("/api/sheets/tabs").then((r) => r.json()).then((j) => setSheetTabs(j.tabs || [])).catch(() => {}); }, []);
+  useEffect(() => { fetch("/api/tiendanube/stores").then((r) => r.json()).then((j) => setTnStores(j.stores || [])).catch(() => {}); }, []);
+  useEffect(() => {
+    if (!tnStore) { setTnSummary(null); return; }
+    let cancelled = false;
+    setTnLoading(true);
+    fetch("/api/tiendanube/summary?store=" + encodeURIComponent(tnStore) + "&preset=" + preset + (account ? "&account=" + account : ""))
+      .then((r) => r.json())
+      .then((j) => { if (!cancelled) setTnSummary(j.error ? null : j); })
+      .catch(() => { if (!cancelled) setTnSummary(null); })
+      .finally(() => { if (!cancelled) setTnLoading(false); });
+    return () => { cancelled = true; };
+  }, [tnStore, account, preset]);
   useEffect(() => {
     if (!account) { setData(SAMPLE); setAudiencias([]); setErr(""); return; }
     let cancelled = false;
@@ -160,12 +179,37 @@ export default function App() {
           <div className="brand">
             <div className="mark">◆</div>
             <div><div className="bname">NUSA APP</div><div className="bsub"><span className="rec">● REC</span> PANEL DE CREATIVOS · MOTOR DE DECISIÓN</div></div>
+            {me && <div className="userbox"><span className="uname">▸ {me.u}{me.admin ? " · admin" : ""}</span><button className="logout" onClick={logout}>salir</button></div>}
           </div>
-          <div className="client"><div className="clabel">▦ CLIENTE</div><select className="cselect" value={account} onChange={(e) => setAccount(e.target.value)}><option value="">— elegí un cliente —</option>{accounts.map((a) => <option key={a.id} value={a.id}>{a.name || a.id}</option>)}</select><select className="cselect" value={sheetTab} onChange={(e) => setSheetTab(e.target.value)}><option value="">— pestaña sheet —</option>{sheetTabs.map((t) => <option key={t.gid} value={t.title}>{t.title}</option>)}</select><select className="cselect" value={preset} onChange={(e) => setPreset(e.target.value)}><option value="today">Hoy</option><option value="yesterday">Ayer</option><option value="last_7d">Últimos 7 días</option><option value="last_14d">Últimos 14 días</option><option value="last_30d">Últimos 30 días</option><option value="last_90d">Últimos 90 días</option><option value="this_month">Este mes</option><option value="last_month">Mes pasado</option><option value="maximum">Máximo</option></select><div className="cmeta">{loading ? "cargando…" : err ? err : account ? ("● data en vivo · " + data.length + " creativos") : "data de muestra"}</div></div>
+          <div className="client"><div className="clabel">▦ CLIENTE</div><select className="cselect" value={account} onChange={(e) => setAccount(e.target.value)}><option value="">— elegí un cliente —</option>{accounts.map((a) => <option key={a.id} value={a.id}>{a.name || a.id}</option>)}</select><select className="cselect" value={sheetTab} onChange={(e) => setSheetTab(e.target.value)}><option value="">— pestaña sheet —</option>{sheetTabs.map((t) => <option key={t.gid} value={t.title}>{t.title}</option>)}</select><select className="cselect" value={preset} onChange={(e) => setPreset(e.target.value)}><option value="today">Hoy</option><option value="yesterday">Ayer</option><option value="last_7d">Últimos 7 días</option><option value="last_14d">Últimos 14 días</option><option value="last_30d">Últimos 30 días</option><option value="last_90d">Últimos 90 días</option><option value="this_month">Este mes</option><option value="last_month">Mes pasado</option><option value="maximum">Máximo</option></select>{tnStores.length > 0 && <select className="cselect" value={tnStore} onChange={(e) => setTnStore(e.target.value)}><option value="">— sin tienda nube —</option>{tnStores.map((s) => <option key={s.name} value={s.name}>🛒 {s.name}</option>)}</select>}<div className="cmeta">{loading ? "cargando…" : err ? err : account ? ("● data en vivo · " + data.length + " creativos") : "data de muestra"}</div></div>
         </div>
         <div className="stripe"><i/><i/><i/><i/><i/><i/></div>
         <div className="phasebar"><span>FASE 01 — HIGH GRADE</span><span>HQ ▮▮▮</span></div>
+        {metaErr && (
+          <div className="metaerr">
+            <strong>⚠ Token de Meta caído.</strong> {/expired|expir|session/i.test(metaErr) ? "El token venció — regeneralo en Meta Business (System User) como “Sin vencimiento” y actualizá META_SYSTEM_TOKEN en Vercel." : metaErr} <span className="metaerr-sample">Mientras tanto se muestra data de muestra.</span>
+          </div>
+        )}
       </header>
+
+      {tnStore && (
+        <section className="tnband">
+          <div className="tnband-head">
+            <span className="tntag">🛒 TIENDA NUBE · {tnStore}</span>
+            <span className="tnrange">{tnLoading ? "cargando…" : tnSummary ? (tnSummary.since + " → " + tnSummary.until) : "sin datos"}</span>
+          </div>
+          {tnSummary && (
+            <>
+              <div className="tnstats">
+                <div className="tnstat"><div className="tnlab">FACTURACIÓN TIENDA</div><div className="tnval">{money(tnSummary.facturacion)}</div><div className="tnsub">{tnSummary.orders} órdenes · ticket {money(tnSummary.ticket)}</div></div>
+                <div className="tnstat"><div className="tnlab">INVERSIÓN META</div><div className="tnval">{account ? money(tnSummary.inversion) : "—"}</div><div className="tnsub">{account ? ("ROAS pixel " + (tnSummary.roasMeta || 0).toFixed(1) + "x") : "elegí el cliente de Meta"}</div></div>
+                <div className="tnstat tnmer"><div className="tnlab">MER (FACT / INV)</div><div className="tnval">{tnSummary.mer != null ? tnSummary.mer.toFixed(2) + "x" : "—"}</div><div className="tnsub">{tnSummary.facturacionPagada ? ("pagadas: " + money(tnSummary.facturacionPagada) + (tnSummary.merPagada != null ? " · " + tnSummary.merPagada.toFixed(2) + "x" : "")) : "facturación / inversión"}</div></div>
+              </div>
+              <div className="tnnote">MER = facturación total de la tienda dividida la inversión en Meta, sobre el mismo período. Mide la eficiencia global del marketing, no solo lo atribuido al pixel.</div>
+            </>
+          )}
+        </section>
+      )}
 
       <div className="rolebar">
         <span className="rlabel">▶ VISTA</span>
@@ -707,6 +751,24 @@ tbody tr:hover{background:#EFE6D2;}tbody tr:last-child{border-bottom:none;}
 td{padding:11px 12px;vertical-align:middle;}.num{text-align:right;}.name{font-weight:700;}
 .fmt{font-size:9px;color:var(--soft);border:1px solid var(--line);border-radius:3px;padding:1px 5px;margin-left:6px;font-family:'Space Mono',monospace;letter-spacing:1px;}
 .tf{font-size:9px;color:var(--soft);background:rgba(0,0,0,.04);border:1px solid var(--line);border-radius:3px;padding:1px 5px;margin-left:6px;font-family:'Space Mono',monospace;letter-spacing:.5px;white-space:nowrap;}
+.metaerr{background:#FBE8E6;color:#8A1C12;border-top:2px solid #C0392B;padding:9px 22px;font-size:12.5px;line-height:1.45;font-family:'Space Mono',monospace;}
+.metaerr-sample{color:#B05A50;}
+.userbox{display:flex;align-items:center;gap:8px;margin-left:14px;}
+.uname{font-family:'Space Mono',monospace;font-size:11px;color:var(--soft);letter-spacing:.5px;}
+.logout{font-family:'Space Mono',monospace;font-size:11px;color:var(--ink);background:transparent;border:1px solid var(--line);border-radius:5px;padding:3px 9px;cursor:pointer;}
+.logout:hover{background:rgba(0,0,0,.05);}
+.tnband{background:#1A1A17;color:#F2EBD9;padding:16px 22px 14px;border-bottom:3px solid #C0392B;}
+.tnband-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;}
+.tntag{font-family:'Space Mono',monospace;font-size:12px;letter-spacing:1.5px;color:#E9DEC8;}
+.tnrange{font-family:'Space Mono',monospace;font-size:11px;color:#9A937F;}
+.tnstats{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;}
+.tnstat{background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.12);border-radius:9px;padding:13px 15px;}
+.tnstat.tnmer{background:rgba(46,139,107,.18);border-color:rgba(46,139,107,.5);}
+.tnlab{font-family:'Space Mono',monospace;font-size:10px;letter-spacing:1.2px;color:#9A937F;margin-bottom:5px;}
+.tnval{font-weight:700;font-size:26px;line-height:1;letter-spacing:-.5px;}
+.tnsub{font-family:'Space Mono',monospace;font-size:10.5px;color:#9A937F;margin-top:6px;}
+.tnnote{font-family:'Space Mono',monospace;font-size:10.5px;color:#7A7259;margin-top:11px;line-height:1.4;}
+@media(max-width:680px){.tnstats{grid-template-columns:1fr;}}
 .ang{color:var(--ink);}.sec{color:var(--soft);}
 .split{font-family:'Space Mono',monospace;font-size:10px;color:var(--soft);background:var(--paper);border:1px solid var(--line);border-radius:3px;padding:1px 5px;margin-left:7px;}
 .aud{color:var(--soft);font-size:12px;}.strong{font-weight:700;}

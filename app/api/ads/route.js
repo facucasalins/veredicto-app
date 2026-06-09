@@ -1,6 +1,8 @@
+import { cookies } from "next/headers";
 import { getAds } from "@/lib/meta";
 import { buildRows, buildAudienceRows } from "@/lib/nomenclatura";
 import { enrichWithSheet } from "@/lib/sheet";
+import { SESSION_COOKIE, verifySession, authDisabled, canSeeAccount } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
@@ -10,6 +12,9 @@ export async function GET(req) {
   const preset = searchParams.get("preset") || "last_30d";
   const tab = searchParams.get("tab"); // pestaña del Sheet elegida en el panel (puede venir vacía)
   if (!account) return Response.json({ error: "falta account" }, { status: 400 });
+  const sess = authDisabled() ? { admin: true } : await verifySession(cookies().get(SESSION_COOKIE)?.value);
+  if (!sess) return Response.json({ error: "No autorizado" }, { status: 401 });
+  if (!canSeeAccount(sess, account)) return Response.json({ error: "Sin acceso a esta cuenta" }, { status: 403 });
   try {
     const ads = await getAds(account, preset);
     let rows = buildRows(ads);
