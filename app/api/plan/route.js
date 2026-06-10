@@ -1,6 +1,7 @@
 import { cookies } from "next/headers";
 import { getAds, getAdsetBudgets } from "@/lib/meta";
 import { getStoreRevenue } from "@/lib/tiendanube";
+import { convertMonto } from "@/lib/fx";
 import { presetToRange } from "@/lib/dates";
 import { SESSION_COOKIE, verifySession, authDisabled, canSeeAccount } from "@/lib/auth";
 
@@ -32,6 +33,7 @@ export async function POST(req) {
   const account = searchParams.get("account");
   const store = searchParams.get("store");
   const goal = +(searchParams.get("goal") || 0);
+  const accCur = (searchParams.get("accCur") || "").toUpperCase(); // moneda de la cuenta de Meta (USD/ARS)
   const modo = searchParams.get("modo") || "ventas";
   const msg = modo === "mensajes";
   if (!account) return Response.json({ error: "falta account" }, { status: 400 });
@@ -72,12 +74,24 @@ export async function POST(req) {
       u.spend += a.spend; u.revenue += a.spend * a.roas; u.ventas += a.ventas; u.conversaciones += (a.conversaciones || 0);
       if (b && b.status === "ACTIVE") u.activa = true;
     }
+    // Conversión de moneda: si la cuenta de Meta está en otra moneda que la tienda (Meta USD vs
+    // tienda ARS), pasamos toda la plata de Meta (inversión, budgets, spend) a la moneda de la
+    // tienda con el dólar oficial, así el plan razona en pesos junto a la meta. Sin tienda (o misma
+    // moneda) no se convierte. Los ratios (ROAS) y los conteos (ventas, conversaciones) no se tocan.
+    const tCur = tienda ? String(tienda.moneda || "ARS").toUpperCase() : null;
+    let rate = null;
+    if (tienda && accCur && tCur && accCur !== tCur) {
+      try { const c = await convertMonto(1, accCur, tCur); if (c.rate) rate = c.monto; } catch { /* sin cotización: seguimos sin convertir */ }
+    }
+    const conv = (x) => (rate && x != null ? Math.round(x * rate) : x); // monto USD → moneda tienda
+
+    const inversionConv = conv(inversion);
     const facturacion = tienda ? tienda.facturacion : Math.round(revenueMeta);
-    const mer = inversion ? +(facturacion / inversion).toFixed(2) : null;
+    const mer = inversionConv ? +(facturacion / inversionConv).toFixed(2) : null;
     const proyeccion = diasTrans ? Math.round(facturacion / diasTrans * diasMes) : facturacion;
 
     const unidades = Object.values(units)
-      .map((u) => ({ nombre: u.nombre, nivel: u.nivel, campania: u.campania, budget_diario: u.budget_diario, spend_mtd: Math.round(u.spend), activa: u.activa, ...(msg ? { conversaciones: Math.round(u.conversaciones), costo_conv: u.conversaciones ? +(u.spend / u.conversaciones).toFixed(2) : 0 } : { roas: u.spend ? +(u.revenue / u.spend).toFixed(1) : 0, ventas: Math.round(u.ventas) }) }))
+      .map((u) => ({ nombre: u.nombre, nivel: u.nivel, campania: u.campania, budget_diario: conv(u.budget_diario), spend_mtd: conv(Math.round(u.spend)), activa: u.activa, ...(msg ? { conversaciones: Math.round(u.conversaciones), costo_conv: u.conversaciones ? +(u.spend / u.conversaciones).toFixed(2) : 0 } : { roas: u.spend ? +(u.revenue / u.spend).toFixed(1) : 0, ventas: Math.round(u.ventas) }) }))
       .sort((a, b) => b.spend_mtd - a.spend_mtd).slice(0, 25);
 
     const snapshot = msg ? {
@@ -86,8 +100,9 @@ export async function POST(req) {
       proyeccion_conversaciones: diasTrans ? Math.round(convTotal / diasTrans * diasMes) : convTotal,
       unidades,
     } : {
-      modo, meta: goal, facturacion_mtd: facturacion, inversion_mtd: Math.round(inversion), mer,
+      modo, meta: goal, facturacion_mtd: facturacion, inversion_mtd: inversionConv, mer,
       fuente_facturacion: tienda ? "tienda" : "meta (pixel)",
+      ...(rate ? { moneda: tCur, nota_moneda: `inversión y budgets convertidos de ${accCur} a ${tCur} al dólar oficial ($${Math.round(rate)})` } : {}),
       dias_transcurridos: diasTrans, dias_del_mes: diasMes, dias_restantes: diasRestan,
       proyeccion_sin_cambios: proyeccion, gap_vs_meta: Math.round(goal - proyeccion),
       unidades,

@@ -17,7 +17,10 @@ respuestas concisas.
 - `lib/meta.js` — cliente Marketing API. `getAccounts()`, `getAds(account, preset, range?)` (range
   `{since,until}` para fechas custom), `getAccountSpend(account, since, until)` (spend a nivel cuenta,
   modo Tienda Nube), **`getAdsetTargeting(account)`** (targeting REAL de cada adset, 1 call paginada),
-  **`getAdStatuses(account)`** (effective_status por ad → activo/pausado) y **`getAdsetBudgets(account)`**
+  **`getAdStatuses(account)`** (estado de entrega por ad mirando la CADENA completa: pide el
+  effective_status del ad + del adset + de la campaña y devuelve `"ACTIVE"` solo si todo entrega; si
+  el conjunto o la campaña de arriba están apagados devuelve `ADSET_PAUSED`/`CAMPAIGN_PAUSED`, porque
+  el effective_status del ad solo no siempre refleja al padre) y **`getAdsetBudgets(account)`**
   (budget real por adset/campaña; detecta ABO vs CBO; para el Plan). `getAds` extrae `ventas` (compras)
   y `conversaciones` (`messaging_conversation_started_7d`, para campañas de mensajes).
 - `lib/nomenclatura.js` — parser del nombre + armado de filas. `buildRows(ads, audMap?, statusMap?, tipoMap?)`
@@ -33,15 +36,23 @@ respuestas concisas.
   Usuarios en `APP_USERS`. `authenticate`, `makeSessionToken`, `verifySession`, `canSeeAccount`,
   `authDisabled`.
 - `lib/tiendanube.js` — `listStores()` y `getStoreRevenue(name, since, until)`. Header de auth es
-  `Authentication: bearer <token>` (NO "Authorization") + `User-Agent` obligatorio.
+  `Authentication: bearer <token>` (NO "Authorization") + `User-Agent` obligatorio. `getStoreRevenue`
+  cuenta como facturación/ventas SOLO las órdenes **pagadas** (`payment_status === "paid"`), igual que
+  las estadísticas de Tienda Nube; las no canceladas pero sin pagar van aparte (`facturacionPendiente`,
+  `ordersPendientes`) y NO suman al titular.
 - `lib/dates.js` — `presetToRange(preset)` → `{since, until}`. Alinea Meta y Tienda Nube al mismo período.
+- `lib/fx.js` — cotización del **dólar oficial** (Argentina) para no mezclar monedas cuando la cuenta de
+  Meta está en USD. `getDolarOficial()` (PROMEDIO de compra y venta = medio del spread, cache en memoria
+  ~1h) y `convertMonto(monto, from, to)` (solo ARS↔USD). Fuente: dolarapi.com, fallback criptoya.com.
+  Se expone al front por `/api/fx`. Sin red degrada: se muestran los montos sin convertir y avisa.
 - `middleware.js` — protege las páginas (redirige a `/login`). Las rutas `/api` hacen su propia
   verificación (JSON 401/403) y quedan fuera del matcher.
 - `app/page.jsx` — TODO el front en un archivo grande (CSS embebido). Componentes: Cliente, Dash,
   **Analisis** (cerebro), **Plan** (cómo llegar al objetivo), Hoy, Top, Panel, **Biblioteca**
   (Tus Ganadores + mapa probado/sin-probar), **Generar** (4 tipos + modo Iterar/Explorar). Toggle
-  **MEDIR: Ventas | Mensajes** (`modo`) que filtra y cambia la métrica de toda la app. NO reescribir
-  entero; editar quirúrgico. `money()` muestra 2 decimales en montos < 100 no enteros (cuentas USD).
+  **MEDIR: Ventas | Mensajes** (`modo`) que filtra y cambia la métrica de toda la app, y toggle
+  **MONEDA CUENTA: Pesos | USD** (`accCur`, auto-detectado del `currency` de Meta, override manual).
+  NO reescribir entero; editar quirúrgico. `money()` muestra 2 decimales en montos < 100 no enteros (USD).
 - `app/api/*` — `accounts` (filtra por sesión), `ads` (insights + targeting + estado en paralelo,
   cruza Sheet, arma tipoMap), `login`, `logout`, `sheets/tabs` (scopeada por `tabs` de sesión),
   `tiendanube/{stores,summary}` (stores scopeadas por cuenta), `copy` (generador), **`analyze`**
@@ -60,6 +71,14 @@ pushear a `main` sin romper prod.
 - **Tienda Nube** (`TIENDANUBE_STORES`, `TIENDANUBE_UA`): selector 🛒 solo si hay tiendas. Muestra
   banda **Facturación (tienda) vs Inversión (Meta) + MER** (mismo período). El objetivo del mes del
   Dashboard también toma la facturación de la tienda.
+- **Moneda de la cuenta** (toggle "MONEDA CUENTA", `accCur`): se detecta solo el `currency` de la cuenta
+  de Meta (override manual Pesos/USD). Si está en **USD**, TODA la plata de Meta se convierte a **pesos**
+  al dólar oficial (`lib/fx.js`, promedio compra/venta) para que el panel entero piense y se cargue en
+  pesos: spend, CPA, costo/conv, KPIs del Dashboard, Top Performers, umbral, MER, cerebro y Plan. La
+  conversión de la data de anuncios es client-side (factor `fxRate` sobre `data` → `dataConv`, usa
+  `/api/fx`) así el toggle es instantáneo; el MER y el Plan convierten server-side. Antes el MER mezclaba
+  monedas (88.000x). El umbral (CPA máx, piso de spend) se carga en pesos. Sin cotización degrada a USD
+  y avisa. Solo aplica en modo Ventas.
 - **Modo Ventas / Mensajes** (toggle "MEDIR" en el header): cada anuncio se clasifica por el objetivo
   del adset. En **Ventas** se excluyen las campañas de mensajes (y al revés). En **Mensajes** toda la
   métrica cambia a **conversaciones iniciadas** y **costo por conversación** (sin ROAS/MER/facturación):

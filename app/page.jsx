@@ -110,11 +110,21 @@ export default function App() {
 
   const [accounts, setAccounts] = useState([]);
   const [account, setAccount] = useState("");
+  const [curForce, setCurForce] = useState(""); // override manual de la moneda de la cuenta ("" = auto desde Meta)
+  const [fx, setFx] = useState(null); // cotización del dólar oficial (promedio compra/venta) para convertir a pesos
   const [preset, setPreset] = useState("last_30d");
   const [cSince, setCSince] = useState("");
   const [cUntil, setCUntil] = useState("");
   // Rango personalizado activo solo si elegiste "custom" y cargaste las dos fechas.
   const customRange = preset === "custom" && cSince && cUntil ? "&since=" + cSince + "&until=" + cUntil : "";
+  // Moneda de la cuenta de Meta: se detecta sola (currency que devuelve Meta), con override manual.
+  // Importa para el MER y el Plan: si la cuenta está en USD y la tienda en pesos, hay que convertir.
+  const curDetected = (accounts.find((a) => a.id === account) || {}).currency || "";
+  const accCur = (curForce || curDetected || "ARS").toUpperCase();
+  // Si la cuenta está en USD y tenemos cotización, convertimos TODA la plata de Meta a pesos
+  // (factor = pesos por USD). En pesos (o sin cotización) el factor es 1 y no se toca nada.
+  const fxRate = accCur === "USD" && fx && fx.rate ? fx.rate : 1;
+  const convirtiendo = fxRate !== 1;
   const [sheetTabs, setSheetTabs] = useState([]);
   const [sheetTab, setSheetTab] = useState("");
   const [tnStores, setTnStores] = useState([]);
@@ -133,21 +143,22 @@ export default function App() {
   useEffect(() => { fetch("/api/accounts").then((r) => r.json()).then((j) => { setAccounts(j.accounts || []); setMe(j.me || null); setMetaErr(j.error && !(j.accounts || []).length ? j.error : ""); }).catch(() => setMetaErr("No se pudo conectar con Meta")); }, []);
   const logout = async () => { try { await fetch("/api/logout", { method: "POST" }); } finally { window.location.href = "/login"; } };
   // la lectura del analista queda obsoleta si cambia el cliente/período/tienda → la limpiamos
-  useEffect(() => { setAnalysis(null); setHookMatch(null); }, [account, preset, tnStore, cSince, cUntil]);
-  useEffect(() => { setPlan(null); }, [account, tnStore, goal]); // el plan depende de la meta y el mes en curso
+  useEffect(() => { setAnalysis(null); setHookMatch(null); }, [account, preset, tnStore, cSince, cUntil, accCur]);
+  useEffect(() => { setPlan(null); }, [account, tnStore, goal, accCur]); // el plan depende de la meta, el mes y la moneda
+  useEffect(() => { fetch("/api/fx").then((r) => r.json()).then((j) => setFx(j && j.rate ? j : null)).catch(() => setFx(null)); }, []);
   useEffect(() => { fetch("/api/sheets/tabs").then((r) => r.json()).then((j) => setSheetTabs(j.tabs || [])).catch(() => {}); }, []);
   useEffect(() => { fetch("/api/tiendanube/stores").then((r) => r.json()).then((j) => setTnStores(j.stores || [])).catch(() => {}); }, []);
   useEffect(() => {
     if (!tnStore) { setTnSummary(null); return; }
     let cancelled = false;
     setTnLoading(true);
-    fetch("/api/tiendanube/summary?store=" + encodeURIComponent(tnStore) + "&preset=" + preset + (account ? "&account=" + account : "") + customRange)
+    fetch("/api/tiendanube/summary?store=" + encodeURIComponent(tnStore) + "&preset=" + preset + (account ? "&account=" + account + "&accCur=" + accCur : "") + customRange)
       .then((r) => r.json())
       .then((j) => { if (!cancelled) setTnSummary(j.error ? null : j); })
       .catch(() => { if (!cancelled) setTnSummary(null); })
       .finally(() => { if (!cancelled) setTnLoading(false); });
     return () => { cancelled = true; };
-  }, [tnStore, account, preset, customRange]);
+  }, [tnStore, account, preset, customRange, accCur]);
   useEffect(() => {
     if (!account) { setData([]); setAudiencias([]); setErr(""); return; }
     if (preset === "custom" && !(cSince && cUntil)) return; // esperá a que cargue las dos fechas
@@ -175,8 +186,17 @@ export default function App() {
     pisoSpend: u.pisoSpend == null ? 0 : u.pisoSpend,
     costoMax: u.costoMax == null ? Infinity : u.costoMax,
   }), [u]);
+  // Conversión a pesos: multiplicamos los montos de Meta (spend, cpa, costo/conv) por el dólar.
+  // ROAS (ratio), ventas y conversaciones (conteos) no se tocan. Todo lo de abajo (stats, top,
+  // dash, panel, cerebro) hereda pesos automáticamente sin más cambios.
+  const dataConv = useMemo(() => fxRate === 1 ? data : data.map((r) => ({
+    ...r,
+    spend: r.spend * fxRate,
+    cpa: r.cpa ? r.cpa * fxRate : r.cpa,
+    costoConv: r.costoConv ? r.costoConv * fxRate : r.costoConv,
+  })), [data, fxRate]);
   // Filtramos por modo: en Ventas excluimos campañas de mensajes (nunca dan buen ROAS) y viceversa.
-  const dataModo = useMemo(() => data.filter((r) => (r.tipo || "ventas") === modo), [data, modo]);
+  const dataModo = useMemo(() => dataConv.filter((r) => (r.tipo || "ventas") === modo), [dataConv, modo]);
   const withV = useMemo(() => dataModo.map((r) => ({ ...r, v: veredicto(r, ueff, modo) })), [dataModo, ueff, modo]);
 
   const rows = useMemo(() => {
@@ -205,6 +225,9 @@ export default function App() {
     const bestAng = [...withV].filter((r) => r.v === "Escalar").sort(byEff)[0]?.ang || "Reseña";
     const promete = (r) => modo === "mensajes" ? r.conversaciones > 0 : r.roas >= ueff.roasMin;
     withV.forEach((r) => {
+      // Ya pausado (el anuncio, o su conjunto/campaña arriba): NO genera tarea en "Qué hacer hoy"
+      // ni suma al contador. Su data sigue visible en Panel, Top Performers y el cerebro.
+      if (r.activa === false) return;
       if (r.v === "Escalar") escalar.push({ ...r, nuevo: r.spend * 1.25 });
       else if (r.v === "Pausar") apagar.push({ ...r, modo: modo === "ventas" && ueff.roasMin && r.roas / ueff.roasMin < 0.5 ? "apagar" : "iterar", bestAng });
       else if (r.v === "Observación" && promete(r)) validar.push(r);
@@ -252,11 +275,11 @@ export default function App() {
           {tnSummary && (
             <>
               <div className="tnstats">
-                <div className="tnstat"><div className="tnlab">FACTURACIÓN TIENDA</div><div className="tnval">{money(tnSummary.facturacion)}</div><div className="tnsub">{tnSummary.orders} órdenes · ticket {money(tnSummary.ticket)}</div></div>
-                <div className="tnstat"><div className="tnlab">INVERSIÓN META</div><div className="tnval">{account ? money(tnSummary.inversion) : "—"}</div><div className="tnsub">{account ? ("ROAS pixel " + (tnSummary.roasMeta || 0).toFixed(1) + "x") : "elegí el cliente de Meta"}</div></div>
-                <div className="tnstat tnmer"><div className="tnlab">MER (FACT / INV)</div><div className="tnval">{tnSummary.mer != null ? tnSummary.mer.toFixed(2) + "x" : "—"}</div><div className="tnsub">{tnSummary.facturacionPagada ? ("pagadas: " + money(tnSummary.facturacionPagada) + (tnSummary.merPagada != null ? " · " + tnSummary.merPagada.toFixed(2) + "x" : "")) : "facturación / inversión"}</div></div>
+                <div className="tnstat"><div className="tnlab">FACTURACIÓN TIENDA</div><div className="tnval">{money(tnSummary.facturacion)}</div><div className="tnsub">{tnSummary.orders} órdenes pagadas · ticket {money(tnSummary.ticket)}</div></div>
+                <div className="tnstat"><div className="tnlab">INVERSIÓN META</div><div className="tnval">{account ? money(tnSummary.fx && !tnSummary.fx.error ? tnSummary.inversionConv : tnSummary.inversion) : "—"}</div><div className="tnsub">{!account ? "elegí el cliente de Meta" : tnSummary.fx && !tnSummary.fx.error ? ("USD " + money(tnSummary.inversion) + " · " + tnSummary.fx.fuente + " $" + nf.format(Math.round(tnSummary.fx.rate))) : tnSummary.fx && tnSummary.fx.error ? ("⚠ no pude cotizar el dólar — MER sin convertir") : ("ROAS pixel " + (tnSummary.roasMeta || 0).toFixed(1) + "x")}</div></div>
+                <div className="tnstat tnmer"><div className="tnlab">MER (FACT / INV)</div><div className="tnval">{tnSummary.mer != null ? tnSummary.mer.toFixed(2) + "x" : "—"}</div><div className="tnsub">{tnSummary.ordersPendientes ? ("+ " + money(tnSummary.facturacionPendiente) + " pendientes (" + tnSummary.ordersPendientes + " órd.)") : "facturación pagada / inversión"}</div></div>
               </div>
-              <div className="tnnote">MER = facturación total de la tienda dividida la inversión en Meta, sobre el mismo período. Mide la eficiencia global del marketing, no solo lo atribuido al pixel.</div>
+              <div className="tnnote">MER = facturación COBRADA de la tienda (órdenes pagadas, igual que Tienda Nube) dividida la inversión en Meta, sobre el mismo período. Las órdenes pendientes de pago no suman al titular. Mide la eficiencia global del marketing, no solo lo atribuido al pixel.</div>
             </>
           )}
         </section>
@@ -268,7 +291,16 @@ export default function App() {
           {Object.keys(ROLES).map((k) => <button key={k} className={"rolebtn" + (role === k ? " on" : "")} onClick={() => setRole(k)}>{k.toUpperCase()}</button>)}
         </div>
         <span className="rdesc">{ROLES[role]}</span>
-        <div className="modobox"><span className="rlabel">◉ MEDIR</span><button className={"modotgl" + (modo === "ventas" ? " on" : "")} onClick={() => setModo("ventas")}>VENTAS</button><button className={"modotgl" + (modo === "mensajes" ? " on" : "")} onClick={() => setModo("mensajes")}>MENSAJES</button></div>
+        <div className="rolebarright">
+          <div className="modobox"><span className="rlabel">◉ MEDIR</span><button className={"modotgl" + (modo === "ventas" ? " on" : "")} onClick={() => setModo("ventas")}>VENTAS</button><button className={"modotgl" + (modo === "mensajes" ? " on" : "")} onClick={() => setModo("mensajes")}>MENSAJES</button></div>
+          {account && modo === "ventas" && (
+            <div className="modobox"><span className="rlabel">$ MONEDA CUENTA</span>
+              <button className={"modotgl" + (accCur === "ARS" ? " on" : "")} onClick={() => setCurForce("ARS")}>PESOS</button>
+              <button className={"modotgl" + (accCur === "USD" ? " on" : "")} onClick={() => setCurForce("USD")}>USD</button>
+              <span className="curhint">{(curForce ? "manual" : (curDetected ? "auto · Meta " + curDetected : "auto")) + (accCur === "USD" ? (convirtiendo ? " · todo en $ARS @ $" + nf.format(Math.round(fxRate)) : " · ⚠ sin cotización") : "")}</span>
+            </div>
+          )}
+        </div>
       </div>
 
       {role === "cliente" ? (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Cliente withV={withV} u={ueff} stats={stats} goal={goal} accountName={(accounts.find((a) => a.id === account) || {}).name || ""} factTienda={tnSummary ? tnSummary.facturacion : null} modo={modo} />) : (
@@ -299,7 +331,7 @@ export default function App() {
           )}
 
           {effView === "an" && (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Analisis withV={withV} stats={stats} audiencias={audiencias} tnSummary={tnSummary} u={ueff} accountName={(accounts.find((a) => a.id === account) || {}).name || ""} periodo={preset === "custom" && cSince && cUntil ? cSince + " → " + cUntil : preset} analysis={analysis} setAnalysis={setAnalysis} modo={modo} />)}
-          {effView === "plan" && (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Plan account={account} store={tnStore} goal={goal} plan={plan} setPlan={setPlan} modo={modo} />)}
+          {effView === "plan" && (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Plan account={account} store={tnStore} goal={goal} plan={plan} setPlan={setPlan} modo={modo} accCur={accCur} />)}
           {effView === "dash" && (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Dash stats={stats} goal={goal} setGoal={setGoal} factTienda={tnSummary ? tnSummary.facturacion : null} tnStore={tnStore} modo={modo} />)}
           {effView === "hoy" && (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Hoy acc={acciones} u={ueff} done={done} toggle={toggle} total={totalTasks} doneCount={doneCount} mantener={stats.counts.Mantener} modo={modo} />)}
           {effView === "top" && (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Top withV={withV} u={ueff} audData={audiencias} modo={modo} />)}
@@ -570,14 +602,14 @@ function Analisis({ withV, stats, audiencias, tnSummary, u, accountName, periodo
 }
 
 // ─────────── Vista: PLAN (cómo llegar al objetivo) ───────────
-function Plan({ account, store, goal, plan, setPlan, modo = "ventas" }) {
+function Plan({ account, store, goal, plan, setPlan, modo = "ventas", accCur = "ARS" }) {
   const msg = modo === "mensajes";
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
   const pedir = async () => {
     setLoading(true); setErr("");
     try {
-      const qs = "account=" + account + (store ? "&store=" + encodeURIComponent(store) : "") + "&goal=" + goal + "&modo=" + modo;
+      const qs = "account=" + account + (store ? "&store=" + encodeURIComponent(store) : "") + "&goal=" + goal + "&modo=" + modo + "&accCur=" + accCur;
       const res = await fetch("/api/plan?" + qs, { method: "POST" });
       const d = await res.json();
       if (d.error) throw new Error(d.error);
@@ -1071,9 +1103,11 @@ const CSS = `
 .phasebar{display:flex;justify-content:space-between;background:var(--ink);color:#C7BBA2;font-family:'Space Mono',monospace;font-size:10px;letter-spacing:2px;padding:5px 20px;}
 
 .rolebar{display:flex;align-items:center;gap:14px;margin:16px 0 4px;flex-wrap:wrap;}
-.modobox{display:flex;align-items:center;gap:7px;margin-left:auto;}
+.modobox{display:flex;align-items:center;gap:7px;}
+.rolebarright{display:flex;align-items:center;gap:14px;margin-left:auto;flex-wrap:wrap;}
 .modotgl{font-family:'Space Mono',monospace;font-weight:700;font-size:11px;letter-spacing:1px;color:var(--ink);background:var(--paper2);border:2px solid var(--ink);padding:5px 12px;border-radius:6px;cursor:pointer;}
 .modotgl.on{background:var(--c6);color:var(--paper);border-color:var(--c6);}
+.curhint{font-family:'Space Mono',monospace;font-size:10px;color:var(--soft);font-style:italic;}
 .rlabel{font-family:'Anton',Impact,sans-serif;font-size:13px;letter-spacing:2px;color:var(--ink);}
 .rolebtns{display:flex;gap:6px;}
 .rolebtn{font-family:'Space Mono',monospace;font-weight:700;font-size:12px;letter-spacing:1px;color:var(--ink);background:var(--paper2);border:2px solid var(--ink);padding:6px 14px;border-radius:6px;cursor:pointer;box-shadow:2px 2px 0 var(--ink);}

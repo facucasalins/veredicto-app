@@ -1,6 +1,7 @@
 import { cookies } from "next/headers";
 import { getStoreRevenue } from "@/lib/tiendanube";
 import { getAccountSpend } from "@/lib/meta";
+import { convertMonto } from "@/lib/fx";
 import { presetToRange } from "@/lib/dates";
 import { SESSION_COOKIE, verifySession, authDisabled, canSeeAccount } from "@/lib/auth";
 
@@ -12,6 +13,7 @@ export async function GET(req) {
   const { searchParams } = new URL(req.url);
   const store = searchParams.get("store");
   const account = searchParams.get("account");
+  const accCur = (searchParams.get("accCur") || "").toUpperCase(); // moneda de la cuenta de Meta (USD/ARS)
   const preset = searchParams.get("preset") || "last_30d";
   if (!store) return Response.json({ error: "falta store" }, { status: 400 });
 
@@ -28,9 +30,20 @@ export async function GET(req) {
       try { const m = await getAccountSpend(account, since, until); inversion = m.spend; roasMeta = m.roasMeta; ventasMeta = m.ventasMeta; }
       catch { /* si Meta falla, mostramos solo facturación */ }
     }
-    const mer = inversion ? +(tienda.facturacion / inversion).toFixed(2) : null;
-    const merPagada = inversion ? +(tienda.facturacionPagada / inversion).toFixed(2) : null;
-    return Response.json({ since, until, inversion, roasMeta, ventasMeta, mer, merPagada, ...tienda });
+    // Si la cuenta de Meta y la tienda están en monedas distintas (típico: Meta en USD, tienda en
+    // ARS), convertimos la inversión a la moneda de la tienda con el dólar oficial. Si no se puede
+    // cotizar, degradamos: mostramos el MER sin convertir y avisamos con fx.error.
+    const tCur = (tienda.moneda || "ARS").toUpperCase();
+    let invForMer = inversion, fx = null;
+    if (account && inversion && accCur && accCur !== tCur) {
+      try {
+        const c = await convertMonto(inversion, accCur, tCur);
+        if (c.rate) { invForMer = c.monto; fx = { from: accCur, to: tCur, rate: c.rate, fuente: c.fuente, fecha: c.fecha, inversionConvertida: Math.round(c.monto) }; }
+      } catch { fx = { error: true, from: accCur, to: tCur }; }
+    }
+    // facturacion ya es solo lo pagado → este MER es el real (venta cobrada / inversión).
+    const mer = invForMer ? +(tienda.facturacion / invForMer).toFixed(2) : null;
+    return Response.json({ since, until, inversion, inversionConv: Math.round(invForMer), accCur, fx, roasMeta, ventasMeta, mer, ...tienda });
   } catch (e) {
     return Response.json({ error: e.message }, { status: 500 });
   }
