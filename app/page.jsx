@@ -33,8 +33,15 @@ const BUCKETS = {
 };
 const ORDER = { Escalar: 0, Pausar: 1, Mantener: 2, "Observación": 3 };
 
-function veredicto(r, u) {
+function veredicto(r, u, modo = "ventas") {
   if (r.spend < u.pisoSpend) return "Observación";
+  if (modo === "mensajes") {
+    // mensajes: juzga por costo por conversación (menor = mejor) + que tenga conversaciones
+    if (!r.conversaciones) return "Pausar";
+    if (r.costoConv <= u.costoMax) return "Escalar";
+    if (r.costoConv <= u.costoMax * 1.4) return "Mantener";
+    return "Pausar";
+  }
   if (r.roas >= u.roasMin && r.cpa <= u.cpaMax) return "Escalar";
   if (r.roas >= u.roasMin * 0.85 && r.cpa <= u.cpaMax * 1.4) return "Mantener";
   return "Pausar";
@@ -46,8 +53,8 @@ function aggregate(rows, dim) {
   const m = {};
   const add = (key, w, r) => {
     if (!key || key === "—" || key === "nd") return;
-    if (!m[key]) m[key] = { key, spend: 0, revenue: 0, ventas: 0, n: 0 };
-    m[key].spend += r.spend * w; m[key].revenue += r.spend * r.roas * w; m[key].ventas += r.ventas * w; m[key].n += 1;
+    if (!m[key]) m[key] = { key, spend: 0, revenue: 0, ventas: 0, conversaciones: 0, n: 0 };
+    m[key].spend += r.spend * w; m[key].revenue += r.spend * r.roas * w; m[key].ventas += r.ventas * w; m[key].conversaciones += (r.conversaciones || 0) * w; m[key].n += 1;
   };
   rows.forEach((r) => {
     if (dim === "cat") {
@@ -61,7 +68,7 @@ function aggregate(rows, dim) {
       add(key, 1, r);
     }
   });
-  return Object.values(m).map((g) => ({ ...g, roas: g.spend ? g.revenue / g.spend : 0 })).sort((a, b) => b.roas - a.roas);
+  return Object.values(m).map((g) => ({ ...g, roas: g.spend ? g.revenue / g.spend : 0, costoConv: g.conversaciones ? g.spend / g.conversaciones : 0 })).sort((a, b) => b.roas - a.roas);
 }
 
 const nf = new Intl.NumberFormat("es-AR");
@@ -91,7 +98,8 @@ const EJECOLOR = { Identidad:"#2E8B6B", Ruptura:"#6E3E94", "Pérdida":"#C5362B",
 const PRESETS = [{ v: "today", l: "Hoy" }, { v: "last_7d", l: "Últimos 7 días" }, { v: "last_14d", l: "Últimos 14 días" }, { v: "last_30d", l: "Últimos 30 días" }, { v: "last_90d", l: "Últimos 90 días" }, { v: "this_month", l: "Este mes" }, { v: "last_month", l: "Mes pasado" }, { v: "maximum", l: "Máximo" }];
 
 export default function App() {
-  const [u, setU] = useState({ roasMin: 20, cpaMax: 3000, pisoSpend: 50000 });
+  const [u, setU] = useState({ roasMin: 20, cpaMax: 3000, pisoSpend: 50000, costoMax: null });
+  const [modo, setModo] = useState("ventas"); // ventas | mensajes
   const [goal, setGoal] = useState(0);
   const [sort, setSort] = useState({ key: "veredicto", dir: "asc" });
   const [view, setView] = useState("dash");
@@ -164,8 +172,11 @@ export default function App() {
     roasMin: u.roasMin == null ? 0 : u.roasMin,
     cpaMax: u.cpaMax == null ? Infinity : u.cpaMax,
     pisoSpend: u.pisoSpend == null ? 0 : u.pisoSpend,
+    costoMax: u.costoMax == null ? Infinity : u.costoMax,
   }), [u]);
-  const withV = useMemo(() => data.map((r) => ({ ...r, v: veredicto(r, ueff) })), [data, ueff]);
+  // Filtramos por modo: en Ventas excluimos campañas de mensajes (nunca dan buen ROAS) y viceversa.
+  const dataModo = useMemo(() => data.filter((r) => (r.tipo || "ventas") === modo), [data, modo]);
+  const withV = useMemo(() => dataModo.map((r) => ({ ...r, v: veredicto(r, ueff, modo) })), [dataModo, ueff, modo]);
 
   const rows = useMemo(() => {
     const { key, dir } = sort, sign = dir === "asc" ? 1 : -1;
@@ -178,27 +189,29 @@ export default function App() {
 
   const stats = useMemo(() => {
     const counts = { Escalar: 0, Mantener: 0, Pausar: 0, "Observación": 0 };
-    let spendTotal = 0, simpleSum = 0, wSpend = 0, wRoas = 0, revenue = 0, ventasTotal = 0;
+    let spendTotal = 0, simpleSum = 0, wSpend = 0, wRoas = 0, revenue = 0, ventasTotal = 0, convTotal = 0;
     withV.forEach((r) => {
-      counts[r.v]++; spendTotal += r.spend; simpleSum += r.roas; revenue += r.spend * r.roas; ventasTotal += r.ventas;
+      counts[r.v]++; spendTotal += r.spend; simpleSum += r.roas; revenue += r.spend * r.roas; ventasTotal += r.ventas; convTotal += (r.conversaciones || 0);
       if (r.spend >= ueff.pisoSpend) { wSpend += r.spend; wRoas += r.spend * r.roas; }
     });
-    const topAds = [...withV].filter((r) => r.spend >= ueff.pisoSpend).sort((a, b) => b.roas - a.roas).slice(0, 6);
-    return { counts, spendTotal, revenue, ventasTotal, roasSimple: simpleSum / withV.length, roasConfiable: wSpend ? wRoas / wSpend : 0, cpaProm: ventasTotal ? spendTotal / ventasTotal : 0, accountRoas: spendTotal ? revenue / spendTotal : 0, topAds };
-  }, [withV, ueff.pisoSpend]);
+    const topAds = [...withV].filter((r) => r.spend >= ueff.pisoSpend).sort((a, b) => modo === "mensajes" ? (a.costoConv || 9e12) - (b.costoConv || 9e12) : b.roas - a.roas).slice(0, 6);
+    return { counts, spendTotal, revenue, ventasTotal, convTotal, costoConvProm: convTotal ? spendTotal / convTotal : 0, roasSimple: withV.length ? simpleSum / withV.length : 0, roasConfiable: wSpend ? wRoas / wSpend : 0, cpaProm: ventasTotal ? spendTotal / ventasTotal : 0, accountRoas: spendTotal ? revenue / spendTotal : 0, topAds };
+  }, [withV, ueff.pisoSpend, modo]);
 
   const acciones = useMemo(() => {
     const escalar = [], apagar = [], validar = [], esperar = [];
-    const bestAng = [...withV].filter((r) => r.v === "Escalar").sort((a, b) => b.roas - a.roas)[0]?.ang || "Reseña";
+    const byEff = (a, b) => modo === "mensajes" ? (a.costoConv || 9e12) - (b.costoConv || 9e12) : b.roas - a.roas;
+    const bestAng = [...withV].filter((r) => r.v === "Escalar").sort(byEff)[0]?.ang || "Reseña";
+    const promete = (r) => modo === "mensajes" ? r.conversaciones > 0 : r.roas >= ueff.roasMin;
     withV.forEach((r) => {
       if (r.v === "Escalar") escalar.push({ ...r, nuevo: r.spend * 1.25 });
-      else if (r.v === "Pausar") apagar.push({ ...r, modo: ueff.roasMin && r.roas / ueff.roasMin < 0.5 ? "apagar" : "iterar", bestAng });
-      else if (r.v === "Observación" && r.roas >= ueff.roasMin) validar.push(r);
+      else if (r.v === "Pausar") apagar.push({ ...r, modo: modo === "ventas" && ueff.roasMin && r.roas / ueff.roasMin < 0.5 ? "apagar" : "iterar", bestAng });
+      else if (r.v === "Observación" && promete(r)) validar.push(r);
       else if (r.v === "Observación") esperar.push(r);
     });
     escalar.sort((a, b) => b.spend - a.spend); apagar.sort((a, b) => b.spend - a.spend);
     return { escalar, apagar, validar, esperar };
-  }, [withV, ueff.roasMin]);
+  }, [withV, ueff.roasMin, modo]);
 
   const totalTasks = acciones.escalar.length + acciones.apagar.length + acciones.validar.length;
   const doneCount = [...acciones.escalar, ...acciones.apagar, ...acciones.validar].filter((r) => done.has(r.id)).length;
@@ -254,9 +267,10 @@ export default function App() {
           {Object.keys(ROLES).map((k) => <button key={k} className={"rolebtn" + (role === k ? " on" : "")} onClick={() => setRole(k)}>{k.toUpperCase()}</button>)}
         </div>
         <span className="rdesc">{ROLES[role]}</span>
+        <div className="modobox"><span className="rlabel">◉ MEDIR</span><button className={"modotgl" + (modo === "ventas" ? " on" : "")} onClick={() => setModo("ventas")}>VENTAS</button><button className={"modotgl" + (modo === "mensajes" ? " on" : "")} onClick={() => setModo("mensajes")}>MENSAJES</button></div>
       </div>
 
-      {role === "cliente" ? (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Cliente withV={withV} u={ueff} stats={stats} goal={goal} accountName={(accounts.find((a) => a.id === account) || {}).name || ""} factTienda={tnSummary ? tnSummary.facturacion : null} />) : (
+      {role === "cliente" ? (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Cliente withV={withV} u={ueff} stats={stats} goal={goal} accountName={(accounts.find((a) => a.id === account) || {}).name || ""} factTienda={tnSummary ? tnSummary.facturacion : null} modo={modo} />) : (
         <>
           <nav className="nav">
             {role === "vos" && <button className={"tab" + (effView === "dash" ? " active" : "")} onClick={() => setView("dash")}>DASHBOARD</button>}
@@ -272,19 +286,23 @@ export default function App() {
           {!!withV.length && (
             <section className="umbral">
               <div className="ulabel">UMBRAL<br/>DEL CLIENTE</div>
-              <Field label="ROAS mínimo" suffix="x" value={u.roasMin} step={0.5} locked={locked} onChange={(v) => setU({ ...u, roasMin: v })} />
-              <Field label="CPA máximo" prefix="$" value={u.cpaMax} step={100} locked={locked} onChange={(v) => setU({ ...u, cpaMax: v })} />
+              {modo === "mensajes" ? (
+                <Field label="Costo x conv. máx" prefix="$" value={u.costoMax} step={50} locked={locked} onChange={(v) => setU({ ...u, costoMax: v })} />
+              ) : (<>
+                <Field label="ROAS mínimo" suffix="x" value={u.roasMin} step={0.5} locked={locked} onChange={(v) => setU({ ...u, roasMin: v })} />
+                <Field label="CPA máximo" prefix="$" value={u.cpaMax} step={100} locked={locked} onChange={(v) => setU({ ...u, cpaMax: v })} />
+              </>)}
               <Field label="Piso de spend" prefix="$" value={u.pisoSpend} step={5000} locked={locked} onChange={(v) => setU({ ...u, pisoSpend: v })} />
               <div className="uhint">{locked ? "🔒 definido por la cuenta · no editable" : "cambiá los valores · todo recalcula en vivo"}</div>
             </section>
           )}
 
-          {effView === "an" && (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Analisis withV={withV} stats={stats} audiencias={audiencias} tnSummary={tnSummary} u={ueff} accountName={(accounts.find((a) => a.id === account) || {}).name || ""} periodo={preset === "custom" && cSince && cUntil ? cSince + " → " + cUntil : preset} analysis={analysis} setAnalysis={setAnalysis} />)}
-          {effView === "plan" && (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Plan account={account} store={tnStore} goal={goal} plan={plan} setPlan={setPlan} />)}
-          {effView === "dash" && (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Dash stats={stats} goal={goal} setGoal={setGoal} factTienda={tnSummary ? tnSummary.facturacion : null} tnStore={tnStore} />)}
-          {effView === "hoy" && (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Hoy acc={acciones} u={ueff} done={done} toggle={toggle} total={totalTasks} doneCount={doneCount} mantener={stats.counts.Mantener} />)}
-          {effView === "top" && (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Top withV={withV} u={ueff} audData={audiencias} />)}
-          {effView === "panel" && (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Panel rows={rows} stats={stats} sort={sort} setSortKey={setSortKey} />)}
+          {effView === "an" && (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Analisis withV={withV} stats={stats} audiencias={audiencias} tnSummary={tnSummary} u={ueff} accountName={(accounts.find((a) => a.id === account) || {}).name || ""} periodo={preset === "custom" && cSince && cUntil ? cSince + " → " + cUntil : preset} analysis={analysis} setAnalysis={setAnalysis} modo={modo} />)}
+          {effView === "plan" && (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Plan account={account} store={tnStore} goal={goal} plan={plan} setPlan={setPlan} modo={modo} />)}
+          {effView === "dash" && (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Dash stats={stats} goal={goal} setGoal={setGoal} factTienda={tnSummary ? tnSummary.facturacion : null} tnStore={tnStore} modo={modo} />)}
+          {effView === "hoy" && (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Hoy acc={acciones} u={ueff} done={done} toggle={toggle} total={totalTasks} doneCount={doneCount} mantener={stats.counts.Mantener} modo={modo} />)}
+          {effView === "top" && (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Top withV={withV} u={ueff} audData={audiencias} modo={modo} />)}
+          {effView === "panel" && (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Panel rows={rows} stats={stats} sort={sort} setSortKey={setSortKey} modo={modo} />)}
           {effView === "bib" && <Biblioteca rows={withV} hookMatch={hookMatch} setHookMatch={setHookMatch} />}
           {effView === "gen" && <Generar rows={withV} accountName={(accounts.find((a) => a.id === account) || {}).name || ""} />}
         </>
@@ -294,20 +312,24 @@ export default function App() {
 }
 
 // ─────────── Vista: CLIENTE (Parte 5) ───────────
-function Cliente({ withV, u, stats, goal, accountName, factTienda }) {
+function Cliente({ withV, u, stats, goal, accountName, factTienda, modo = "ventas" }) {
+  const msg = modo === "mensajes";
   const reliable = useMemo(() => withV.filter((r) => r.spend >= u.pisoSpend), [withV, u.pisoSpend]);
   const facturado = factTienda != null ? factTienda : stats.revenue;
   const pct = goal ? Math.min(100, (facturado / goal) * 100) : 0;
   const mes = new Date().toLocaleDateString("es-AR", { month: "long", year: "numeric" }).toUpperCase();
   const topAng = aggregate(reliable, "ang")[0]?.key || "—";
-  const wins = [...reliable].sort((a, b) => b.roas - a.roas).slice(0, 4);
-  const resumen = `La cuenta facturó ${short(facturado)} con un ROAS de ${stats.accountRoas.toFixed(1)}x y ${nf.format(stats.ventasTotal)} ventas${goal > 0 ? ` — al ${pct.toFixed(0)}% del objetivo` : ""}. El ángulo ${topAng} y los catálogos lideraron el rendimiento, con varios anuncios listos para escalar.`;
+  const wins = [...reliable].sort((a, b) => msg ? (a.costoConv || 9e12) - (b.costoConv || 9e12) : b.roas - a.roas).slice(0, 4);
+  const resumen = msg
+    ? `La cuenta generó ${nf.format(stats.convTotal)} conversaciones con una inversión de ${short(stats.spendTotal)}, a un costo promedio de ${money(stats.costoConvProm)} por conversación. El ángulo ${topAng} lideró el volumen, con varios anuncios listos para escalar.`
+    : `La cuenta facturó ${short(facturado)} con un ROAS de ${stats.accountRoas.toFixed(1)}x y ${nf.format(stats.ventasTotal)} ventas${goal > 0 ? ` — al ${pct.toFixed(0)}% del objetivo` : ""}. El ángulo ${topAng} y los catálogos lideraron el rendimiento, con varios anuncios listos para escalar.`;
   return (
     <>
       <div className="repbar">
         <div><div className="reptitle">REPORTE MENSUAL · {mes}</div><div className="repsub">{accountName || "Cliente"} · preparado por tu agencia</div></div>
       </div>
 
+      {!msg && (
       <section className="goal light">
         <div className="goalhead"><span className="goaltitle">OBJETIVO DEL MES</span><span className="repnote">→ exportable a PDF en la Parte 10</span></div>
         {goal > 0 ? (<>
@@ -317,11 +339,18 @@ function Cliente({ withV, u, stats, goal, accountName, factTienda }) {
           <div className="goalnums"><div className="goalstack"><div><b className="mono">{short(facturado)}</b> <span className="soft">facturado · definí la meta del mes en el Dashboard</span></div></div></div>
         )}
       </section>
+      )}
 
       <section className="kpis repk">
-        <Kpi lab="FACTURACIÓN" val={short(stats.revenue)} mod="grn" />
-        <Kpi lab="ROAS" val={stats.accountRoas.toFixed(1) + "x"} mod="grn" />
-        <Kpi lab="VENTAS" val={nf.format(stats.ventasTotal)} />
+        {msg ? (<>
+          <Kpi lab="CONVERSACIONES" val={nf.format(stats.convTotal)} mod="grn" />
+          <Kpi lab="COSTO / CONV" val={money(stats.costoConvProm)} />
+          <Kpi lab="INVERSIÓN" val={short(stats.spendTotal)} />
+        </>) : (<>
+          <Kpi lab="FACTURACIÓN" val={short(stats.revenue)} mod="grn" />
+          <Kpi lab="ROAS" val={stats.accountRoas.toFixed(1) + "x"} mod="grn" />
+          <Kpi lab="VENTAS" val={nf.format(stats.ventasTotal)} />
+        </>)}
       </section>
 
       <section className="sect">
@@ -331,8 +360,8 @@ function Cliente({ withV, u, stats, goal, accountName, factTienda }) {
             <div className="topcard" key={r.id} style={{ "--bar": "#2E8B6B" }}>
               <div className="tcardtop"><span className="trank">{String(i + 1).padStart(2, "0")}</span><span className="winstar">★</span></div>
               <div className="tname">{r.nombre} <span className="fmt">{r.fmt}</span><TF r={r} /><Paused r={r} /></div>
-              <div className="troas grn">{r.roas.toFixed(1)}<small>x</small></div>
-              <div className="tmeta mono">{r.ang} · {r.aud}</div>
+              {msg ? <div className="troas grn">{money(r.costoConv)}</div> : <div className="troas grn">{r.roas.toFixed(1)}<small>x</small></div>}
+              <div className="tmeta mono">{msg ? (nf.format(r.conversaciones) + " conv · " + r.ang) : (r.ang + " · " + r.aud)}</div>
             </div>))}
         </div>
       </section>
@@ -346,31 +375,33 @@ function Cliente({ withV, u, stats, goal, accountName, factTienda }) {
 }
 
 // ─────────── Vista: TOP PERFORMERS (Parte 4) ───────────
-function Top({ withV, u, audData }) {
+function Top({ withV, u, audData, modo = "ventas" }) {
+  const msg = modo === "mensajes";
   const [dim, setDim] = useState("ang");
   const reliable = useMemo(() => withV.filter((r) => r.spend >= u.pisoSpend), [withV, u.pisoSpend]);
   const MINV = 5;
   const data = useMemo(() => {
-    const arr = (dim === "aud" && audData && audData.length)
-      ? audData.map((g) => ({ ...g, roas: g.spend ? g.revenue / g.spend : 0 }))
+    return (dim === "aud" && audData && audData.length)
+      ? audData.map((g) => ({ ...g, roas: g.spend ? g.revenue / g.spend : 0, costoConv: g.conversaciones ? g.spend / g.conversaciones : 0 }))
       : aggregate(reliable, dim);
-    return [...arr].sort((a, b) => b.roas - a.roas);
   }, [reliable, dim, audData]);
   // Cuántos mostrar por dimensión. Audiencia = todas; el resto, un top.
   const LIMITS = { ang: 5, cat: 5, aud: Infinity, hook: 10, fmt: 8 };
   const limit = LIMITS[dim] ?? 5;
-  // Métrica de orden: ROAS (default), Spend, Ventas o Ads.
-  const [metric, setMetric] = useState("roas");
-  const METRICS = [["roas", "ROAS"], ["spend", "Spend"], ["ventas", "Ventas"], ["ads", "Ads"]];
-  const valOf = (d) => metric === "spend" ? d.spend : metric === "ventas" ? d.ventas : metric === "ads" ? d.n : d.roas;
-  const ordered = [...data].sort((a, b) => valOf(b) - valOf(a));
+  // Métrica de orden. En mensajes: costo por conversación (menor = mejor), conversaciones, spend, ads.
+  const [metric, setMetric] = useState(msg ? "costo" : "roas");
+  const METRICS = msg ? [["costo", "Costo/conv"], ["conv", "Conversac."], ["spend", "Spend"], ["ads", "Ads"]] : [["roas", "ROAS"], ["spend", "Spend"], ["ventas", "Ventas"], ["ads", "Ads"]];
+  const lowerBetter = metric === "costo";
+  const valOf = (d) => metric === "spend" ? d.spend : metric === "ventas" ? d.ventas : metric === "conv" ? (d.conversaciones || 0) : metric === "ads" ? d.n : metric === "costo" ? (d.costoConv || 0) : d.roas;
+  const ordered = [...data].filter((d) => metric !== "costo" || d.costoConv > 0).sort((a, b) => lowerBetter ? valOf(a) - valOf(b) : valOf(b) - valOf(a));
   const ranked = ordered.slice(0, limit);
   const thin = ordered.slice(limit);
-  const top3 = useMemo(() => topWinners(reliable, 3), [reliable]);
+  const top3 = useMemo(() => msg ? [...reliable.filter((r) => r.conversaciones > 0 && r.activa !== false)].sort((a, b) => (a.costoConv || 9e12) - (b.costoConv || 9e12)).slice(0, 3) : topWinners(reliable, 3), [reliable, msg]);
   const best = top3[0];
   const max = Math.max(...ranked.map((d) => valOf(d)), 1) || 1;
-  const fmtVal = (d) => metric === "spend" ? short(d.spend) : metric === "ventas" ? nf.format(Math.round(d.ventas)) : metric === "ads" ? (d.n + " ad" + (d.n !== 1 ? "s" : "")) : (d.roas.toFixed(1) + "x");
-  const colorFor = (roas) => roas >= u.roasMin ? BUCKETS.Escalar.color : roas >= u.roasMin * 0.85 ? BUCKETS.Mantener.color : BUCKETS.Pausar.color;
+  const barOf = (d) => lowerBetter ? Math.max(8, (1 - valOf(d) / max) * 100) : (valOf(d) / max) * 100;
+  const fmtVal = (d) => metric === "spend" ? short(d.spend) : metric === "ventas" ? nf.format(Math.round(d.ventas)) : metric === "conv" ? nf.format(Math.round(d.conversaciones || 0)) : metric === "ads" ? (d.n + " ad" + (d.n !== 1 ? "s" : "")) : metric === "costo" ? money(d.costoConv) : (d.roas.toFixed(1) + "x");
+  const colorFor = (d) => msg ? (d.costoConv && d.costoConv <= u.costoMax ? BUCKETS.Escalar.color : d.costoConv && d.costoConv <= u.costoMax * 1.4 ? BUCKETS.Mantener.color : BUCKETS.Pausar.color) : (d.roas >= u.roasMin ? BUCKETS.Escalar.color : d.roas >= u.roasMin * 0.85 ? BUCKETS.Mantener.color : BUCKETS.Pausar.color);
   const dims = [["ang", "Ángulo"], ["cat", "Categoría"], ["aud", "Audiencia"], ["hook", "Hook"], ["fmt", "Formato"]];
   // Acordeón: solo para ángulo, categoría y hook (no audiencia/formato). Lista qué creativos
   // componen cada fila y, dentro de cada uno, en qué campañas/adsets corren.
@@ -388,18 +419,18 @@ function Top({ withV, u, audData }) {
         <section className="combo">
           <div className="combohead"><span className="combotag">★ TUS 3 MEJORES COMBINACIONES</span><span className="comboname">{best.nombre}</span><TF r={best} /></div>
           <div className="comborow">
-            <div className="comboroas">{best.roas.toFixed(1)}<small>x</small></div>
+            {msg ? <div className="comboroas">{money(best.costoConv)}</div> : <div className="comboroas">{best.roas.toFixed(1)}<small>x</small></div>}
             <div className="comborec"><Rec k="ÁNGULO" v={best.sheet?.angulo || best.ang} /><Rec k="AUDIENCIA" v={best.aud} /><Rec k="HOOK" v={best.sheet?.tipo_gancho || best.hook} /><Rec k="FORMATO" v={best.fmt} /></div>
           </div>
-          <div className="combostats">{nf.format(best.ventas)} ventas · {short(best.spend)} spend</div>
+          <div className="combostats">{msg ? (nf.format(best.conversaciones) + " conversaciones · " + short(best.spend) + " spend") : (nf.format(best.ventas) + " ventas · " + short(best.spend) + " spend")}</div>
           {top3.length > 1 && (
             <div className="combomore">
               {top3.slice(1).map((r, i) => (
                 <div className="comboalt" key={r.id}>
                   <span className="caltrank">{String(i + 2).padStart(2, "0")}</span>
-                  <span className="caltroas">{r.roas.toFixed(1)}x</span>
+                  <span className="caltroas">{msg ? money(r.costoConv) : r.roas.toFixed(1) + "x"}</span>
                   <span className="caltname">{r.nombre}</span><TF r={r} />
-                  <span className="caltmeta">{(r.sheet?.angulo || r.ang)} · {(r.sheet?.tipo_gancho || r.hook)} · {r.aud} · {r.fmt} · {nf.format(r.ventas)} vtas · {short(r.spend)}</span>
+                  <span className="caltmeta">{(r.sheet?.angulo || r.ang)} · {(r.sheet?.tipo_gancho || r.hook)} · {r.aud} · {r.fmt} · {msg ? (nf.format(r.conversaciones) + " conv") : (nf.format(r.ventas) + " vtas")} · {short(r.spend)}</span>
                 </div>
               ))}
             </div>
@@ -424,17 +455,17 @@ function Top({ withV, u, audData }) {
               <div className={"rankrow" + (expandable ? " clickable" : "") + (isOpen ? " open" : "")} onClick={expandable ? () => setOpen(isOpen ? null : d.key) : undefined}>
                 {expandable && <span className="rcaret">{isOpen ? "▾" : "▸"}</span>}
                 <span className="rrank">{String(i + 1).padStart(2, "0")}</span><span className="rname">{d.key}</span>
-                <div className="rbar"><span className="rfill" style={{ width: (valOf(d) / max) * 100 + "%", background: colorFor(d.roas) }} /></div>
-                <span className="rval" style={{ color: colorFor(d.roas) }}>{fmtVal(d)}</span>
-                <span className="rmeta">{metric !== "roas" ? d.roas.toFixed(1) + "x · " : ""}{short(d.spend)} · {nf.format(Math.round(d.ventas))} vtas · {d.n} ad{d.n !== 1 ? "s" : ""}</span>
+                <div className="rbar"><span className="rfill" style={{ width: barOf(d) + "%", background: colorFor(d) }} /></div>
+                <span className="rval" style={{ color: colorFor(d) }}>{fmtVal(d)}</span>
+                <span className="rmeta">{msg ? (nf.format(Math.round(d.conversaciones || 0)) + " conv · " + short(d.spend) + " · " + d.n + " ad" + (d.n !== 1 ? "s" : "")) : ((metric !== "roas" ? d.roas.toFixed(1) + "x · " : "") + short(d.spend) + " · " + nf.format(Math.round(d.ventas)) + " vtas · " + d.n + " ad" + (d.n !== 1 ? "s" : ""))}</span>
               </div>
               {isOpen && (
                 <div className="rexp">
                   {membersFor(d.key).sort((a, b) => b.spend - a.spend).map((m) => (
                     <div className="rexad" key={m.id}>
-                      <div className="rexhead"><b>{m.nombre}</b><TF r={m} /><Paused r={m} /> <span className="rexkpi">{m.roas.toFixed(1)}x · {short(m.spend)} · {nf.format(m.ventas)} vtas</span></div>
+                      <div className="rexhead"><b>{m.nombre}</b><TF r={m} /><Paused r={m} /> <span className="rexkpi">{msg ? (money(m.costoConv) + "/conv · " + short(m.spend) + " · " + nf.format(m.conversaciones) + " conv") : (m.roas.toFixed(1) + "x · " + short(m.spend) + " · " + nf.format(m.ventas) + " vtas")}</span></div>
                       {(m.breakdown || []).map((b, j) => (
-                        <div className="rexline" key={j}><span className="rexcamp">{b.campaign}</span> › <span className="rexset">{b.adset}</span>{b.aud ? <span className="rexaud">{b.aud}</span> : null}<span className="rexmeta">{short(b.spend)} · {nf.format(b.ventas)} vtas · {b.roas.toFixed(1)}x</span></div>
+                        <div className="rexline" key={j}><span className="rexcamp">{b.campaign}</span> › <span className="rexset">{b.adset}</span>{b.aud ? <span className="rexaud">{b.aud}</span> : null}<span className="rexmeta">{short(b.spend)} · {msg ? (nf.format(b.ventas) + " vtas") : (nf.format(b.ventas) + " vtas · " + b.roas.toFixed(1) + "x")}</span></div>
                       ))}
                     </div>
                   ))}
@@ -460,33 +491,37 @@ function EmptyState({ account, loading, err }) {
 }
 
 // ─────────── Vista: ANÁLISIS (el "cerebro" read-only) ───────────
-function Analisis({ withV, stats, audiencias, tnSummary, u, accountName, periodo, analysis, setAnalysis }) {
+function Analisis({ withV, stats, audiencias, tnSummary, u, accountName, periodo, analysis, setAnalysis, modo = "ventas" }) {
   const out = analysis; // persiste en el padre: no se borra al cambiar de pestaña
   const setOut = setAnalysis;
+  const msg = modo === "mensajes";
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
 
   // Resumen COMPACTO calculado acá (no mandamos anuncios crudos → pocos tokens).
   const snapshot = useMemo(() => {
     const reliable = withV.filter((r) => r.spend >= u.pisoSpend);
-    const top = (dim) => aggregate(reliable, dim).slice(0, 5).map((g) => ({ k: g.key, roas: +g.roas.toFixed(1), spend: Math.round(g.spend), ventas: Math.round(g.ventas), ads: g.n }));
-    const aud = (audiencias && audiencias.length ? audiencias : []).slice(0, 6).map((g) => ({ k: g.key, roas: g.spend ? +(g.revenue / g.spend).toFixed(1) : 0, spend: g.spend, ventas: g.ventas, ads: g.n }));
-    const sangrado = [...withV].filter((r) => r.v === "Pausar").sort((a, b) => b.spend - a.spend).slice(0, 5).map((r) => ({ nombre: r.nombre, roas: r.roas, spend: r.spend, ventas: r.ventas, ya_pausado: r.activa === false }));
-    // top ROAS entre los que TODAVÍA están activos (ignora ganadores históricos/estacionales ya apagados)
-    const topActivos = [...reliable.filter((r) => r.activa !== false)].sort((x, y) => y.roas - x.roas).slice(0, 5).map((r) => ({ nombre: r.nombre, roas: r.roas, spend: r.spend, ventas: r.ventas, activa: true }));
-    const b = topWinners(reliable, 1)[0];
+    const m = (g) => msg ? { k: g.key, costo_conv: Math.round(g.costoConv || 0), conversaciones: Math.round(g.conversaciones || 0), spend: Math.round(g.spend), ads: g.n } : { k: g.key, roas: +g.roas.toFixed(1), spend: Math.round(g.spend), ventas: Math.round(g.ventas), ads: g.n };
+    const top = (dim) => [...aggregate(reliable, dim)].sort((a, b) => msg ? (a.costoConv || 9e12) - (b.costoConv || 9e12) : b.roas - a.roas).slice(0, 5).map(m);
+    const aud = (audiencias && audiencias.length ? audiencias : []).map((g) => ({ ...g, roas: g.spend ? g.revenue / g.spend : 0, costoConv: g.conversaciones ? g.spend / g.conversaciones : 0 })).sort((a, b) => msg ? (a.costoConv || 9e12) - (b.costoConv || 9e12) : b.roas - a.roas).slice(0, 6).map(m);
+    const r2 = (r) => msg ? { nombre: r.nombre, costo_conv: r.costoConv, conversaciones: r.conversaciones, spend: r.spend, ya_pausado: r.activa === false } : { nombre: r.nombre, roas: r.roas, spend: r.spend, ventas: r.ventas, ya_pausado: r.activa === false };
+    const sangrado = [...withV].filter((r) => r.v === "Pausar").sort((a, b) => b.spend - a.spend).slice(0, 5).map(r2);
+    const topActivos = [...reliable.filter((r) => r.activa !== false)].sort((a, b) => msg ? (a.costoConv || 9e12) - (b.costoConv || 9e12) : b.roas - a.roas).slice(0, 5).map((r) => ({ ...r2(r), activa: true }));
+    const b = msg ? (topActivos[0] && withV.find((r) => r.nombre === topActivos[0].nombre)) : topWinners(reliable, 1)[0];
     return {
-      cuenta: accountName || "—", periodo,
-      inversion: stats.spendTotal, ventas: stats.ventasTotal, cpa: Math.round(stats.cpaProm), roas_cuenta: +stats.accountRoas.toFixed(1),
-      tienda: tnSummary ? { facturacion: tnSummary.facturacion, mer: tnSummary.mer, roas_pixel: +(tnSummary.roasMeta || 0).toFixed(1) } : null,
+      modo, cuenta: accountName || "—", periodo,
+      inversion: stats.spendTotal,
+      ...(msg
+        ? { conversaciones: stats.convTotal, costo_conv_prom: Math.round(stats.costoConvProm) }
+        : { ventas: stats.ventasTotal, cpa: Math.round(stats.cpaProm), roas_cuenta: +stats.accountRoas.toFixed(1), tienda: tnSummary ? { facturacion: tnSummary.facturacion, mer: tnSummary.mer, roas_pixel: +(tnSummary.roasMeta || 0).toFixed(1) } : null }),
       veredictos: stats.counts,
-      umbral: { roas_min: u.roasMin || null, cpa_max: u.cpaMax === Infinity ? null : u.cpaMax, piso_spend: u.pisoSpend || null },
+      umbral: msg ? { costo_conv_max: u.costoMax === Infinity ? null : u.costoMax, piso_spend: u.pisoSpend || null } : { roas_min: u.roasMin || null, cpa_max: u.cpaMax === Infinity ? null : u.cpaMax, piso_spend: u.pisoSpend || null },
       ranking: { angulo_venta: top("ang"), categoria: top("cat"), hook: top("hook"), audiencia: aud, formato: top("fmt") },
       sangrando: sangrado,
       top_activos: topActivos,
-      receta_ganadora: b ? { angulo: b.sheet?.angulo || b.ang, categoria: b.ang, hook: b.sheet?.tipo_gancho || b.hook, audiencia: b.aud, formato: b.fmt, roas: b.roas, ventas: b.ventas, spend: b.spend, activa: b.activa !== false } : null,
+      receta_ganadora: b ? { angulo: b.sheet?.angulo || b.ang, categoria: b.ang, hook: b.sheet?.tipo_gancho || b.hook, audiencia: b.aud, formato: b.fmt, ...(msg ? { costo_conv: b.costoConv, conversaciones: b.conversaciones } : { roas: b.roas, ventas: b.ventas }), spend: b.spend, activa: b.activa !== false } : null,
     };
-  }, [withV, stats, audiencias, tnSummary, u, accountName, periodo]);
+  }, [withV, stats, audiencias, tnSummary, u, accountName, periodo, msg, modo]);
 
   const pedir = async () => {
     setLoading(true); setErr(""); setOut(null);
@@ -534,13 +569,14 @@ function Analisis({ withV, stats, audiencias, tnSummary, u, accountName, periodo
 }
 
 // ─────────── Vista: PLAN (cómo llegar al objetivo) ───────────
-function Plan({ account, store, goal, plan, setPlan }) {
+function Plan({ account, store, goal, plan, setPlan, modo = "ventas" }) {
+  const msg = modo === "mensajes";
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
   const pedir = async () => {
     setLoading(true); setErr("");
     try {
-      const qs = "account=" + account + (store ? "&store=" + encodeURIComponent(store) : "") + "&goal=" + goal;
+      const qs = "account=" + account + (store ? "&store=" + encodeURIComponent(store) : "") + "&goal=" + goal + "&modo=" + modo;
       const res = await fetch("/api/plan?" + qs, { method: "POST" });
       const d = await res.json();
       if (d.error) throw new Error(d.error);
@@ -554,22 +590,24 @@ function Plan({ account, store, goal, plan, setPlan }) {
   return (
     <section className="an">
       <div className="anhead">
-        <div><div className="antitle">◎ PLAN PARA LLEGAR AL OBJETIVO</div><div className="ansub">Claude mira tu inversión real por adset/campaña (ABO/CBO) del mes en curso y te da 3 escenarios de cuánto y dónde invertir. Read-only.</div></div>
-        {goal > 0 && <button className="anbtn" onClick={pedir} disabled={loading}>{loading ? "● CALCULANDO..." : p ? "↻ RECALCULAR" : "▶ PEDIR PLAN"}</button>}
+        <div><div className="antitle">◎ PLAN {msg ? "DE OPTIMIZACIÓN" : "PARA LLEGAR AL OBJETIVO"}</div><div className="ansub">{msg ? "Claude mira tu inversión real por adset/campaña (ABO/CBO) del mes y te da 3 escenarios de cuánto/dónde invertir para escalar conversaciones bajando el costo." : "Claude mira tu inversión real por adset/campaña (ABO/CBO) del mes en curso y te da 3 escenarios de cuánto y dónde invertir."} Read-only.</div></div>
+        {(msg || goal > 0) && <button className="anbtn" onClick={pedir} disabled={loading}>{loading ? "● CALCULANDO..." : p ? "↻ RECALCULAR" : "▶ PEDIR PLAN"}</button>}
       </div>
-      {goal <= 0 && <div className="anplaceholder">Primero cargá la <b>META del mes</b> en el Dashboard (Objetivo del mes). Sin meta no hay a dónde llegar.</div>}
+      {!msg && goal <= 0 && <div className="anplaceholder">Primero cargá la <b>META del mes</b> en el Dashboard (Objetivo del mes). Sin meta no hay a dónde llegar.</div>}
       {err && <div className="generr">{err}</div>}
-      {goal > 0 && !p && !loading && !err && <div className="anplaceholder">Apretá <b>“Pedir plan”</b>. El sistema cruza la meta, lo facturado del mes, los días que faltan y el budget real de cada unidad, y arma escenarios <b>pesimista / normal / optimista</b> de cuánto invertir y dónde (y qué desinvertir). ~5 centavos de IA, on-demand.</div>}
+      {(msg || goal > 0) && !p && !loading && !err && <div className="anplaceholder">Apretá <b>“Pedir plan”</b>. El sistema cruza {msg ? "las conversaciones del mes, el costo por conversación" : "la meta, lo facturado del mes"}, los días que faltan y el budget real de cada unidad, y arma escenarios <b>pesimista / normal / optimista</b> de cuánto invertir y dónde (y qué desinvertir). ~5 centavos de IA, on-demand.</div>}
       {p && (
         <div className="anout">
-          {snap && <div className="planbar"><span>META {money(snap.meta)}</span><span>FACTURADO MTD {money(snap.facturacion_mtd)}</span><span>MER {snap.mer}x</span><span>PROYECCIÓN {money(snap.proyeccion_sin_cambios)}</span><span>FALTAN {snap.dias_restantes} días</span></div>}
+          {snap && (msg
+            ? <div className="planbar"><span>CONVERSACIONES MTD {nf.format(snap.conversaciones_mtd)}</span><span>COSTO/CONV {money(snap.costo_conv)}</span><span>INVERSIÓN {money(snap.inversion_mtd)}</span><span>FALTAN {snap.dias_restantes} días</span></div>
+            : <div className="planbar"><span>META {money(snap.meta)}</span><span>FACTURADO MTD {money(snap.facturacion_mtd)}</span><span>MER {snap.mer}x</span><span>PROYECCIÓN {money(snap.proyeccion_sin_cambios)}</span><span>FALTAN {snap.dias_restantes} días</span></div>)}
           <div className="andiag">{p.resumen}</div>
           <div className="planscenarios">
             {(p.escenarios || []).map((e, i) => (
               <div className="plansc" key={i} style={{ "--sc": COL[e.nombre] || "#857A66" }}>
-                <div className="planschead"><span className="planscname">{e.nombre}</span><span className={"planscmeta" + (e.alcanza_meta ? " ok" : "")}>{e.alcanza_meta ? "✓ llega" : "✗ no llega"}</span></div>
+                <div className="planschead"><span className="planscname">{e.nombre}</span>{!msg && <span className={"planscmeta" + (e.alcanza_meta ? " ok" : "")}>{e.alcanza_meta ? "✓ llega" : "✗ no llega"}</span>}</div>
                 <div className="planscsup">{e.supuesto}</div>
-                <div className="planscnums"><div><b>{money(e.inversion_extra_diaria)}</b><span>/día extra</span></div><div><b>{money(e.inversion_extra_total)}</b><span>total al mes</span></div><div><b>{money(e.facturacion_proyectada)}</b><span>proyección</span></div></div>
+                <div className="planscnums"><div><b>{money(e.inversion_extra_diaria)}</b><span>/día extra</span></div><div><b>{money(e.inversion_extra_total)}</b><span>total al mes</span></div>{msg ? <div><b>{nf.format(e.conversaciones_proyectadas || 0)}</b><span>conv. proyectadas</span></div> : <div><b>{money(e.facturacion_proyectada)}</b><span>proyección</span></div>}</div>
                 <div className="planscacc">
                   {(e.acciones || []).map((a, j) => (
                     <div className="planacc" key={j}>
@@ -591,7 +629,8 @@ function Plan({ account, store, goal, plan, setPlan }) {
 }
 
 // ─────────── Vista: DASHBOARD (Parte 3) ───────────
-function Dash({ stats, goal, setGoal, factTienda, tnStore }) {
+function Dash({ stats, goal, setGoal, factTienda, tnStore, modo = "ventas" }) {
+  const msg = modo === "mensajes";
   // El objetivo lo marca la facturación de Tienda Nube si hay tienda elegida; si no, la revenue de Meta.
   const facturado = factTienda != null ? factTienda : stats.revenue;
   const fuenteTienda = factTienda != null;
@@ -602,6 +641,7 @@ function Dash({ stats, goal, setGoal, factTienda, tnStore }) {
   const diasRestan = diasMes - hoy.getDate();
   return (
     <>
+      {!msg && (
       <section className="goal">
         <div className="goalhead"><span className="goaltitle">OBJETIVO DEL MES{fuenteTienda ? <span className="goalsrc">🛒 {tnStore}</span> : null}</span><label className="goaledit">META<span className="finput"><i>$</i><input type="text" inputMode="numeric" value={goal} onChange={(e) => { const n = parseInt(String(e.target.value).replace(/[^\d]/g, ""), 10); setGoal(isNaN(n) ? 0 : n); }} /></span></label></div>
         {goal > 0 ? (<>
@@ -611,16 +651,21 @@ function Dash({ stats, goal, setGoal, factTienda, tnStore }) {
           <div className="goalnums"><div className="goalstack"><div><b className="mono">{short(facturado)}</b> <span className="soft">{fuenteTienda ? "facturado (tienda)" : "facturado"} · cargá una META arriba para ver el progreso</span></div></div></div>
         )}
       </section>
+      )}
       <section className="kpis dashk">
-        <Kpi lab="FACTURACIÓN" val={short(stats.revenue)} /><Kpi lab="INVERSIÓN" val={short(stats.spendTotal)} /><Kpi lab="ROAS CUENTA" val={stats.accountRoas.toFixed(1) + "x"} mod="grn" /><Kpi lab="CPA PROMEDIO" val={money(stats.cpaProm)} /><Kpi lab="VENTAS" val={nf.format(stats.ventasTotal)} />
+        {msg ? (<>
+          <Kpi lab="CONVERSACIONES" val={nf.format(stats.convTotal)} mod="grn" /><Kpi lab="COSTO / CONV" val={money(stats.costoConvProm)} /><Kpi lab="INVERSIÓN" val={short(stats.spendTotal)} /><Kpi lab="CREATIVOS" val={nf.format(stats.counts.Escalar + stats.counts.Mantener + stats.counts.Pausar + stats.counts["Observación"])} />
+        </>) : (<>
+          <Kpi lab="FACTURACIÓN" val={short(stats.revenue)} /><Kpi lab="INVERSIÓN" val={short(stats.spendTotal)} /><Kpi lab="ROAS CUENTA" val={stats.accountRoas.toFixed(1) + "x"} mod="grn" /><Kpi lab="CPA PROMEDIO" val={money(stats.cpaProm)} /><Kpi lab="VENTAS" val={nf.format(stats.ventasTotal)} />
+        </>)}
       </section>
       <section className="sect">
-        <div className="secthead"><span className="sverb" style={{ background: "#1E1812", color: "#F4C24A" }}><span className="sq" style={{ background: "#F4C24A" }} />TOP</span><span className="stitle">TOP ADS DEL MES</span><span className="scount">por ROAS · spend ≥ piso</span></div>
+        <div className="secthead"><span className="sverb" style={{ background: "#1E1812", color: "#F4C24A" }}><span className="sq" style={{ background: "#F4C24A" }} />TOP</span><span className="stitle">TOP ADS DEL MES</span><span className="scount">{msg ? "por costo/conv · spend ≥ piso" : "por ROAS · spend ≥ piso"}</span></div>
         <div className="topgrid">
           {stats.topAds.map((r, i) => { const b = BUCKETS[r.v]; return (
             <div className="topcard" key={r.id} style={{ "--bar": b.color }}>
               <div className="tcardtop"><span className="trank">{String(i + 1).padStart(2, "0")}</span><span className="badge" style={{ background: b.bg, color: b.color }}><span className="sq" style={{ background: b.color }} />{r.v}</span></div>
-              <div className="tname">{r.nombre} <span className="fmt">{r.fmt}</span><TF r={r} /><Paused r={r} /></div><div className="troas">{r.roas.toFixed(1)}<small>x</small></div><div className="tmeta mono">{short(r.spend)} spend · {r.ang}</div>
+              <div className="tname">{r.nombre} <span className="fmt">{r.fmt}</span><TF r={r} /><Paused r={r} /></div>{msg ? <div className="troas">{money(r.costoConv)}</div> : <div className="troas">{r.roas.toFixed(1)}<small>x</small></div>}<div className="tmeta mono">{msg ? (nf.format(r.conversaciones) + " conv · " + short(r.spend)) : (short(r.spend) + " spend · " + r.ang)}</div>
             </div>); })}
         </div>
       </section>
@@ -630,7 +675,8 @@ function Dash({ stats, goal, setGoal, factTienda, tnStore }) {
 function Kpi({ lab, val, mod }) { return <div className={"kpi" + (mod === "grn" ? " good" : "")}><div className="klab">{lab}</div><div className={"kval" + (mod === "grn" ? " grn" : "")}>{val}</div></div>; }
 
 // ─────────── Vista: QUÉ HACER HOY (Parte 2) ───────────
-function Hoy({ acc, u, done, toggle, total, doneCount, mantener }) {
+function Hoy({ acc, u, done, toggle, total, doneCount, mantener, modo = "ventas" }) {
+  const msg = modo === "mensajes";
   return (
     <>
       <div className="dayhead">
@@ -638,13 +684,13 @@ function Hoy({ acc, u, done, toggle, total, doneCount, mantener }) {
         <div className="progress"><div className="pbar"><span style={{ width: total ? `${(doneCount / total) * 100}%` : "0%" }} /></div><div className="pnum">{doneCount}/{total} HECHAS</div></div>
       </div>
       <Section title="ESCALÁ — SUBÍ EL CONJUNTO/CAMPAÑA" verb="Escalar" b={BUCKETS.Escalar} empty="Sin ganadores claros hoy.">
-        {acc.escalar.map((r) => (<Item key={r.id} r={r} done={done.has(r.id)} toggle={toggle} c={BUCKETS.Escalar} reason={`ROAS ${r.roas.toFixed(1)}x · CPA ${money(r.cpa)} · spend ${money(r.spend)}`} act={`Subí ~+25% el budget del conjunto/campaña donde corre este creativo (o duplicalo en más conjuntos)`} />))}
+        {acc.escalar.map((r) => (<Item key={r.id} r={r} done={done.has(r.id)} toggle={toggle} c={BUCKETS.Escalar} reason={msg ? `${money(r.costoConv)}/conv · ${nf.format(r.conversaciones)} conversaciones · spend ${money(r.spend)}` : `ROAS ${r.roas.toFixed(1)}x · CPA ${money(r.cpa)} · spend ${money(r.spend)}`} act={`Subí ~+25% el budget del conjunto/campaña donde corre este creativo (o duplicalo en más conjuntos)`} />))}
       </Section>
       <Section title="PAUSÁ O ITERÁ" verb="Pausar" b={BUCKETS.Pausar} empty="Nada sangrando hoy 👌">
-        {acc.apagar.map((r) => (<Item key={r.id} r={r} done={done.has(r.id)} toggle={toggle} c={BUCKETS.Pausar} reason={u.roasMin ? `ROAS ${r.roas.toFixed(1)}x — debajo de ${u.roasMin}x · spend ${money(r.spend)}` : `CPA ${money(r.cpa)} — arriba del tope · spend ${money(r.spend)}`} act={r.modo === "apagar" ? "Pausá el anuncio" : `Iterá: ${r.ang} no rinde — probá ${r.bestAng}`} />))}
+        {acc.apagar.map((r) => (<Item key={r.id} r={r} done={done.has(r.id)} toggle={toggle} c={BUCKETS.Pausar} reason={msg ? (r.conversaciones ? `${money(r.costoConv)}/conv — caro · spend ${money(r.spend)}` : `0 conversaciones con ${money(r.spend)} de spend`) : (u.roasMin ? `ROAS ${r.roas.toFixed(1)}x — debajo de ${u.roasMin}x · spend ${money(r.spend)}` : `CPA ${money(r.cpa)} — arriba del tope · spend ${money(r.spend)}`)} act={r.modo === "apagar" ? "Pausá el anuncio" : `Iterá: ${r.ang} no rinde — probá ${r.bestAng}`} />))}
       </Section>
       <Section title="VALIDÁ" verb="Observación" b={{ color: "#0F6E56", bg: "#DFEAE4" }} empty="Sin promesas pendientes.">
-        {acc.validar.map((r) => (<Item key={r.id} r={r} done={done.has(r.id)} toggle={toggle} c={{ color: "#0F6E56", bg: "#DFEAE4" }} reason={`ROAS ${r.roas.toFixed(1)}x prometedor, pero solo ${money(r.spend)} (bajo el piso)`} act={`Dale más budget al conjunto hasta cruzar ${money(u.pisoSpend)} y reevaluar`} />))}
+        {acc.validar.map((r) => (<Item key={r.id} r={r} done={done.has(r.id)} toggle={toggle} c={{ color: "#0F6E56", bg: "#DFEAE4" }} reason={msg ? `${money(r.costoConv)}/conv prometedor, pero solo ${money(r.spend)} (bajo el piso)` : `ROAS ${r.roas.toFixed(1)}x prometedor, pero solo ${money(r.spend)} (bajo el piso)`} act={`Dale más budget al conjunto hasta cruzar ${money(u.pisoSpend)} y reevaluar`} />))}
       </Section>
       <div className="noaction"><b>SIN ACCIÓN HOY:</b> {mantener} en <i>Mantener</i> (rentables, sostener){acc.esperar.length ? ` · ${acc.esperar.length} juntando data` : ""}. El sistema los miró y no requieren que toques nada.</div>
     </>
@@ -659,27 +705,33 @@ function Item({ r, done, toggle, reason, act, c }) {
 }
 
 // ─────────── Vista: PANEL DE CREATIVOS (Parte 1) ───────────
-function Panel({ rows, stats, sort, setSortKey }) {
+function Panel({ rows, stats, sort, setSortKey, modo = "ventas" }) {
+  const msg = modo === "mensajes";
   return (
     <>
       <section className="kpis">
         <div className="kpi"><div className="klab">SPEND TOTAL</div><div className="kval">{short(stats.spendTotal)}</div></div>
-        <div className="kpi flag"><div className="klab">ROAS PROMEDIO <span className="warn">⚠ INFLADO</span></div><div className="kval dim">{stats.roasSimple.toFixed(1)}x</div><div className="ksub">promedio simple de todos los creativos</div></div>
-        <div className="kpi good"><div className="klab">ROAS CONFIABLE</div><div className="kval grn">{stats.roasConfiable.toFixed(1)}x</div><div className="ksub">ponderado, solo spend ≥ piso</div></div>
+        {msg ? (<>
+          <div className="kpi good"><div className="klab">CONVERSACIONES</div><div className="kval grn">{nf.format(stats.convTotal)}</div><div className="ksub">mensajes iniciados</div></div>
+          <div className="kpi"><div className="klab">COSTO / CONV</div><div className="kval">{money(stats.costoConvProm)}</div><div className="ksub">spend ÷ conversaciones</div></div>
+        </>) : (<>
+          <div className="kpi flag"><div className="klab">ROAS PROMEDIO <span className="warn">⚠ INFLADO</span></div><div className="kval dim">{stats.roasSimple.toFixed(1)}x</div><div className="ksub">promedio simple de todos los creativos</div></div>
+          <div className="kpi good"><div className="klab">ROAS CONFIABLE</div><div className="kval grn">{stats.roasConfiable.toFixed(1)}x</div><div className="ksub">ponderado, solo spend ≥ piso</div></div>
+        </>)}
         <div className="kpi chips">{Object.entries(stats.counts).map(([k, n]) => (<div className="chip" key={k} style={{ background: BUCKETS[k].bg, color: BUCKETS[k].color }}><b>{n}</b> {k}</div>))}</div>
       </section>
       <section className="tablewrap">
         <table>
           <thead><tr>
             <Th label="Creativo" k="nombre" sort={sort} on={setSortKey} align="left" /><Th label="Ángulo (prim/sec · split)" align="left" /><Th label="Aud." align="left" />
-            <Th label="Spend" k="spend" sort={sort} on={setSortKey} /><Th label="ROAS" k="roas" sort={sort} on={setSortKey} /><Th label="CPA" k="cpa" sort={sort} on={setSortKey} /><Th label="Veredicto" k="veredicto" sort={sort} on={setSortKey} align="left" />
+            <Th label="Spend" k="spend" sort={sort} on={setSortKey} />{msg ? <><Th label="Conv." k="conversaciones" sort={sort} on={setSortKey} /><Th label="Costo/conv" k="costoConv" sort={sort} on={setSortKey} /></> : <><Th label="ROAS" k="roas" sort={sort} on={setSortKey} /><Th label="CPA" k="cpa" sort={sort} on={setSortKey} /></>}<Th label="Veredicto" k="veredicto" sort={sort} on={setSortKey} align="left" />
           </tr></thead>
           <tbody>
             {rows.map((r) => { const b = BUCKETS[r.v]; return (
               <tr key={r.id} style={{ "--bar": b.color }}>
                 <td className="name">{r.nombre} <span className="fmt">{r.fmt}</span><TF r={r} /><Paused r={r} /></td>
                 <td className="ang">{r.ang}{r.sec !== "—" ? <span className="sec"> / {r.sec}</span> : null}<span className="split">{r.split}</span></td>
-                <td className="aud">{r.aud}</td><td className="mono num">{money(r.spend)}</td><td className="mono num strong">{r.roas.toFixed(1)}x</td><td className="mono num">{money(r.cpa)}</td>
+                <td className="aud">{r.aud}</td><td className="mono num">{money(r.spend)}</td>{msg ? <><td className="mono num strong">{nf.format(r.conversaciones)}</td><td className="mono num">{money(r.costoConv)}</td></> : <><td className="mono num strong">{r.roas.toFixed(1)}x</td><td className="mono num">{money(r.cpa)}</td></>}
                 <td><span className="badge" style={{ background: b.bg, color: b.color }}><span className="sq" style={{ background: b.color }} />{r.v}</span></td>
               </tr>); })}
           </tbody>
@@ -1017,7 +1069,10 @@ const CSS = `
 .stripe i:nth-child(1){background:var(--c1)}.stripe i:nth-child(2){background:var(--c2)}.stripe i:nth-child(3){background:var(--c3)}.stripe i:nth-child(4){background:var(--c4)}.stripe i:nth-child(5){background:var(--c5)}.stripe i:nth-child(6){background:var(--c6)}
 .phasebar{display:flex;justify-content:space-between;background:var(--ink);color:#C7BBA2;font-family:'Space Mono',monospace;font-size:10px;letter-spacing:2px;padding:5px 20px;}
 
-.rolebar{display:flex;align-items:center;gap:14px;margin:16px 0 4px;}
+.rolebar{display:flex;align-items:center;gap:14px;margin:16px 0 4px;flex-wrap:wrap;}
+.modobox{display:flex;align-items:center;gap:7px;margin-left:auto;}
+.modotgl{font-family:'Space Mono',monospace;font-weight:700;font-size:11px;letter-spacing:1px;color:var(--ink);background:var(--paper2);border:2px solid var(--ink);padding:5px 12px;border-radius:6px;cursor:pointer;}
+.modotgl.on{background:var(--c6);color:var(--paper);border-color:var(--c6);}
 .rlabel{font-family:'Anton',Impact,sans-serif;font-size:13px;letter-spacing:2px;color:var(--ink);}
 .rolebtns{display:flex;gap:6px;}
 .rolebtn{font-family:'Space Mono',monospace;font-weight:700;font-size:12px;letter-spacing:1px;color:var(--ink);background:var(--paper2);border:2px solid var(--ink);padding:6px 14px;border-radius:6px;cursor:pointer;box-shadow:2px 2px 0 var(--ink);}

@@ -21,16 +21,21 @@ REGLAS DURAS:
 - Si ni el escenario optimista llega a la meta, decilo con honestidad.
 - SÉ CONCISO: máximo 5 acciones por escenario (las de mayor impacto), "porque" en una frase corta. Máximo 4 ítems en desinversión.
 
-Devolvé EXCLUSIVAMENTE JSON válido sin markdown ni backticks:
-{"resumen":"1-2 oraciones: dónde estás vs la meta y el ritmo","escenarios":[{"nombre":"Pesimista","supuesto":"breve","inversion_extra_diaria":N,"inversion_extra_total":N,"facturacion_proyectada":N,"alcanza_meta":true|false,"acciones":[{"unidad":"nombre","nivel":"ABO|CBO","accion":"subir|bajar|pausar|mantener","de":N,"a":N,"porque":"breve, con número"}]},{"nombre":"Normal",...},{"nombre":"Optimista",...}],"desinversion":["qué cortar/reasignar y por qué, con número"]}`;
+SI modo="mensajes" (campañas de mensajería): NO hay facturación, ROAS ni meta de plata. El resultado son CONVERSACIONES y la eficiencia es el COSTO POR CONVERSACIÓN (menor = mejor). El plan es de OPTIMIZACIÓN: cómo escalar conversaciones manteniendo o bajando el costo por conversación. Los 3 escenarios se diferencian por cómo asumís que se comporta el costo por conversación al escalar (sube por saturación / se mantiene / baja). Concentrá budget en las unidades con costo por conversación más bajo y margen; desinvertí las de costo alto o sin conversaciones. En vez de "facturacion_proyectada" y "alcanza_meta", devolvé "conversaciones_proyectadas" (cuántas conversaciones proyectás al cierre del mes en ese escenario).
+
+Devolvé EXCLUSIVAMENTE JSON válido sin markdown ni backticks.
+- modo ventas: {"resumen":"...","escenarios":[{"nombre":"Pesimista","supuesto":"breve","inversion_extra_diaria":N,"inversion_extra_total":N,"facturacion_proyectada":N,"alcanza_meta":true|false,"acciones":[{"unidad":"nombre","nivel":"ABO|CBO","accion":"subir|bajar|pausar|mantener","de":N,"a":N,"porque":"breve, con número"}]},{"nombre":"Normal",...},{"nombre":"Optimista",...}],"desinversion":["..."]}
+- modo mensajes: igual pero cada escenario con "conversaciones_proyectadas":N en vez de "facturacion_proyectada" y "alcanza_meta".`;
 
 export async function POST(req) {
   const { searchParams } = new URL(req.url);
   const account = searchParams.get("account");
   const store = searchParams.get("store");
   const goal = +(searchParams.get("goal") || 0);
+  const modo = searchParams.get("modo") || "ventas";
+  const msg = modo === "mensajes";
   if (!account) return Response.json({ error: "falta account" }, { status: 400 });
-  if (!goal) return Response.json({ error: "definí la meta del mes primero" }, { status: 400 });
+  if (!msg && !goal) return Response.json({ error: "definí la meta del mes primero" }, { status: 400 });
 
   const sess = authDisabled() ? { admin: true } : await verifySession(cookies().get(SESSION_COOKIE)?.value);
   if (!sess) return Response.json({ error: "No autorizado" }, { status: 401 });
@@ -51,16 +56,20 @@ export async function POST(req) {
       store ? getStoreRevenue(store, since, until).catch(() => null) : Promise.resolve(null),
     ]);
 
-    // agregamos por unidad de presupuesto (adset si ABO, campaña si CBO)
+    // agregamos por unidad de presupuesto (adset si ABO, campaña si CBO). En mensajes solo contamos
+    // unidades de campañas de mensajería (optimization_goal CONVERSATIONS / destino mensajería).
+    const isMsg = (a) => { const b = budgets[a.adset_id]; return b && b.tipo === "mensajes"; };
     const units = {};
-    let inversion = 0, revenueMeta = 0;
+    let inversion = 0, revenueMeta = 0, convTotal = 0;
     for (const a of ads) {
-      inversion += a.spend; revenueMeta += a.spend * a.roas;
       const b = budgets[a.adset_id];
+      const esMsg = b && b.tipo === "mensajes";
+      if (msg ? !esMsg : esMsg) continue; // filtramos por modo
+      inversion += a.spend; revenueMeta += a.spend * a.roas; convTotal += (a.conversaciones || 0);
       const key2 = b ? b.unidad : "adset:" + a.adset_id;
-      if (!units[key2]) units[key2] = { nombre: (b && b.unidad_nombre) || a.adset || "?", nivel: (b && b.nivel) || "?", campania: (b && b.campaign) || a.campaign || "", budget_diario: b ? b.budget_diario : null, spend: 0, revenue: 0, ventas: 0, activa: false };
+      if (!units[key2]) units[key2] = { nombre: (b && b.unidad_nombre) || a.adset || "?", nivel: (b && b.nivel) || "?", campania: (b && b.campaign) || a.campaign || "", budget_diario: b ? b.budget_diario : null, spend: 0, revenue: 0, ventas: 0, conversaciones: 0, activa: false };
       const u = units[key2];
-      u.spend += a.spend; u.revenue += a.spend * a.roas; u.ventas += a.ventas;
+      u.spend += a.spend; u.revenue += a.spend * a.roas; u.ventas += a.ventas; u.conversaciones += (a.conversaciones || 0);
       if (b && b.status === "ACTIVE") u.activa = true;
     }
     const facturacion = tienda ? tienda.facturacion : Math.round(revenueMeta);
@@ -68,11 +77,16 @@ export async function POST(req) {
     const proyeccion = diasTrans ? Math.round(facturacion / diasTrans * diasMes) : facturacion;
 
     const unidades = Object.values(units)
-      .map((u) => ({ nombre: u.nombre, nivel: u.nivel, campania: u.campania, budget_diario: u.budget_diario, spend_mtd: Math.round(u.spend), roas: u.spend ? +(u.revenue / u.spend).toFixed(1) : 0, ventas: Math.round(u.ventas), activa: u.activa }))
+      .map((u) => ({ nombre: u.nombre, nivel: u.nivel, campania: u.campania, budget_diario: u.budget_diario, spend_mtd: Math.round(u.spend), activa: u.activa, ...(msg ? { conversaciones: Math.round(u.conversaciones), costo_conv: u.conversaciones ? Math.round(u.spend / u.conversaciones) : 0 } : { roas: u.spend ? +(u.revenue / u.spend).toFixed(1) : 0, ventas: Math.round(u.ventas) }) }))
       .sort((a, b) => b.spend_mtd - a.spend_mtd).slice(0, 25);
 
-    const snapshot = {
-      meta: goal, facturacion_mtd: facturacion, inversion_mtd: Math.round(inversion), mer,
+    const snapshot = msg ? {
+      modo, dias_transcurridos: diasTrans, dias_del_mes: diasMes, dias_restantes: diasRestan,
+      conversaciones_mtd: convTotal, inversion_mtd: Math.round(inversion), costo_conv: convTotal ? Math.round(inversion / convTotal) : 0,
+      proyeccion_conversaciones: diasTrans ? Math.round(convTotal / diasTrans * diasMes) : convTotal,
+      unidades,
+    } : {
+      modo, meta: goal, facturacion_mtd: facturacion, inversion_mtd: Math.round(inversion), mer,
       fuente_facturacion: tienda ? "tienda" : "meta (pixel)",
       dias_transcurridos: diasTrans, dias_del_mes: diasMes, dias_restantes: diasRestan,
       proyeccion_sin_cambios: proyeccion, gap_vs_meta: Math.round(goal - proyeccion),

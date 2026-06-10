@@ -1,6 +1,6 @@
 import { cookies } from "next/headers";
 import { getAds, getAdsetTargeting, getAdStatuses } from "@/lib/meta";
-import { buildRows, buildAudienceRows, classifyTargeting } from "@/lib/nomenclatura";
+import { buildRows, buildAudienceRows, classifyTargeting, targetingTipo } from "@/lib/nomenclatura";
 import { enrichWithSheet } from "@/lib/sheet";
 import { SESSION_COOKIE, verifySession, authDisabled, canSeeAccount } from "@/lib/auth";
 
@@ -26,10 +26,10 @@ export async function GET(req) {
       getAdsetTargeting(account).catch(() => ({})),
       getAdStatuses(account).catch(() => null),
     ]);
-    const audMap = {};
-    for (const id in targeting) { const lbl = classifyTargeting(targeting[id]); if (lbl) audMap[id] = lbl; }
+    const audMap = {}, tipoMap = {};
+    for (const id in targeting) { const lbl = classifyTargeting(targeting[id]); if (lbl) audMap[id] = lbl; tipoMap[id] = targetingTipo(targeting[id]); }
     const statusMap = statuses && Object.keys(statuses).length ? statuses : null;
-    let rows = buildRows(ads, audMap, statusMap);
+    let rows = buildRows(ads, audMap, statusMap, tipoMap);
     rows = await enrichWithSheet(rows, tab); // si hay pestaña, cruza el Sheet; si no, devuelve las rows igual
     return Response.json({ rows, audiencias: buildAudienceRows(ads, audMap) });
   } catch (e) {
