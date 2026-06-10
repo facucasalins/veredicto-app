@@ -72,7 +72,8 @@ function aggregate(rows, dim) {
 }
 
 const nf = new Intl.NumberFormat("es-AR");
-const money = (n) => "$" + nf.format(Math.round(n));
+// Montos chicos (< 3 dígitos) con fracción → 2 decimales, para no perder los centavos (cuentas en USD).
+const money = (n) => "$" + (Math.abs(n) < 100 && !Number.isInteger(n) ? Number(n).toFixed(2) : nf.format(Math.round(n)));
 const short = (n) => { n = Math.round(n); if (Math.abs(n) >= 1e6) return "$" + (n / 1e6).toFixed(1).replace(".0", "") + "M"; if (Math.abs(n) >= 1e3) return "$" + Math.round(n / 1e3) + "k"; return "$" + nf.format(n); };
 // Fingerprint de tiempo (HH.MM.SS) que identifica cada creativo. Vive en row.id ("concepto (HH.MM.SS)").
 const tf = (r) => { const m = String(r?.id || "").match(/\((\d{1,2}\.\d{2}\.\d{2})\)/); return m ? m[1] : null; };
@@ -501,7 +502,7 @@ function Analisis({ withV, stats, audiencias, tnSummary, u, accountName, periodo
   // Resumen COMPACTO calculado acá (no mandamos anuncios crudos → pocos tokens).
   const snapshot = useMemo(() => {
     const reliable = withV.filter((r) => r.spend >= u.pisoSpend);
-    const m = (g) => msg ? { k: g.key, costo_conv: Math.round(g.costoConv || 0), conversaciones: Math.round(g.conversaciones || 0), spend: Math.round(g.spend), ads: g.n } : { k: g.key, roas: +g.roas.toFixed(1), spend: Math.round(g.spend), ventas: Math.round(g.ventas), ads: g.n };
+    const m = (g) => msg ? { k: g.key, costo_conv: +(g.costoConv || 0).toFixed(2), conversaciones: Math.round(g.conversaciones || 0), spend: Math.round(g.spend), ads: g.n } : { k: g.key, roas: +g.roas.toFixed(1), spend: Math.round(g.spend), ventas: Math.round(g.ventas), ads: g.n };
     const top = (dim) => [...aggregate(reliable, dim)].sort((a, b) => msg ? (a.costoConv || 9e12) - (b.costoConv || 9e12) : b.roas - a.roas).slice(0, 5).map(m);
     const aud = (audiencias && audiencias.length ? audiencias : []).map((g) => ({ ...g, roas: g.spend ? g.revenue / g.spend : 0, costoConv: g.conversaciones ? g.spend / g.conversaciones : 0 })).sort((a, b) => msg ? (a.costoConv || 9e12) - (b.costoConv || 9e12) : b.roas - a.roas).slice(0, 6).map(m);
     const r2 = (r) => msg ? { nombre: r.nombre, costo_conv: r.costoConv, conversaciones: r.conversaciones, spend: r.spend, ya_pausado: r.activa === false } : { nombre: r.nombre, roas: r.roas, spend: r.spend, ventas: r.ventas, ya_pausado: r.activa === false };
@@ -512,7 +513,7 @@ function Analisis({ withV, stats, audiencias, tnSummary, u, accountName, periodo
       modo, cuenta: accountName || "—", periodo,
       inversion: stats.spendTotal,
       ...(msg
-        ? { conversaciones: stats.convTotal, costo_conv_prom: Math.round(stats.costoConvProm) }
+        ? { conversaciones: stats.convTotal, costo_conv_prom: +stats.costoConvProm.toFixed(2) }
         : { ventas: stats.ventasTotal, cpa: Math.round(stats.cpaProm), roas_cuenta: +stats.accountRoas.toFixed(1), tienda: tnSummary ? { facturacion: tnSummary.facturacion, mer: tnSummary.mer, roas_pixel: +(tnSummary.roasMeta || 0).toFixed(1) } : null }),
       veredictos: stats.counts,
       umbral: msg ? { costo_conv_max: u.costoMax === Infinity ? null : u.costoMax, piso_spend: u.pisoSpend || null } : { roas_min: u.roasMin || null, cpa_max: u.cpaMax === Infinity ? null : u.cpaMax, piso_spend: u.pisoSpend || null },

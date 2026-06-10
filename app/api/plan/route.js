@@ -77,12 +77,12 @@ export async function POST(req) {
     const proyeccion = diasTrans ? Math.round(facturacion / diasTrans * diasMes) : facturacion;
 
     const unidades = Object.values(units)
-      .map((u) => ({ nombre: u.nombre, nivel: u.nivel, campania: u.campania, budget_diario: u.budget_diario, spend_mtd: Math.round(u.spend), activa: u.activa, ...(msg ? { conversaciones: Math.round(u.conversaciones), costo_conv: u.conversaciones ? Math.round(u.spend / u.conversaciones) : 0 } : { roas: u.spend ? +(u.revenue / u.spend).toFixed(1) : 0, ventas: Math.round(u.ventas) }) }))
+      .map((u) => ({ nombre: u.nombre, nivel: u.nivel, campania: u.campania, budget_diario: u.budget_diario, spend_mtd: Math.round(u.spend), activa: u.activa, ...(msg ? { conversaciones: Math.round(u.conversaciones), costo_conv: u.conversaciones ? +(u.spend / u.conversaciones).toFixed(2) : 0 } : { roas: u.spend ? +(u.revenue / u.spend).toFixed(1) : 0, ventas: Math.round(u.ventas) }) }))
       .sort((a, b) => b.spend_mtd - a.spend_mtd).slice(0, 25);
 
     const snapshot = msg ? {
       modo, dias_transcurridos: diasTrans, dias_del_mes: diasMes, dias_restantes: diasRestan,
-      conversaciones_mtd: convTotal, inversion_mtd: Math.round(inversion), costo_conv: convTotal ? Math.round(inversion / convTotal) : 0,
+      conversaciones_mtd: convTotal, inversion_mtd: Math.round(inversion), costo_conv: convTotal ? +(inversion / convTotal).toFixed(2) : 0,
       proyeccion_conversaciones: diasTrans ? Math.round(convTotal / diasTrans * diasMes) : convTotal,
       unidades,
     } : {
