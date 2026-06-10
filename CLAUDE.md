@@ -16,14 +16,17 @@ respuestas concisas.
 
 - `lib/meta.js` — cliente Marketing API. `getAccounts()`, `getAds(account, preset, range?)` (range
   `{since,until}` para fechas custom), `getAccountSpend(account, since, until)` (spend a nivel cuenta,
-  modo Tienda Nube), **`getAdsetTargeting(account)`** (targeting REAL de cada adset, 1 call paginada)
-  y **`getAdStatuses(account)`** (effective_status por ad → activo/pausado).
-- `lib/nomenclatura.js` — parser del nombre + armado de filas. `buildRows(ads, audMap?, statusMap?)`
+  modo Tienda Nube), **`getAdsetTargeting(account)`** (targeting REAL de cada adset, 1 call paginada),
+  **`getAdStatuses(account)`** (effective_status por ad → activo/pausado) y **`getAdsetBudgets(account)`**
+  (budget real por adset/campaña; detecta ABO vs CBO; para el Plan). `getAds` extrae `ventas` (compras)
+  y `conversaciones` (`messaging_conversation_started_7d`, para campañas de mensajes).
+- `lib/nomenclatura.js` — parser del nombre + armado de filas. `buildRows(ads, audMap?, statusMap?, tipoMap?)`
   agrupa por **fingerprint de tiempo** `(HH.MM.SS)`; cada fila: `id`, `ang`, `sec`, `split`, `aud`,
-  `hook`, `fmt`, `spend`, `roas`, `cpa`, `ventas`, `activa` (true/false/null), `breakdown` (campaña/
-  adset/aud). **`classifyTargeting(adset)`** clasifica la audiencia desde el targeting real
-  (Retargeting Hot/Tibio por intención de las audiencias custom, Lookalike+%, Advantage+, Amplio/
-  Intereses, Mensajería). `parseAudience(nombre)` queda como **fallback** si no hay targeting.
+  `hook`, `fmt`, `spend`, `roas`, `cpa`, `ventas`, `conversaciones`, `costoConv`, `tipo` (ventas|mensajes),
+  `activa` (true/false/null), `breakdown` (campaña/adset/aud). **`classifyTargeting(adset)`** clasifica
+  la audiencia desde el targeting real (Retargeting Hot/Tibio por intención de las audiencias custom,
+  Lookalike+%, Advantage+, Amplio/Intereses, Mensajería). **`targetingTipo(adset)`** marca ventas|mensajes
+  por optimization_goal/destination_type. `parseAudience(nombre)` queda como **fallback**.
 - `lib/sheet.js` — cruza el Google Sheet (cuenta de servicio, JWT RS256). Cruce por `(HH.MM.SS)` de
   `nuevo_nombre`. `listTabs()`, `enrichWithSheet(rows, tab)`. Degrada: sin tab devuelve `sheet:null`.
 - `lib/auth.js` — login por cliente. Cookie firmada HMAC-SHA256 con **Web Crypto** (Edge + Node).
@@ -35,11 +38,15 @@ respuestas concisas.
 - `middleware.js` — protege las páginas (redirige a `/login`). Las rutas `/api` hacen su propia
   verificación (JSON 401/403) y quedan fuera del matcher.
 - `app/page.jsx` — TODO el front en un archivo grande (CSS embebido). Componentes: Cliente, Dash,
-  **Analisis** (el cerebro), Hoy, Top, Panel, **Biblioteca** (Tus Ganadores + mapa probado/sin-probar),
-  **Generar** (4 tipos + modo Iterar/Explorar). NO reescribir entero; editar quirúrgico.
+  **Analisis** (cerebro), **Plan** (cómo llegar al objetivo), Hoy, Top, Panel, **Biblioteca**
+  (Tus Ganadores + mapa probado/sin-probar), **Generar** (4 tipos + modo Iterar/Explorar). Toggle
+  **MEDIR: Ventas | Mensajes** (`modo`) que filtra y cambia la métrica de toda la app. NO reescribir
+  entero; editar quirúrgico. `money()` muestra 2 decimales en montos < 100 no enteros (cuentas USD).
 - `app/api/*` — `accounts` (filtra por sesión), `ads` (insights + targeting + estado en paralelo,
-  cruza Sheet), `login`, `logout`, `sheets/tabs`, `tiendanube/{stores,summary}`, `copy` (generador),
-  **`analyze`** (cerebro), **`match-hooks`** (cruce de hooks reales vs biblioteca).
+  cruza Sheet, arma tipoMap), `login`, `logout`, `sheets/tabs` (scopeada por `tabs` de sesión),
+  `tiendanube/{stores,summary}` (stores scopeadas por cuenta), `copy` (generador), **`analyze`**
+  (cerebro), **`match-hooks`** (hooks reales vs biblioteca), **`plan`** (escenarios para el objetivo,
+  budget real ABO/CBO). Las rutas de IA son mode-aware (ventas/mensajes).
 
 Alias de imports: `@/lib/...` (en `jsconfig.json`).
 
@@ -53,6 +60,14 @@ pushear a `main` sin romper prod.
 - **Tienda Nube** (`TIENDANUBE_STORES`, `TIENDANUBE_UA`): selector 🛒 solo si hay tiendas. Muestra
   banda **Facturación (tienda) vs Inversión (Meta) + MER** (mismo período). El objetivo del mes del
   Dashboard también toma la facturación de la tienda.
+- **Modo Ventas / Mensajes** (toggle "MEDIR" en el header): cada anuncio se clasifica por el objetivo
+  del adset. En **Ventas** se excluyen las campañas de mensajes (y al revés). En **Mensajes** toda la
+  métrica cambia a **conversaciones iniciadas** y **costo por conversación** (sin ROAS/MER/facturación):
+  veredicto, umbral (Costo x conv máx), KPIs, Top, Hoy, Panel, Cliente, cerebro y Plan se adaptan.
+  El objetivo de facturación se oculta en mensajes. Estos clientes usan solo Meta + Sheet (sin Tienda Nube).
+- **Plan (`/api/plan`)**: cómo llegar al objetivo del mes. Lee el budget real por unidad (adset si ABO,
+  campaña si CBO) del mes en curso y devuelve 3 escenarios (pesimista/normal/optimista) de cuánto/dónde
+  invertir, vía MER (no lineal) + desinversión. En modo mensajes optimiza conversaciones/costo (sin meta).
 - **Audiencias desde targeting real**: la clasificación sale del spec de Meta, no del nombre del
   conjunto (Hot/Tibio por intención de las audiencias). Fallback al nombre si falla.
 - **Estado activo/pausado**: cada creativo muestra `⏸ PAUSADA` si su `effective_status` no es ACTIVE.
