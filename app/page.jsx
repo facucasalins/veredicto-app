@@ -1,5 +1,5 @@
 "use client";
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 
 // ─────────────────────────────────────────────────────────────
 // VEREDICTO — Fase 1 · estética retro-VHS 80s
@@ -322,6 +322,7 @@ export default function App() {
             <button className={"tab" + (effView === "panel" ? " active" : "")} onClick={() => setView("panel")}>PANEL</button>
             <button className={"tab" + (effView === "bib" ? " active" : "")} onClick={() => setView("bib")}>BIBLIOTECA</button>
             <button className={"tab" + (effView === "gen" ? " active" : "")} onClick={() => setView("gen")}>GENERAR</button>
+            <button className={"tab" + (effView === "chat" ? " active" : "")} onClick={() => setView("chat")}>PREGUNTAR</button>
           </nav>
 
           {!!withV.length && (
@@ -346,6 +347,7 @@ export default function App() {
           {effView === "panel" && (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Panel rows={rows} stats={stats} sort={sort} setSortKey={setSortKey} modo={modo} />)}
           {effView === "bib" && <Biblioteca rows={withV} hookMatch={hookMatch} setHookMatch={setHookMatch} />}
           {effView === "gen" && <Generar rows={withV} accountName={(accounts.find((a) => a.id === account) || {}).name || ""} />}
+          {effView === "chat" && (!account ? <EmptyState account={account} loading={loading} err={err} /> : <Chat account={account} accountName={(accounts.find((a) => a.id === account) || {}).name || ""} store={tnStore} tab={sheetTab} accCur={accCur} />)}
         </>
       )}
     </div>
@@ -559,6 +561,78 @@ function Historial({ items, render }) {
         </div>
       ))}
     </div>
+  );
+}
+
+// ─────────── Vista: PREGUNTAR (chat capado a los datos de la cuenta) ───────────
+// Preguntas en lenguaje natural sobre la cuenta (Meta + Tienda Nube + planilla). El backend
+// (/api/chat) corre tool-use con herramientas read-only scopeadas a esta cuenta: no puede
+// responder nada que no salga de esos datos. Historial por cliente en localStorage.
+const CHAT_SUGS = [
+  "¿Cuánto consume por día toda la cuenta?",
+  "Listame los anuncios que más consumieron",
+  "Top 10 productos más vendidos en los últimos 60 días",
+  "¿Qué familia de hooks rinde mejor según la planilla?",
+];
+function Chat({ account, accountName, store, tab, accCur }) {
+  const chatKey = "nusa_chat_" + (account || "x");
+  const [msgs, setMsgs] = useState([]);
+  useEffect(() => { setMsgs(histLoad(chatKey)); }, [chatKey]); // en useEffect: localStorage no existe en SSR
+  const [q, setQ] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState("");
+  const endRef = useRef(null);
+  useEffect(() => { endRef.current?.scrollIntoView({ block: "nearest" }); }, [msgs, loading]);
+
+  const enviar = async (texto) => {
+    const text = String(texto ?? q).trim();
+    if (!text || loading) return;
+    const next = [...msgs, { role: "user", content: text }];
+    setMsgs(next); setQ(""); setLoading(true); setErr("");
+    try {
+      const res = await fetch("/api/chat", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ account, accountName, store, tab, accCur, messages: next.slice(-12) }),
+      });
+      const d = await res.json();
+      if (d.error) throw new Error(d.error);
+      const all = [...next, { role: "assistant", content: d.text }];
+      setMsgs(all);
+      try { localStorage.setItem(chatKey, JSON.stringify(all.slice(-30))); } catch {}
+    } catch (e) { setErr("No se pudo responder: " + e.message); } finally { setLoading(false); }
+  };
+  const limpiar = () => { setMsgs([]); try { localStorage.removeItem(chatKey); } catch {} };
+
+  return (
+    <section className="an">
+      <div className="anhead">
+        <div><div className="antitle">▸ PREGUNTALE A LA CUENTA</div><div className="ansub">Preguntas en lenguaje natural sobre {accountName || "la cuenta"}: Meta{store ? " + 🛒 " + store : ""}{tab ? " + planilla " + tab : ""}. Solo contesta sobre estos datos — nada más.</div></div>
+        {msgs.length > 0 && <button className="anbtn" onClick={limpiar}>✕ LIMPIAR</button>}
+      </div>
+      <div className="chatbox">
+        {!msgs.length && !loading && (
+          <div className="chatsugs">
+            <div className="chatsugtitle">PROBÁ CON:</div>
+            {CHAT_SUGS.map((s, i) => <button key={i} className="chatsug" onClick={() => enviar(s)}>{s}</button>)}
+          </div>
+        )}
+        <div className="chatmsgs">
+          {msgs.map((m, i) => (
+            <div key={i} className={"chatmsg " + (m.role === "user" ? "user" : "ai")}>
+              <span className="chatwho">{m.role === "user" ? "VOS" : "NUSA"}</span>
+              <div className="chattext">{m.content}</div>
+            </div>
+          ))}
+          {loading && <div className="chatmsg ai"><span className="chatwho">NUSA</span><div className="chattext chatthinking">● consultando la cuenta…</div></div>}
+          {err && <div className="generr">{err}</div>}
+          <div ref={endRef} />
+        </div>
+        <div className="chatrow">
+          <input className="chatinput" value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") enviar(); }} placeholder="ej: ¿cuánto invertimos esta semana y qué dejó?" disabled={loading} />
+          <button className="anbtn" onClick={() => enviar()} disabled={loading || !q.trim()}>{loading ? "…" : "▶ PREGUNTAR"}</button>
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -1434,6 +1508,22 @@ td{padding:11px 12px;vertical-align:middle;}.num{text-align:right;}.name{font-we
 .histdate{font-weight:700;}
 .histmeta{color:var(--soft);font-size:11px;font-style:italic;}
 .histbody{padding:14px;border-top:2px dashed var(--line);}
+.chatbox{display:flex;flex-direction:column;gap:14px;}
+.chatsugs{display:flex;flex-wrap:wrap;gap:8px;align-items:center;}
+.chatsugtitle{font-family:'Space Mono',monospace;font-size:10px;letter-spacing:2px;color:var(--soft);}
+.chatsug{font-family:'Space Mono',monospace;font-size:12px;color:var(--ink);background:var(--paper2);border:2px solid var(--ink);border-radius:999px;padding:6px 14px;cursor:pointer;}
+.chatsug:hover{background:var(--ink);color:var(--paper);}
+.chatmsgs{display:flex;flex-direction:column;gap:10px;max-height:520px;overflow-y:auto;}
+.chatmsg{display:flex;gap:10px;align-items:flex-start;}
+.chatwho{font-family:'Space Mono',monospace;font-size:9px;font-weight:700;letter-spacing:1px;padding:3px 8px;border-radius:6px;border:2px solid var(--ink);background:var(--paper2);flex-shrink:0;margin-top:2px;}
+.chatmsg.user .chatwho{background:var(--c6);color:var(--paper);border-color:var(--c6);}
+.chattext{font-family:'Space Mono',monospace;font-size:13px;line-height:1.55;color:var(--ink);white-space:pre-wrap;background:var(--paper2);border:2px solid var(--ink);border-radius:10px;padding:10px 14px;box-shadow:3px 3px 0 var(--ink);}
+.chatmsg.user .chattext{background:var(--paper);box-shadow:none;}
+.chatthinking{color:var(--soft);font-style:italic;animation:pulse 1.2s ease-in-out infinite;}
+@keyframes pulse{0%,100%{opacity:.5}50%{opacity:1}}
+.chatrow{display:flex;gap:10px;}
+.chatinput{flex:1;font-family:'Space Mono',monospace;font-size:13px;color:var(--ink);background:var(--paper2);border:2px solid var(--ink);border-radius:10px;padding:11px 14px;outline:none;}
+.chatinput:focus{box-shadow:3px 3px 0 var(--ink);}
 .anaccion{display:flex;gap:11px;align-items:flex-start;padding:9px 0;border-top:1px solid var(--line);}
 .anaccion:first-of-type{border-top:none;}
 .anprio{font-family:'Space Mono',monospace;font-size:9px;font-weight:700;letter-spacing:1px;color:#fff;border-radius:4px;padding:3px 7px;flex-shrink:0;margin-top:1px;}

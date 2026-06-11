@@ -103,6 +103,14 @@ pushear a `main` sin romper prod.
   **localStorage** (clave `nusa_hist_an_<account>` / `nusa_hist_plan_<account>`, tope 15, por browser).
   Acordeón abajo de la lectura fresca, lo más nuevo arriba; al abrir renderiza con los mismos
   componentes (`AnalisisOut` / `PlanOut`). Sirve para auditar qué dijo y qué decisiones se tomaron.
+- **Chat de la cuenta (`/api/chat`, pestaña PREGUNTAR)**: preguntas en lenguaje natural sobre los datos
+  de la cuenta elegida. Loop de **tool-use** (máx 6 vueltas) con herramientas read-only scopeadas:
+  `meta_resumen` (spend cuenta, opcional día por día), `meta_anuncios` (rows con estado/audiencia, top
+  100 por spend), `tiendanube_resumen`, `tiendanube_productos` (line items de órdenes PAGADAS) y
+  `sheet_analisis` (análisis cualitativo de la pestaña elegida). **Capado doble**: el prompt rechaza
+  todo lo que no sea de la cuenta con respuesta fija, y las únicas tools que existen consultan esa
+  cuenta (account validado con `canSeeAccount`). Montos de Meta convertidos a pesos (misma regla que
+  el panel). Conversación por cliente en localStorage (`nusa_chat_<account>`, tope 30 mensajes).
 - **Audiencias desde targeting real**: la clasificación sale del spec de Meta, no del nombre del
   conjunto (Hot/Tibio por intención de las audiencias). Fallback al nombre si falla.
 - **Estado activo/pausado**: cada creativo muestra `⏸ PAUSADA` si su `effective_status` no es ACTIVE.
