@@ -286,7 +286,7 @@ export default function App() {
       </header>
 
       {tnStore && (
-        <section className="tnband">
+        <section className={"tnband" + (tnLoading ? " tnloading" : "")}>
           <div className="tnband-head">
             <span className="tntag">🛒 TIENDA NUBE · {tnStore}</span>
             <div className="modobox"><span className="tncountlab">VENTA =</span>
@@ -1466,6 +1466,9 @@ td{padding:11px 12px;vertical-align:middle;}.num{text-align:right;}.name{font-we
 .logout{font-family:'Space Mono',monospace;font-size:11px;color:var(--paper);background:transparent;border:1px solid rgba(242,235,217,.4);border-radius:5px;padding:3px 9px;cursor:pointer;}
 .logout:hover{background:rgba(242,235,217,.12);border-color:var(--paper);}
 .tnband{background:#1A1A17;color:#F2EBD9;padding:16px 22px 16px;border:2px solid var(--ink);border-top:4px solid #C0392B;border-radius:12px;box-shadow:5px 5px 0 #1e181233;margin-bottom:18px;}
+/* cargando: barras a 45° que se deslizan de fondo (barber pole), para que se note que aún no llegó la data */
+.tnband.tnloading{background-image:linear-gradient(45deg,rgba(242,235,217,0.05) 25%,transparent 25%,transparent 50%,rgba(242,235,217,0.05) 50%,rgba(242,235,217,0.05) 75%,transparent 75%,transparent);background-size:42px 42px;animation:tnstripes 0.9s linear infinite;}
+@keyframes tnstripes{from{background-position:0 0;}to{background-position:42px 0;}}
 .tnband-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:12px;flex-wrap:wrap;}
 .tntag{font-family:'Space Mono',monospace;font-size:12px;letter-spacing:1.5px;color:#E9DEC8;}
 .tnrange{font-family:'Space Mono',monospace;font-size:11px;color:#9A937F;margin-left:auto;}
