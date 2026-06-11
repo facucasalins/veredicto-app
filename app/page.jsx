@@ -541,8 +541,43 @@ function EmptyState({ account, loading, err }) {
 // es por browser/máquina. Acordeón con lo más nuevo arriba; al abrir, renderiza EXACTAMENTE lo
 // mismo que una lectura recién generada (mismos componentes).
 const histLoad = (key) => { try { const v = JSON.parse(localStorage.getItem(key) || "[]"); return Array.isArray(v) ? v : []; } catch { return []; } };
-const histPush = (key, entry, cap = 15) => { try { const v = [entry, ...histLoad(key)].slice(0, cap); localStorage.setItem(key, JSON.stringify(v)); return v; } catch { return histLoad(key); } };
 const fdate = (t) => new Date(t).toLocaleString("es-AR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
+
+// Historial HÍBRIDO: localStorage siempre (cache local + fallback) y, si Upstash está conectado
+// (/api/history responde enabled:true), también server-side → compartido entre máquinas y usuarios
+// con acceso a la cuenta. Si el server tiene data manda el server; si el server está vacío y este
+// browser tiene historial viejo, lo migra solo (primera vez). Sin Upstash todo sigue como antes.
+function useHistSync(kind, account) {
+  const key = "nusa_" + kind + "_" + (account || "x");
+  const [items, setItems] = useState([]);
+  useEffect(() => {
+    let cancelled = false;
+    const local = histLoad(key);
+    setItems(local);
+    if (!account) return;
+    fetch("/api/history?kind=" + kind + "&account=" + account)
+      .then((r) => r.json())
+      .then((j) => {
+        if (cancelled || !j || j.enabled !== true) return;
+        const server = Array.isArray(j.items) ? j.items : [];
+        if (server.length) {
+          setItems(server);
+          try { localStorage.setItem(key, JSON.stringify(server)); } catch {}
+        } else if (local.length) {
+          // server recién conectado y vacío → subimos lo que había en este browser
+          fetch("/api/history", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ kind, account, items: local }) }).catch(() => {});
+        }
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [key, kind, account]);
+  const save = (v) => {
+    setItems(v);
+    try { localStorage.setItem(key, JSON.stringify(v)); } catch {}
+    if (account) fetch("/api/history", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ kind, account, items: v }) }).catch(() => {});
+  };
+  return [items, save];
+}
 
 function Historial({ items, render }) {
   const [open, setOpen] = useState(null);
@@ -575,9 +610,8 @@ const CHAT_SUGS = [
   "¿Qué familia de hooks rinde mejor según la planilla?",
 ];
 function Chat({ account, accountName, store, tab, accCur }) {
-  const chatKey = "nusa_chat_" + (account || "x");
-  const [msgs, setMsgs] = useState([]);
-  useEffect(() => { setMsgs(histLoad(chatKey)); }, [chatKey]); // en useEffect: localStorage no existe en SSR
+  // Conversación por cliente: localStorage + Upstash si está conectado (compartida entre máquinas)
+  const [msgs, saveMsgs] = useHistSync("chat", account);
   const [q, setQ] = useState("");
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
@@ -588,7 +622,7 @@ function Chat({ account, accountName, store, tab, accCur }) {
     const text = String(texto ?? q).trim();
     if (!text || loading) return;
     const next = [...msgs, { role: "user", content: text }];
-    setMsgs(next); setQ(""); setLoading(true); setErr("");
+    saveMsgs(next); setQ(""); setLoading(true); setErr("");
     try {
       const res = await fetch("/api/chat", {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -596,12 +630,10 @@ function Chat({ account, accountName, store, tab, accCur }) {
       });
       const d = await res.json();
       if (d.error) throw new Error(d.error);
-      const all = [...next, { role: "assistant", content: d.text }];
-      setMsgs(all);
-      try { localStorage.setItem(chatKey, JSON.stringify(all.slice(-30))); } catch {}
+      saveMsgs([...next, { role: "assistant", content: d.text }].slice(-30));
     } catch (e) { setErr("No se pudo responder: " + e.message); } finally { setLoading(false); }
   };
-  const limpiar = () => { setMsgs([]); try { localStorage.removeItem(chatKey); } catch {} };
+  const limpiar = () => saveMsgs([]);
 
   return (
     <section className="an">
@@ -697,10 +729,8 @@ function Analisis({ withV, stats, audiencias, tnSummary, u, accountName, periodo
     };
   }, [withV, stats, audiencias, tnSummary, u, accountName, periodo, msg, modo]);
 
-  // Historial por cliente (se carga en useEffect para no romper la hidratación: localStorage no existe en SSR)
-  const histKey = "nusa_hist_an_" + (account || "x");
-  const [hist, setHist] = useState([]);
-  useEffect(() => { setHist(histLoad(histKey)); }, [histKey]);
+  // Historial por cliente: localStorage + Upstash si está conectado (compartido entre máquinas)
+  const [hist, saveHist] = useHistSync("hist_an", account);
 
   const pedir = async () => {
     setLoading(true); setErr(""); setOut(null);
@@ -709,7 +739,7 @@ function Analisis({ withV, stats, audiencias, tnSummary, u, accountName, periodo
       const data = await res.json();
       if (data.error) throw new Error(data.error);
       setOut(data.analysis);
-      setHist(histPush(histKey, { t: Date.now(), label: (accountName || "—") + " · " + periodo + " · " + modo, out: data.analysis }));
+      saveHist([{ t: Date.now(), label: (accountName || "—") + " · " + periodo + " · " + modo, out: data.analysis }, ...hist].slice(0, 15));
     } catch (e) { setErr("No se pudo analizar: " + e.message); } finally { setLoading(false); }
   };
 
@@ -767,10 +797,8 @@ function Plan({ account, store, goal, plan, setPlan, modo = "ventas", accCur = "
   const msg = modo === "mensajes";
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
-  // Historial por cliente (carga en useEffect: localStorage no existe en SSR)
-  const histKey = "nusa_hist_plan_" + (account || "x");
-  const [hist, setHist] = useState([]);
-  useEffect(() => { setHist(histLoad(histKey)); }, [histKey]);
+  // Historial por cliente: localStorage + Upstash si está conectado (compartido entre máquinas)
+  const [hist, saveHist] = useHistSync("hist_plan", account);
   const pedir = async () => {
     setLoading(true); setErr("");
     try {
@@ -779,7 +807,7 @@ function Plan({ account, store, goal, plan, setPlan, modo = "ventas", accCur = "
       const d = await res.json();
       if (d.error) throw new Error(d.error);
       setPlan(d);
-      setHist(histPush(histKey, { t: Date.now(), label: (msg ? "mensajes" : "meta " + money(goal)) + " · " + modo, modo, plan: d.plan, snapshot: d.snapshot }));
+      saveHist([{ t: Date.now(), label: (msg ? "mensajes" : "meta " + money(goal)) + " · " + modo, modo, plan: d.plan, snapshot: d.snapshot }, ...hist].slice(0, 15));
     } catch (e) { setErr("No se pudo armar el plan: " + e.message); } finally { setLoading(false); }
   };
   const p = plan && plan.plan;

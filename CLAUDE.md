@@ -49,6 +49,10 @@ respuestas concisas.
   las estadísticas de Tienda Nube; las no canceladas pero sin pagar van aparte (`facturacionPendiente`,
   `ordersPendientes`) y NO suman al titular.
 - `lib/dates.js` — `presetToRange(preset)` → `{since, until}`. Alinea Meta y Tienda Nube al mismo período.
+- `lib/store.js` — storage server-side en **Upstash Redis** (REST, sin dependencias): `storeEnabled()`,
+  `kvGet(key)`, `kvSet(key, value)`. Para historiales/conversaciones compartidos. Sin env vars degrada
+  (el front sigue en localStorage). Lo consume `/api/history` (GET/POST, scopeado por sesión, claves
+  `nusa:<kind>:<account>`, kinds: `hist_an`/`hist_plan`/`chat`).
 - `lib/fx.js` — cotización del **dólar oficial** (Argentina) para no mezclar monedas cuando la cuenta de
   Meta está en USD. `getDolarOficial()` (PROMEDIO de compra y venta = medio del spread, cache en memoria
   ~1h) y `convertMonto(monto, from, to)` (solo ARS↔USD). Fuente: dolarapi.com, fallback criptoya.com.
@@ -99,10 +103,13 @@ pushear a `main` sin romper prod.
   invertir + desinversión. Proyecta desde el **ROAS por unidad con decaimiento por saturación** — NUNCA
   desde el MER: la facturación la empujan varios canales (Google/TikTok/orgánico) y acá solo se ve Meta,
   así que el MER está inflado y solo sirve de contexto. En modo mensajes optimiza conversaciones/costo.
-- **Historial de Análisis y Plan**: cada lectura del cerebro y cada plan quedan guardados con fecha en
-  **localStorage** (clave `nusa_hist_an_<account>` / `nusa_hist_plan_<account>`, tope 15, por browser).
+- **Historial de Análisis y Plan**: cada lectura del cerebro y cada plan quedan guardados con fecha.
   Acordeón abajo de la lectura fresca, lo más nuevo arriba; al abrir renderiza con los mismos
   componentes (`AnalisisOut` / `PlanOut`). Sirve para auditar qué dijo y qué decisiones se tomaron.
+  **Persistencia híbrida** (`useHistSync` + `/api/history`): localStorage siempre (cache/fallback) y,
+  si Upstash está conectado, también server-side → compartido entre máquinas/usuarios de la cuenta.
+  Si el server tiene data manda el server; si está vacío y el browser tiene historial viejo, lo migra
+  solo. Lo mismo aplica a las conversaciones del chat (PREGUNTAR).
 - **Chat de la cuenta (`/api/chat`, pestaña PREGUNTAR)**: preguntas en lenguaje natural sobre los datos
   de la cuenta elegida. Loop de **tool-use** (máx 6 vueltas) con herramientas read-only scopeadas:
   `meta_resumen` (spend cuenta, opcional día por día), `meta_anuncios` (rows con estado/audiencia, top
@@ -136,7 +143,10 @@ pushear a `main` sin romper prod.
 - `GOOGLE_SA_EMAIL`, `GOOGLE_SA_KEY` (private_key con `\n`), `SHEET_ID` — Google Sheets.
 - `APP_USERS` (JSON `[{u,p,admin?,accounts?}]`), `SESSION_SECRET` — login.
 - `TIENDANUBE_STORES` (JSON `[{name,store_id,token,account?}]`), `TIENDANUBE_UA`.
-- `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL` (`claude-sonnet-4-6`) — generador, cerebro y match-hooks.
+- `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL` (`claude-sonnet-4-6`) — generador, cerebro, match-hooks y chat.
+- `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN` — historiales/conversaciones server-side
+  (los inyecta sola la integración Upstash del Marketplace de Vercel; opcional, sin esto queda
+  localStorage). Alias legacy soportados: `KV_REST_API_URL`/`KV_REST_API_TOKEN`.
 
 **Gotcha Vercel:** cambiar una env var NO redeploya solo → Deployments → último → ⋯ → Redeploy.
 
