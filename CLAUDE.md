@@ -22,7 +22,9 @@ respuestas concisas.
   el conjunto o la campaña de arriba están apagados devuelve `ADSET_PAUSED`/`CAMPAIGN_PAUSED`, porque
   el effective_status del ad solo no siempre refleja al padre) y **`getAdsetBudgets(account)`**
   (budget real por adset/campaña; detecta ABO vs CBO; para el Plan). `getAds` extrae `ventas` (compras)
-  y `conversaciones` (`messaging_conversation_started_7d`, para campañas de mensajes).
+  y `conversaciones` (`messaging_conversation_started_7d`, para campañas de mensajes). TODAS las
+  llamadas paginan siguiendo `paging.next` — sin eso Meta corta en `limit` y el panel mostraría una
+  foto incompleta SIN avisar (pasaba en `getAds` con >500 anuncios).
 - `lib/nomenclatura.js` — parser del nombre + armado de filas. `buildRows(ads, audMap?, statusMap?, tipoMap?)`
   agrupa por **fingerprint de tiempo** `(HH.MM.SS)`; cada fila: `id`, `ang`, `sec`, `split`, `aud`,
   `hook`, `fmt`, `spend`, `roas`, `cpa`, `ventas`, `conversaciones`, `costoConv`, `tipo` (ventas|mensajes),
@@ -32,6 +34,12 @@ respuestas concisas.
   por optimization_goal/destination_type. `parseAudience(nombre)` queda como **fallback**.
 - `lib/sheet.js` — cruza el Google Sheet (cuenta de servicio, JWT RS256). Cruce por `(HH.MM.SS)` de
   `nuevo_nombre`. `listTabs()`, `enrichWithSheet(rows, tab)`. Degrada: sin tab devuelve `sheet:null`.
+  **Normalización v1→v2 al leer** (el Sheet NO se toca, los videos viejos no se re-procesan):
+  `normCat` unifica vocabulario (Educacional→Educativo); `gancho_familia`/`gancho_formato`/`marca_detectada`
+  son columnas nuevas del prompt Gemini v2 (`docs/gemini-prompt-v2.md`, lo llena n8n) con fallback
+  derivado del `tipo_gancho` viejo (Pregunta→Ruptura, Dato/Número→Evidencia, ...; lo ambiguo "nd").
+  El Top Performers tiene la dimensión **Familia** (Ruptura/Evidencia/Pérdida/Identidad — la misma
+  taxonomía que la Biblioteca).
 - `lib/auth.js` — login por cliente. Cookie firmada HMAC-SHA256 con **Web Crypto** (Edge + Node).
   Usuarios en `APP_USERS`. `authenticate`, `makeSessionToken`, `verifySession`, `canSeeAccount`,
   `authDisabled`.
@@ -74,11 +82,13 @@ pushear a `main` sin romper prod.
 - **Moneda de la cuenta** (toggle "MONEDA CUENTA", `accCur`): se detecta solo el `currency` de la cuenta
   de Meta (override manual Pesos/USD). Si está en **USD**, TODA la plata de Meta se convierte a **pesos**
   al dólar oficial (`lib/fx.js`, promedio compra/venta) para que el panel entero piense y se cargue en
-  pesos: spend, CPA, costo/conv, KPIs del Dashboard, Top Performers, umbral, MER, cerebro y Plan. La
-  conversión de la data de anuncios es client-side (factor `fxRate` sobre `data` → `dataConv`, usa
-  `/api/fx`) así el toggle es instantáneo; el MER y el Plan convierten server-side. Antes el MER mezclaba
-  monedas (88.000x). El umbral (CPA máx, piso de spend) se carga en pesos. Sin cotización degrada a USD
-  y avisa. Solo aplica en modo Ventas.
+  pesos: spend, CPA, costo/conv, KPIs del Dashboard, Top Performers (incluye **audiencias** y el
+  **breakdown** del acordeón), umbral, MER, cerebro y Plan. La conversión de la data de anuncios es
+  client-side (factor `fxRate` sobre `data` → `dataConv` y `audiencias` → `audConv`, usa `/api/fx`)
+  así el toggle es instantáneo; el MER y el Plan convierten server-side (el Plan con o SIN tienda, en
+  ambos modos). Antes el MER mezclaba monedas (88.000x). El umbral (CPA máx, piso de spend) se carga
+  en pesos. Sin cotización degrada a USD y avisa. La conversión aplica en ambos modos (en mensajes
+  convierte el costo/conv); el toggle de override solo se muestra en Ventas.
 - **Modo Ventas / Mensajes** (toggle "MEDIR" en el header): cada anuncio se clasifica por el objetivo
   del adset. En **Ventas** se excluyen las campañas de mensajes (y al revés). En **Mensajes** toda la
   métrica cambia a **conversaciones iniciadas** y **costo por conversación** (sin ROAS/MER/facturación):
@@ -86,7 +96,13 @@ pushear a `main` sin romper prod.
   El objetivo de facturación se oculta en mensajes. Estos clientes usan solo Meta + Sheet (sin Tienda Nube).
 - **Plan (`/api/plan`)**: cómo llegar al objetivo del mes. Lee el budget real por unidad (adset si ABO,
   campaña si CBO) del mes en curso y devuelve 3 escenarios (pesimista/normal/optimista) de cuánto/dónde
-  invertir, vía MER (no lineal) + desinversión. En modo mensajes optimiza conversaciones/costo (sin meta).
+  invertir + desinversión. Proyecta desde el **ROAS por unidad con decaimiento por saturación** — NUNCA
+  desde el MER: la facturación la empujan varios canales (Google/TikTok/orgánico) y acá solo se ve Meta,
+  así que el MER está inflado y solo sirve de contexto. En modo mensajes optimiza conversaciones/costo.
+- **Historial de Análisis y Plan**: cada lectura del cerebro y cada plan quedan guardados con fecha en
+  **localStorage** (clave `nusa_hist_an_<account>` / `nusa_hist_plan_<account>`, tope 15, por browser).
+  Acordeón abajo de la lectura fresca, lo más nuevo arriba; al abrir renderiza con los mismos
+  componentes (`AnalisisOut` / `PlanOut`). Sirve para auditar qué dijo y qué decisiones se tomaron.
 - **Audiencias desde targeting real**: la clasificación sale del spec de Meta, no del nombre del
   conjunto (Hot/Tibio por intención de las audiencias). Fallback al nombre si falla.
 - **Estado activo/pausado**: cada creativo muestra `⏸ PAUSADA` si su `effective_status` no es ACTIVE.
@@ -94,6 +110,9 @@ pushear a `main` sin romper prod.
 - **Cerebro (`/api/analyze`)**: analista read-only con Claude Sonnet 4.6. Recibe un resumen YA
   CALCULADO (rankings, MER vs ROAS pixel, veredictos, qué sangra, receta, umbral) y devuelve
   diagnóstico + acciones priorizadas. On-demand (botón "Pedir lectura"), grounded, ~2-3¢ por lectura.
+  El prompt es **multi-canal-aware** (igual que el Plan): el MER incluye Google/TikTok/orgánico, así
+  que tiene prohibido acreditarle a Meta toda la brecha MER vs ROAS pixel o proyectar con el MER —
+  para juzgar Meta mandan el ROAS del pixel y las ventas atribuidas.
 - **Generador (`/api/copy`)**: hooks / guion / copy / ángulos desde la receta ganadora, con modo
   **Iterar** (escalar lo que funciona) o **Explorar** (salir de la caja). Sonnet 4.6.
 - **Biblioteca**: pestaña **★ Tus Ganadores** (hooks reales del cliente top por ROAS, data pura) y

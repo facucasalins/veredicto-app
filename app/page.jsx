@@ -58,11 +58,14 @@ function aggregate(rows, dim) {
   };
   rows.forEach((r) => {
     if (dim === "cat") {
-      const [p, s] = (r.split || "100/0").split("/").map(Number);
+      // split malformado ("nd", vacío) → 100/0; un NaN acá envenenaría todo el bucket del ranking
+      let [p, s] = (r.split || "100/0").split("/").map(Number);
+      if (!isFinite(p) || !isFinite(s)) { p = 100; s = 0; }
       add(r.ang, p / 100, r); if (r.sec && r.sec !== "—") add(r.sec, s / 100, r);
     } else {
       const key = dim === "aud" ? r.aud
         : dim === "hook" ? (r.sheet?.tipo_gancho || r.hook)
+        : dim === "fam" ? r.sheet?.familia // familia psicológica del hook (Ruptura/Evidencia/Pérdida/Identidad); solo con Sheet
         : dim === "ang" ? (r.sheet?.angulo || r.ang)
         : r.fmt;
       add(key, 1, r);
@@ -194,7 +197,12 @@ export default function App() {
     spend: r.spend * fxRate,
     cpa: r.cpa ? r.cpa * fxRate : r.cpa,
     costoConv: r.costoConv ? r.costoConv * fxRate : r.costoConv,
+    breakdown: (r.breakdown || []).map((b) => ({ ...b, spend: b.spend * fxRate })),
   })), [data, fxRate]);
+  // Las audiencias (ranking por targeting real) también traen plata de Meta → mismo factor.
+  const audConv = useMemo(() => fxRate === 1 ? audiencias : audiencias.map((g) => ({
+    ...g, spend: g.spend * fxRate, revenue: g.revenue * fxRate,
+  })), [audiencias, fxRate]);
   // Filtramos por modo: en Ventas excluimos campañas de mensajes (nunca dan buen ROAS) y viceversa.
   const dataModo = useMemo(() => dataConv.filter((r) => (r.tipo || "ventas") === modo), [dataConv, modo]);
   const withV = useMemo(() => dataModo.map((r) => ({ ...r, v: veredicto(r, ueff, modo) })), [dataModo, ueff, modo]);
@@ -330,11 +338,11 @@ export default function App() {
             </section>
           )}
 
-          {effView === "an" && (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Analisis withV={withV} stats={stats} audiencias={audiencias} tnSummary={tnSummary} u={ueff} accountName={(accounts.find((a) => a.id === account) || {}).name || ""} periodo={preset === "custom" && cSince && cUntil ? cSince + " → " + cUntil : preset} analysis={analysis} setAnalysis={setAnalysis} modo={modo} />)}
+          {effView === "an" && (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Analisis withV={withV} stats={stats} audiencias={audConv} tnSummary={tnSummary} u={ueff} accountName={(accounts.find((a) => a.id === account) || {}).name || ""} periodo={preset === "custom" && cSince && cUntil ? cSince + " → " + cUntil : preset} analysis={analysis} setAnalysis={setAnalysis} modo={modo} account={account} />)}
           {effView === "plan" && (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Plan account={account} store={tnStore} goal={goal} plan={plan} setPlan={setPlan} modo={modo} accCur={accCur} />)}
           {effView === "dash" && (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Dash stats={stats} goal={goal} setGoal={setGoal} factTienda={tnSummary ? tnSummary.facturacion : null} tnStore={tnStore} modo={modo} />)}
           {effView === "hoy" && (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Hoy acc={acciones} u={ueff} done={done} toggle={toggle} total={totalTasks} doneCount={doneCount} mantener={stats.counts.Mantener} modo={modo} />)}
-          {effView === "top" && (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Top withV={withV} u={ueff} audData={audiencias} modo={modo} />)}
+          {effView === "top" && (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Top withV={withV} u={ueff} audData={audConv} modo={modo} />)}
           {effView === "panel" && (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Panel rows={rows} stats={stats} sort={sort} setSortKey={setSortKey} modo={modo} />)}
           {effView === "bib" && <Biblioteca rows={withV} hookMatch={hookMatch} setHookMatch={setHookMatch} />}
           {effView === "gen" && <Generar rows={withV} accountName={(accounts.find((a) => a.id === account) || {}).name || ""} />}
@@ -419,7 +427,7 @@ function Top({ withV, u, audData, modo = "ventas" }) {
       : aggregate(reliable, dim);
   }, [reliable, dim, audData]);
   // Cuántos mostrar por dimensión. Audiencia = todas; el resto, un top.
-  const LIMITS = { ang: 5, cat: 5, aud: Infinity, hook: 10, fmt: 8 };
+  const LIMITS = { ang: 5, cat: 5, aud: Infinity, hook: 10, fam: 4, fmt: 8 };
   const limit = LIMITS[dim] ?? 5;
   // Métrica de orden. En mensajes: costo por conversación (menor = mejor), conversaciones, spend, ads.
   const [metric, setMetric] = useState(msg ? "costo" : "roas");
@@ -435,14 +443,15 @@ function Top({ withV, u, audData, modo = "ventas" }) {
   const barOf = (d) => lowerBetter ? Math.max(8, (1 - valOf(d) / max) * 100) : (valOf(d) / max) * 100;
   const fmtVal = (d) => metric === "spend" ? short(d.spend) : metric === "ventas" ? nf.format(Math.round(d.ventas)) : metric === "conv" ? nf.format(Math.round(d.conversaciones || 0)) : metric === "ads" ? (d.n + " ad" + (d.n !== 1 ? "s" : "")) : metric === "costo" ? money(d.costoConv) : (d.roas.toFixed(1) + "x");
   const colorFor = (d) => msg ? (d.costoConv && d.costoConv <= u.costoMax ? BUCKETS.Escalar.color : d.costoConv && d.costoConv <= u.costoMax * 1.4 ? BUCKETS.Mantener.color : BUCKETS.Pausar.color) : (d.roas >= u.roasMin ? BUCKETS.Escalar.color : d.roas >= u.roasMin * 0.85 ? BUCKETS.Mantener.color : BUCKETS.Pausar.color);
-  const dims = [["ang", "Ángulo"], ["cat", "Categoría"], ["aud", "Audiencia"], ["hook", "Hook"], ["fmt", "Formato"]];
-  // Acordeón: solo para ángulo, categoría y hook (no audiencia/formato). Lista qué creativos
-  // componen cada fila y, dentro de cada uno, en qué campañas/adsets corren.
-  const expandable = dim === "ang" || dim === "cat" || dim === "hook";
+  const dims = [["ang", "Ángulo"], ["cat", "Categoría"], ["aud", "Audiencia"], ["hook", "Hook"], ["fam", "Familia"], ["fmt", "Formato"]];
+  // Acordeón: solo para ángulo, categoría, hook y familia (no audiencia/formato). Lista qué
+  // creativos componen cada fila y, dentro de cada uno, en qué campañas/adsets corren.
+  const expandable = dim === "ang" || dim === "cat" || dim === "hook" || dim === "fam";
   const [open, setOpen] = useState(null);
   const membersFor = (key) => {
     if (dim === "ang") return reliable.filter((r) => (r.sheet?.angulo || r.ang) === key);
     if (dim === "hook") return reliable.filter((r) => (r.sheet?.tipo_gancho || r.hook) === key);
+    if (dim === "fam") return reliable.filter((r) => r.sheet?.familia === key);
     if (dim === "cat") return reliable.filter((r) => r.ang === key || r.sec === key);
     return [];
   };
@@ -478,6 +487,7 @@ function Top({ withV, u, audData, modo = "ventas" }) {
         {dim === "cat" && <div className="dedup">▦ Ponderado por <b>split</b> (categoría primaria/secundaria) — sin doble conteo. Un anuncio 70/30 suma 70% a su categoría principal y 30% a la secundaria, no el total a cada una.</div>}
         {dim === "ang" && <div className="dedup">▦ Ángulo de venta (columna <b>angulo_de_venta</b> del Sheet).</div>}
         {dim === "hook" && <div className="dedup">▦ Tipo de gancho (columna <b>tipo_gancho</b> del Sheet).</div>}
+        {dim === "fam" && <div className="dedup">▦ Familia psicológica del hook (<b>Ruptura</b> rompe un patrón · <b>Evidencia</b> prueba con datos/demos · <b>Pérdida</b> lo que te sangra · <b>Identidad</b> quién sos). Es la misma taxonomía de la Biblioteca. Sale de la columna <b>gancho_familia</b> del Sheet; en videos viejos se deriva del tipo_gancho cuando se puede{ranked.length === 0 ? " — elegí una pestaña del Sheet para ver este ranking" : ""}.</div>}
         {dim === "aud" && audData && audData.length > 0 && <div className="dedup">▦ Audiencia leída del <b>targeting real</b> de cada conjunto (audiencias custom, lookalikes, intereses, Advantage+). Hot/Tibio según la intención de las audiencias. Si falla, cae al nombre del conjunto.</div>}
         {dim === "aud" && (!audData || !audData.length) && <div className="dedup">▦ La audiencia se lee del targeting real del conjunto. Con datos en vivo se completa automáticamente.</div>}
         <div className="ranklist">
@@ -523,8 +533,65 @@ function EmptyState({ account, loading, err }) {
   );
 }
 
+// ─────────── Historial de lecturas/planes (localStorage, por cliente) ───────────
+// Cada lectura del cerebro y cada plan quedan guardados con fecha, para auditar qué dijo, qué
+// decisiones se tomaron y si nos fue guiando bien. Vive en localStorage (sin DB, cero infra):
+// es por browser/máquina. Acordeón con lo más nuevo arriba; al abrir, renderiza EXACTAMENTE lo
+// mismo que una lectura recién generada (mismos componentes).
+const histLoad = (key) => { try { const v = JSON.parse(localStorage.getItem(key) || "[]"); return Array.isArray(v) ? v : []; } catch { return []; } };
+const histPush = (key, entry, cap = 15) => { try { const v = [entry, ...histLoad(key)].slice(0, cap); localStorage.setItem(key, JSON.stringify(v)); return v; } catch { return histLoad(key); } };
+const fdate = (t) => new Date(t).toLocaleString("es-AR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
+
+function Historial({ items, render }) {
+  const [open, setOpen] = useState(null);
+  if (!items.length) return null;
+  return (
+    <div className="histsect">
+      <div className="histtitle">🗂 HISTORIAL · {items.length} {items.length === 1 ? "guardado" : "guardados"}</div>
+      {items.map((it, i) => (
+        <div className="histitem" key={it.t || i}>
+          <button className="histhead" onClick={() => setOpen(open === i ? null : i)}>
+            <span className="histcaret">{open === i ? "▾" : "▸"}</span>
+            <span className="histdate">{fdate(it.t)}</span>
+            <span className="histmeta">{it.label}</span>
+          </button>
+          {open === i && <div className="histbody">{render(it)}</div>}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// Render del output del analista (lo usa la lectura fresca Y el historial).
+function AnalisisOut({ out }) {
+  const PR = { alta: "#C0392B", media: "#E0852E", baja: "#857A66" };
+  if (!out) return null;
+  return (
+    <div className="anout">
+      <div className="antop">{out.titular}</div>
+      <div className="andiag">{out.diagnostico}</div>
+      {Array.isArray(out.acciones) && out.acciones.length > 0 && (
+        <div className="anblock"><div className="anbh">ACCIONES</div>
+          {out.acciones.map((a, i) => (
+            <div className="anaccion" key={i}>
+              <span className="anprio" style={{ background: PR[a.prioridad] || "#857A66" }}>{(a.prioridad || "").toUpperCase()}</span>
+              <div><div className="anacc">{a.accion}</div><div className="anporque">{a.porque}</div></div>
+            </div>
+          ))}
+        </div>
+      )}
+      {Array.isArray(out.explorar) && out.explorar.length > 0 && (
+        <div className="anblock"><div className="anbh">PARA EXPLORAR</div>{out.explorar.map((e, i) => <div className="anitem" key={i}>↗ {e}</div>)}</div>
+      )}
+      {Array.isArray(out.riesgos) && out.riesgos.length > 0 && (
+        <div className="anblock"><div className="anbh">RIESGOS</div>{out.riesgos.map((e, i) => <div className="anitem riesgo" key={i}>⚠ {e}</div>)}</div>
+      )}
+    </div>
+  );
+}
+
 // ─────────── Vista: ANÁLISIS (el "cerebro" read-only) ───────────
-function Analisis({ withV, stats, audiencias, tnSummary, u, accountName, periodo, analysis, setAnalysis, modo = "ventas" }) {
+function Analisis({ withV, stats, audiencias, tnSummary, u, accountName, periodo, analysis, setAnalysis, modo = "ventas", account = "" }) {
   const out = analysis; // persiste en el padre: no se borra al cambiar de pestaña
   const setOut = setAnalysis;
   const msg = modo === "mensajes";
@@ -556,6 +623,11 @@ function Analisis({ withV, stats, audiencias, tnSummary, u, accountName, periodo
     };
   }, [withV, stats, audiencias, tnSummary, u, accountName, periodo, msg, modo]);
 
+  // Historial por cliente (se carga en useEffect para no romper la hidratación: localStorage no existe en SSR)
+  const histKey = "nusa_hist_an_" + (account || "x");
+  const [hist, setHist] = useState([]);
+  useEffect(() => { setHist(histLoad(histKey)); }, [histKey]);
+
   const pedir = async () => {
     setLoading(true); setErr(""); setOut(null);
     try {
@@ -563,10 +635,10 @@ function Analisis({ withV, stats, audiencias, tnSummary, u, accountName, periodo
       const data = await res.json();
       if (data.error) throw new Error(data.error);
       setOut(data.analysis);
+      setHist(histPush(histKey, { t: Date.now(), label: (accountName || "—") + " · " + periodo + " · " + modo, out: data.analysis }));
     } catch (e) { setErr("No se pudo analizar: " + e.message); } finally { setLoading(false); }
   };
 
-  const PR = { alta: "#C0392B", media: "#E0852E", baja: "#857A66" };
   return (
     <section className="an">
       <div className="anhead">
@@ -575,29 +647,44 @@ function Analisis({ withV, stats, audiencias, tnSummary, u, accountName, periodo
       </div>
       {err && <div className="generr">{err}</div>}
       {!out && !loading && !err && <div className="anplaceholder">Apretá <b>“Pedir lectura”</b> y el analista cruza tus rankings, el MER vs ROAS del pixel, qué escalar, qué sangra y qué te falta probar. Cada lectura cuesta ~2 centavos de IA y corre solo cuando vos la pedís.</div>}
-      {out && (
-        <div className="anout">
-          <div className="antop">{out.titular}</div>
-          <div className="andiag">{out.diagnostico}</div>
-          {Array.isArray(out.acciones) && out.acciones.length > 0 && (
-            <div className="anblock"><div className="anbh">ACCIONES</div>
-              {out.acciones.map((a, i) => (
-                <div className="anaccion" key={i}>
-                  <span className="anprio" style={{ background: PR[a.prioridad] || "#857A66" }}>{(a.prioridad || "").toUpperCase()}</span>
-                  <div><div className="anacc">{a.accion}</div><div className="anporque">{a.porque}</div></div>
+      {out && <AnalisisOut out={out} />}
+      <Historial items={hist} render={(it) => <AnalisisOut out={it.out} />} />
+    </section>
+  );
+}
+
+// Render del output del plan (lo usa el plan fresco Y el historial).
+function PlanOut({ p, snap, msg }) {
+  const COL = { Pesimista: "#C0392B", Normal: "#E0852E", Optimista: "#2E8B6B" };
+  const ACC = { subir: "↑", bajar: "↓", pausar: "⏸", mantener: "=" };
+  if (!p) return null;
+  return (
+    <div className="anout">
+      {snap && (msg
+        ? <div className="planbar"><span>CONVERSACIONES MTD {nf.format(snap.conversaciones_mtd)}</span><span>COSTO/CONV {money(snap.costo_conv)}</span><span>INVERSIÓN {money(snap.inversion_mtd)}</span><span>FALTAN {snap.dias_restantes} días</span></div>
+        : <div className="planbar"><span>META {money(snap.meta)}</span><span>FACTURADO MTD {money(snap.facturacion_mtd)}</span><span>MER {snap.mer}x</span><span>PROYECCIÓN {money(snap.proyeccion_sin_cambios)}</span><span>FALTAN {snap.dias_restantes} días</span></div>)}
+      <div className="andiag">{p.resumen}</div>
+      <div className="planscenarios">
+        {(p.escenarios || []).map((e, i) => (
+          <div className="plansc" key={i} style={{ "--sc": COL[e.nombre] || "#857A66" }}>
+            <div className="planschead"><span className="planscname">{e.nombre}</span>{!msg && <span className={"planscmeta" + (e.alcanza_meta ? " ok" : "")}>{e.alcanza_meta ? "✓ llega" : "✗ no llega"}</span>}</div>
+            <div className="planscsup">{e.supuesto}</div>
+            <div className="planscnums"><div><b>{money(e.inversion_extra_diaria)}</b><span>/día extra</span></div><div><b>{money(e.inversion_extra_total)}</b><span>total al mes</span></div>{msg ? <div><b>{nf.format(e.conversaciones_proyectadas || 0)}</b><span>conv. proyectadas</span></div> : <div><b>{money(e.facturacion_proyectada)}</b><span>proyección</span></div>}</div>
+            <div className="planscacc">
+              {(e.acciones || []).map((a, j) => (
+                <div className="planacc" key={j}>
+                  <span className="planaccico">{ACC[a.accion] || "•"}</span>
+                  <div><div className="planacct"><b>{a.unidad}</b> <span className="planlvl">{a.nivel}</span> {a.de != null && a.a != null ? <span className="planba">{money(a.de)}→{money(a.a)}/día</span> : a.accion}</div><div className="planaccp">{a.porque}</div></div>
                 </div>
               ))}
             </div>
-          )}
-          {Array.isArray(out.explorar) && out.explorar.length > 0 && (
-            <div className="anblock"><div className="anbh">PARA EXPLORAR</div>{out.explorar.map((e, i) => <div className="anitem" key={i}>↗ {e}</div>)}</div>
-          )}
-          {Array.isArray(out.riesgos) && out.riesgos.length > 0 && (
-            <div className="anblock"><div className="anbh">RIESGOS</div>{out.riesgos.map((e, i) => <div className="anitem riesgo" key={i}>⚠ {e}</div>)}</div>
-          )}
-        </div>
+          </div>
+        ))}
+      </div>
+      {Array.isArray(p.desinversion) && p.desinversion.length > 0 && (
+        <div className="anblock"><div className="anbh">DESINVERTIR / REASIGNAR</div>{p.desinversion.map((d, i) => <div className="anitem" key={i}>↓ {d}</div>)}</div>
       )}
-    </section>
+    </div>
   );
 }
 
@@ -606,6 +693,10 @@ function Plan({ account, store, goal, plan, setPlan, modo = "ventas", accCur = "
   const msg = modo === "mensajes";
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
+  // Historial por cliente (carga en useEffect: localStorage no existe en SSR)
+  const histKey = "nusa_hist_plan_" + (account || "x");
+  const [hist, setHist] = useState([]);
+  useEffect(() => { setHist(histLoad(histKey)); }, [histKey]);
   const pedir = async () => {
     setLoading(true); setErr("");
     try {
@@ -614,10 +705,9 @@ function Plan({ account, store, goal, plan, setPlan, modo = "ventas", accCur = "
       const d = await res.json();
       if (d.error) throw new Error(d.error);
       setPlan(d);
+      setHist(histPush(histKey, { t: Date.now(), label: (msg ? "mensajes" : "meta " + money(goal)) + " · " + modo, modo, plan: d.plan, snapshot: d.snapshot }));
     } catch (e) { setErr("No se pudo armar el plan: " + e.message); } finally { setLoading(false); }
   };
-  const COL = { Pesimista: "#C0392B", Normal: "#E0852E", Optimista: "#2E8B6B" };
-  const ACC = { subir: "↑", bajar: "↓", pausar: "⏸", mantener: "=" };
   const p = plan && plan.plan;
   const snap = plan && plan.snapshot;
   return (
@@ -629,34 +719,8 @@ function Plan({ account, store, goal, plan, setPlan, modo = "ventas", accCur = "
       {!msg && goal <= 0 && <div className="anplaceholder">Primero cargá la <b>META del mes</b> en el Dashboard (Objetivo del mes). Sin meta no hay a dónde llegar.</div>}
       {err && <div className="generr">{err}</div>}
       {(msg || goal > 0) && !p && !loading && !err && <div className="anplaceholder">Apretá <b>“Pedir plan”</b>. El sistema cruza {msg ? "las conversaciones del mes, el costo por conversación" : "la meta, lo facturado del mes"}, los días que faltan y el budget real de cada unidad, y arma escenarios <b>pesimista / normal / optimista</b> de cuánto invertir y dónde (y qué desinvertir). ~5 centavos de IA, on-demand.</div>}
-      {p && (
-        <div className="anout">
-          {snap && (msg
-            ? <div className="planbar"><span>CONVERSACIONES MTD {nf.format(snap.conversaciones_mtd)}</span><span>COSTO/CONV {money(snap.costo_conv)}</span><span>INVERSIÓN {money(snap.inversion_mtd)}</span><span>FALTAN {snap.dias_restantes} días</span></div>
-            : <div className="planbar"><span>META {money(snap.meta)}</span><span>FACTURADO MTD {money(snap.facturacion_mtd)}</span><span>MER {snap.mer}x</span><span>PROYECCIÓN {money(snap.proyeccion_sin_cambios)}</span><span>FALTAN {snap.dias_restantes} días</span></div>)}
-          <div className="andiag">{p.resumen}</div>
-          <div className="planscenarios">
-            {(p.escenarios || []).map((e, i) => (
-              <div className="plansc" key={i} style={{ "--sc": COL[e.nombre] || "#857A66" }}>
-                <div className="planschead"><span className="planscname">{e.nombre}</span>{!msg && <span className={"planscmeta" + (e.alcanza_meta ? " ok" : "")}>{e.alcanza_meta ? "✓ llega" : "✗ no llega"}</span>}</div>
-                <div className="planscsup">{e.supuesto}</div>
-                <div className="planscnums"><div><b>{money(e.inversion_extra_diaria)}</b><span>/día extra</span></div><div><b>{money(e.inversion_extra_total)}</b><span>total al mes</span></div>{msg ? <div><b>{nf.format(e.conversaciones_proyectadas || 0)}</b><span>conv. proyectadas</span></div> : <div><b>{money(e.facturacion_proyectada)}</b><span>proyección</span></div>}</div>
-                <div className="planscacc">
-                  {(e.acciones || []).map((a, j) => (
-                    <div className="planacc" key={j}>
-                      <span className="planaccico">{ACC[a.accion] || "•"}</span>
-                      <div><div className="planacct"><b>{a.unidad}</b> <span className="planlvl">{a.nivel}</span> {a.de != null && a.a != null ? <span className="planba">{money(a.de)}→{money(a.a)}/día</span> : a.accion}</div><div className="planaccp">{a.porque}</div></div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ))}
-          </div>
-          {Array.isArray(p.desinversion) && p.desinversion.length > 0 && (
-            <div className="anblock"><div className="anbh">DESINVERTIR / REASIGNAR</div>{p.desinversion.map((d, i) => <div className="anitem" key={i}>↓ {d}</div>)}</div>
-          )}
-        </div>
-      )}
+      {p && <PlanOut p={p} snap={snap} msg={msg} />}
+      <Historial items={hist} render={(it) => <PlanOut p={it.plan} snap={it.snapshot} msg={it.modo === "mensajes"} />} />
     </section>
   );
 }
@@ -1361,6 +1425,15 @@ td{padding:11px 12px;vertical-align:middle;}.num{text-align:right;}.name{font-we
 .andiag{font-size:14.5px;line-height:1.6;color:var(--ink);}
 .anblock{background:var(--paper2);border:2px solid var(--ink);border-radius:12px;padding:14px 16px;box-shadow:4px 4px 0 var(--ink);}
 .anbh{font-family:'Space Mono',monospace;font-size:10px;letter-spacing:2px;color:var(--soft);margin-bottom:10px;}
+.histsect{margin-top:22px;border-top:2px dashed var(--line);padding-top:14px;display:flex;flex-direction:column;gap:8px;}
+.histtitle{font-family:'Space Mono',monospace;font-size:10px;letter-spacing:2px;color:var(--soft);margin-bottom:4px;}
+.histitem{border:2px solid var(--ink);border-radius:10px;background:var(--paper2);overflow:hidden;}
+.histhead{display:flex;align-items:center;gap:10px;width:100%;text-align:left;background:none;border:none;cursor:pointer;padding:10px 14px;font-family:'Space Mono',monospace;font-size:12px;color:var(--ink);}
+.histhead:hover{background:rgba(0,0,0,0.04);}
+.histcaret{font-size:11px;color:var(--soft);}
+.histdate{font-weight:700;}
+.histmeta{color:var(--soft);font-size:11px;font-style:italic;}
+.histbody{padding:14px;border-top:2px dashed var(--line);}
 .anaccion{display:flex;gap:11px;align-items:flex-start;padding:9px 0;border-top:1px solid var(--line);}
 .anaccion:first-of-type{border-top:none;}
 .anprio{font-family:'Space Mono',monospace;font-size:9px;font-weight:700;letter-spacing:1px;color:#fff;border-radius:4px;padding:3px 7px;flex-shrink:0;margin-top:1px;}
