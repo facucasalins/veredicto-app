@@ -61,7 +61,7 @@ export async function POST(req) {
 
   let body = {};
   try { body = await req.json(); } catch {}
-  const { account, accountName = "", store = "", tab = "", accCur = "ARS", messages = [] } = body;
+  const { account, accountName = "", store = "", tab = "", accCur = "ARS", criterio = null, messages = [] } = body;
   if (!account) return Response.json({ error: "falta account" }, { status: 400 });
   if (!canSeeAccount(sess, account)) return Response.json({ error: "Sin acceso a esta cuenta" }, { status: 403 });
   if (!Array.isArray(messages) || !messages.length) return Response.json({ error: "falta la pregunta" }, { status: 400 });
@@ -84,7 +84,7 @@ REGLAS:
 - Citá los números concretos. Para rankings/listas devolvé lista numerada, valor y contexto (período usado).
 - Todos los montos de Meta ya vienen en pesos argentinos${rateNota}. La tienda ya está en pesos.
 - Períodos relativos ("últimos 60 días", "este mes") calculalos desde hoy (${hoy}). Si no te dan período, usá los últimos 30 días y aclaralo en la respuesta.
-- ${store ? `La tienda conectada es "${store}".` : "Esta cuenta NO tiene Tienda Nube conectada: si preguntan por productos o facturación de tienda, decilo."}
+- ${store ? `La tienda conectada es "${store}". El criterio de VENTA de este cliente es: ${criterio === "no_canceladas" ? "toda orden NO cancelada cuenta como venta (pagadas + pendientes de pago; las de pago anulado no)" : "solo las órdenes PAGADAS cuentan como venta"} — los números de facturación/órdenes de las herramientas ya vienen con ese criterio aplicado.` : "Esta cuenta NO tiene Tienda Nube conectada: si preguntan por productos o facturación de tienda, decilo."}
 - ${tab ? `La pestaña de la planilla de análisis es "${tab}".` : "No hay pestaña de planilla seleccionada: si preguntan por el análisis cualitativo, pedí que elijan la pestaña del Sheet en el panel."}
 - Español rioplatense (vos), conciso y directo. Sin relleno.`;
 
@@ -116,8 +116,8 @@ REGLAS:
       };
     }
     if (name === "tiendanube_resumen") {
-      const t = await getStoreRevenue(store, since, until);
-      return { since, until, facturacion_pagada: t.facturacion, ordenes_pagadas: t.orders, ticket_promedio: t.ticket, facturacion_pendiente: t.facturacionPendiente, ordenes_pendientes: t.ordersPendientes, moneda: t.moneda };
+      const t = await getStoreRevenue(store, since, until, criterio);
+      return { since, until, criterio: t.criterio, facturacion: t.facturacion, ordenes: t.orders, ticket_promedio: t.ticket, facturacion_pagada: t.facturacionPagada, ordenes_pagadas: t.ordersPagadas, facturacion_pendiente: t.facturacionPendiente, ordenes_pendientes: t.ordersPendientes, ordenes_pago_anulado: t.anuladas, moneda: t.moneda };
     }
     if (name === "tiendanube_productos") {
       return { since, until, productos: await getTopProducts(store, since, until, input.limit || 10) };

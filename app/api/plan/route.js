@@ -40,6 +40,7 @@ export async function POST(req) {
   const goal = +(searchParams.get("goal") || 0);
   const accCur = (searchParams.get("accCur") || "").toUpperCase(); // moneda de la cuenta de Meta (USD/ARS)
   const modo = searchParams.get("modo") || "ventas";
+  const count = searchParams.get("count"); // criterio de venta de la tienda: pagadas | no_canceladas
   const msg = modo === "mensajes";
   if (!account) return Response.json({ error: "falta account" }, { status: 400 });
   if (!msg && !goal) return Response.json({ error: "definí la meta del mes primero" }, { status: 400 });
@@ -60,7 +61,7 @@ export async function POST(req) {
     const [ads, budgets, tienda] = await Promise.all([
       getAds(account, "this_month", { since, until }),
       getAdsetBudgets(account).catch(() => ({})),
-      store ? getStoreRevenue(store, since, until).catch(() => null) : Promise.resolve(null),
+      store ? getStoreRevenue(store, since, until, count).catch(() => null) : Promise.resolve(null),
     ]);
 
     // agregamos por unidad de presupuesto (adset si ABO, campaña si CBO). En mensajes solo contamos

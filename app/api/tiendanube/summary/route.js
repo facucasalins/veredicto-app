@@ -14,6 +14,7 @@ export async function GET(req) {
   const store = searchParams.get("store");
   const account = searchParams.get("account");
   const accCur = (searchParams.get("accCur") || "").toUpperCase(); // moneda de la cuenta de Meta (USD/ARS)
+  const count = searchParams.get("count"); // criterio de venta: pagadas | no_canceladas (default: el de la tienda)
   const preset = searchParams.get("preset") || "last_30d";
   if (!store) return Response.json({ error: "falta store" }, { status: 400 });
 
@@ -24,7 +25,7 @@ export async function GET(req) {
   const qsSince = searchParams.get("since"), qsUntil = searchParams.get("until");
   const { since, until } = qsSince && qsUntil ? { since: qsSince, until: qsUntil } : presetToRange(preset);
   try {
-    const tienda = await getStoreRevenue(store, since, until);
+    const tienda = await getStoreRevenue(store, since, until, count);
     let inversion = 0, roasMeta = 0, ventasMeta = 0;
     if (account) {
       try { const m = await getAccountSpend(account, since, until); inversion = m.spend; roasMeta = m.roasMeta; ventasMeta = m.ventasMeta; }

@@ -132,6 +132,17 @@ export default function App() {
   const [sheetTab, setSheetTab] = useState("");
   const [tnStores, setTnStores] = useState([]);
   const [tnStore, setTnStore] = useState("");
+  // Criterio de VENTA de la tienda: "pagadas" (panel TN) o "no_canceladas" (conteo interno del
+  // cliente, ej. MoraShop). Default por tienda (campo `ventas` en TIENDANUBE_STORES); el toggle
+  // de la banda lo overridea y queda recordado por tienda en este browser.
+  const [tnCount, setTnCount] = useState("pagadas");
+  useEffect(() => {
+    if (!tnStore) return;
+    let saved = null; try { saved = localStorage.getItem("nusa_tncount_" + tnStore); } catch {}
+    const def = (tnStores.find((s) => s.name === tnStore) || {}).ventas || "pagadas";
+    setTnCount(saved === "pagadas" || saved === "no_canceladas" ? saved : def);
+  }, [tnStore, tnStores]);
+  const setCount = (v) => { setTnCount(v); try { localStorage.setItem("nusa_tncount_" + tnStore, v); } catch {} };
   const [tnSummary, setTnSummary] = useState(null);
   const [tnLoading, setTnLoading] = useState(false);
   const [analysis, setAnalysis] = useState(null); // lectura del cerebro, persiste entre pestañas
@@ -147,7 +158,7 @@ export default function App() {
   const logout = async () => { try { await fetch("/api/logout", { method: "POST" }); } finally { window.location.href = "/login"; } };
   // la lectura del analista queda obsoleta si cambia el cliente/período/tienda → la limpiamos
   useEffect(() => { setAnalysis(null); setHookMatch(null); }, [account, preset, tnStore, cSince, cUntil, accCur]);
-  useEffect(() => { setPlan(null); }, [account, tnStore, goal, accCur]); // el plan depende de la meta, el mes y la moneda
+  useEffect(() => { setPlan(null); }, [account, tnStore, goal, accCur, tnCount]); // el plan depende de la meta, el mes, la moneda y el criterio de venta
   useEffect(() => { fetch("/api/fx").then((r) => r.json()).then((j) => setFx(j && j.rate ? j : null)).catch(() => setFx(null)); }, []);
   useEffect(() => { fetch("/api/sheets/tabs").then((r) => r.json()).then((j) => setSheetTabs(j.tabs || [])).catch(() => {}); }, []);
   useEffect(() => { fetch("/api/tiendanube/stores").then((r) => r.json()).then((j) => setTnStores(j.stores || [])).catch(() => {}); }, []);
@@ -155,13 +166,13 @@ export default function App() {
     if (!tnStore) { setTnSummary(null); return; }
     let cancelled = false;
     setTnLoading(true);
-    fetch("/api/tiendanube/summary?store=" + encodeURIComponent(tnStore) + "&preset=" + preset + (account ? "&account=" + account + "&accCur=" + accCur : "") + customRange)
+    fetch("/api/tiendanube/summary?store=" + encodeURIComponent(tnStore) + "&preset=" + preset + "&count=" + tnCount + (account ? "&account=" + account + "&accCur=" + accCur : "") + customRange)
       .then((r) => r.json())
       .then((j) => { if (!cancelled) setTnSummary(j.error ? null : j); })
       .catch(() => { if (!cancelled) setTnSummary(null); })
       .finally(() => { if (!cancelled) setTnLoading(false); });
     return () => { cancelled = true; };
-  }, [tnStore, account, preset, customRange, accCur]);
+  }, [tnStore, account, preset, customRange, accCur, tnCount]);
   useEffect(() => {
     if (!account) { setData([]); setAudiencias([]); setErr(""); return; }
     if (preset === "custom" && !(cSince && cUntil)) return; // esperá a que cargue las dos fechas
@@ -278,16 +289,22 @@ export default function App() {
         <section className="tnband">
           <div className="tnband-head">
             <span className="tntag">🛒 TIENDA NUBE · {tnStore}</span>
+            <div className="modobox"><span className="tncountlab">VENTA =</span>
+              <button className={"modotgl tng" + (tnCount === "pagadas" ? " on" : "")} onClick={() => setCount("pagadas")}>PAGADAS</button>
+              <button className={"modotgl tng" + (tnCount === "no_canceladas" ? " on" : "")} onClick={() => setCount("no_canceladas")}>NO CANCELADAS</button>
+            </div>
             <span className="tnrange">{tnLoading ? "cargando…" : tnSummary ? (tnSummary.since + " → " + tnSummary.until) : "sin datos"}</span>
           </div>
           {tnSummary && (
             <>
               <div className="tnstats">
-                <div className="tnstat"><div className="tnlab">FACTURACIÓN TIENDA</div><div className="tnval">{money(tnSummary.facturacion)}</div><div className="tnsub">{tnSummary.orders} órdenes pagadas · ticket {money(tnSummary.ticket)}</div></div>
+                <div className="tnstat"><div className="tnlab">FACTURACIÓN TIENDA</div><div className="tnval">{money(tnSummary.facturacion)}</div><div className="tnsub">{tnSummary.orders} órdenes {tnSummary.criterio === "no_canceladas" ? "(pagadas + pendientes)" : "pagadas"} · ticket {money(tnSummary.ticket)}</div></div>
                 <div className="tnstat"><div className="tnlab">INVERSIÓN META</div><div className="tnval">{account ? money(tnSummary.fx && !tnSummary.fx.error ? tnSummary.inversionConv : tnSummary.inversion) : "—"}</div><div className="tnsub">{!account ? "elegí el cliente de Meta" : tnSummary.fx && !tnSummary.fx.error ? ("USD " + money(tnSummary.inversion) + " · " + tnSummary.fx.fuente + " $" + nf.format(Math.round(tnSummary.fx.rate))) : tnSummary.fx && tnSummary.fx.error ? ("⚠ no pude cotizar el dólar — MER sin convertir") : ("ROAS pixel " + (tnSummary.roasMeta || 0).toFixed(1) + "x")}</div></div>
-                <div className="tnstat tnmer"><div className="tnlab">MER (FACT / INV)</div><div className="tnval">{tnSummary.mer != null ? tnSummary.mer.toFixed(2) + "x" : "—"}</div><div className="tnsub">{tnSummary.ordersPendientes ? ("+ " + money(tnSummary.facturacionPendiente) + " pendientes (" + tnSummary.ordersPendientes + " órd.)") : "facturación pagada / inversión"}</div></div>
+                <div className="tnstat tnmer"><div className="tnlab">MER (FACT / INV)</div><div className="tnval">{tnSummary.mer != null ? tnSummary.mer.toFixed(2) + "x" : "—"}</div><div className="tnsub">{tnSummary.criterio === "no_canceladas" ? ("pagadas: " + money(tnSummary.facturacionPagada) + " (" + tnSummary.ordersPagadas + ") · pendientes: " + money(tnSummary.facturacionPendiente) + " (" + tnSummary.ordersPendientes + ")") : tnSummary.ordersPendientes ? ("+ " + money(tnSummary.facturacionPendiente) + " pendientes (" + tnSummary.ordersPendientes + " órd.) sin contar") : "facturación / inversión"}</div></div>
               </div>
-              <div className="tnnote">MER = facturación COBRADA de la tienda (órdenes pagadas, igual que Tienda Nube) dividida la inversión en Meta, sobre el mismo período. Las órdenes pendientes de pago no suman al titular. Mide la eficiencia global del marketing, no solo lo atribuido al pixel.</div>
+              <div className="tnnote">{tnSummary.criterio === "no_canceladas"
+                ? "MER = facturación de TODAS las órdenes no canceladas (pagadas + pendientes de pago, sin las de pago anulado — criterio interno del cliente) dividida la inversión en Meta, mismo período. Mide la eficiencia global del marketing, no solo lo atribuido al pixel."
+                : "MER = facturación COBRADA de la tienda (órdenes pagadas, igual que Tienda Nube) dividida la inversión en Meta, mismo período. Las pendientes de pago no suman al titular. Mide la eficiencia global del marketing, no solo lo atribuido al pixel."}</div>
             </>
           )}
         </section>
@@ -340,14 +357,14 @@ export default function App() {
           )}
 
           {effView === "an" && (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Analisis withV={withV} stats={stats} audiencias={audConv} tnSummary={tnSummary} u={ueff} accountName={(accounts.find((a) => a.id === account) || {}).name || ""} periodo={preset === "custom" && cSince && cUntil ? cSince + " → " + cUntil : preset} analysis={analysis} setAnalysis={setAnalysis} modo={modo} account={account} />)}
-          {effView === "plan" && (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Plan account={account} store={tnStore} goal={goal} plan={plan} setPlan={setPlan} modo={modo} accCur={accCur} />)}
+          {effView === "plan" && (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Plan account={account} store={tnStore} goal={goal} plan={plan} setPlan={setPlan} modo={modo} accCur={accCur} count={tnCount} />)}
           {effView === "dash" && (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Dash stats={stats} goal={goal} setGoal={setGoal} factTienda={tnSummary ? tnSummary.facturacion : null} tnStore={tnStore} modo={modo} />)}
           {effView === "hoy" && (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Hoy acc={acciones} u={ueff} done={done} toggle={toggle} total={totalTasks} doneCount={doneCount} mantener={stats.counts.Mantener} modo={modo} />)}
           {effView === "top" && (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Top withV={withV} u={ueff} audData={audConv} modo={modo} />)}
           {effView === "panel" && (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Panel rows={rows} stats={stats} sort={sort} setSortKey={setSortKey} modo={modo} />)}
           {effView === "bib" && <Biblioteca rows={withV} hookMatch={hookMatch} setHookMatch={setHookMatch} />}
           {effView === "gen" && <Generar rows={withV} accountName={(accounts.find((a) => a.id === account) || {}).name || ""} />}
-          {effView === "chat" && (!account ? <EmptyState account={account} loading={loading} err={err} /> : <Chat account={account} accountName={(accounts.find((a) => a.id === account) || {}).name || ""} store={tnStore} tab={sheetTab} accCur={accCur} />)}
+          {effView === "chat" && (!account ? <EmptyState account={account} loading={loading} err={err} /> : <Chat account={account} accountName={(accounts.find((a) => a.id === account) || {}).name || ""} store={tnStore} tab={sheetTab} accCur={accCur} criterio={tnCount} />)}
         </>
       )}
     </div>
@@ -609,7 +626,7 @@ const CHAT_SUGS = [
   "Top 10 productos más vendidos en los últimos 60 días",
   "¿Qué familia de hooks rinde mejor según la planilla?",
 ];
-function Chat({ account, accountName, store, tab, accCur }) {
+function Chat({ account, accountName, store, tab, accCur, criterio = "" }) {
   // Conversación por cliente: localStorage + Upstash si está conectado (compartida entre máquinas)
   const [msgs, saveMsgs] = useHistSync("chat", account);
   const [q, setQ] = useState("");
@@ -626,7 +643,7 @@ function Chat({ account, accountName, store, tab, accCur }) {
     try {
       const res = await fetch("/api/chat", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ account, accountName, store, tab, accCur, messages: next.slice(-12) }),
+        body: JSON.stringify({ account, accountName, store, tab, accCur, criterio, messages: next.slice(-12) }),
       });
       const d = await res.json();
       if (d.error) throw new Error(d.error);
@@ -793,7 +810,7 @@ function PlanOut({ p, snap, msg }) {
 }
 
 // ─────────── Vista: PLAN (cómo llegar al objetivo) ───────────
-function Plan({ account, store, goal, plan, setPlan, modo = "ventas", accCur = "ARS" }) {
+function Plan({ account, store, goal, plan, setPlan, modo = "ventas", accCur = "ARS", count = "" }) {
   const msg = modo === "mensajes";
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
@@ -802,7 +819,7 @@ function Plan({ account, store, goal, plan, setPlan, modo = "ventas", accCur = "
   const pedir = async () => {
     setLoading(true); setErr("");
     try {
-      const qs = "account=" + account + (store ? "&store=" + encodeURIComponent(store) : "") + "&goal=" + goal + "&modo=" + modo + "&accCur=" + accCur;
+      const qs = "account=" + account + (store ? "&store=" + encodeURIComponent(store) + "&count=" + count : "") + "&goal=" + goal + "&modo=" + modo + "&accCur=" + accCur;
       const res = await fetch("/api/plan?" + qs, { method: "POST" });
       const d = await res.json();
       if (d.error) throw new Error(d.error);
@@ -1449,9 +1466,12 @@ td{padding:11px 12px;vertical-align:middle;}.num{text-align:right;}.name{font-we
 .logout{font-family:'Space Mono',monospace;font-size:11px;color:var(--paper);background:transparent;border:1px solid rgba(242,235,217,.4);border-radius:5px;padding:3px 9px;cursor:pointer;}
 .logout:hover{background:rgba(242,235,217,.12);border-color:var(--paper);}
 .tnband{background:#1A1A17;color:#F2EBD9;padding:16px 22px 16px;border:2px solid var(--ink);border-top:4px solid #C0392B;border-radius:12px;box-shadow:5px 5px 0 #1e181233;margin-bottom:18px;}
-.tnband-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;}
+.tnband-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:12px;flex-wrap:wrap;}
 .tntag{font-family:'Space Mono',monospace;font-size:12px;letter-spacing:1.5px;color:#E9DEC8;}
-.tnrange{font-family:'Space Mono',monospace;font-size:11px;color:#9A937F;}
+.tnrange{font-family:'Space Mono',monospace;font-size:11px;color:#9A937F;margin-left:auto;}
+.tncountlab{font-family:'Space Mono',monospace;font-size:10px;letter-spacing:2px;color:#9A937F;}
+.modotgl.tng{background:transparent;color:#9A937F;border-color:#5A5447;font-size:10px;padding:4px 10px;}
+.modotgl.tng.on{background:#E9DEC8;color:#1E1812;border-color:#E9DEC8;}
 .tnstats{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;}
 .tnstat{background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.12);border-radius:9px;padding:13px 15px;}
 .tnstat.tnmer{background:rgba(46,139,107,.18);border-color:rgba(46,139,107,.5);}

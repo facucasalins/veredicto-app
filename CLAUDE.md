@@ -43,11 +43,15 @@ respuestas concisas.
 - `lib/auth.js` — login por cliente. Cookie firmada HMAC-SHA256 con **Web Crypto** (Edge + Node).
   Usuarios en `APP_USERS`. `authenticate`, `makeSessionToken`, `verifySession`, `canSeeAccount`,
   `authDisabled`.
-- `lib/tiendanube.js` — `listStores()` y `getStoreRevenue(name, since, until)`. Header de auth es
-  `Authentication: bearer <token>` (NO "Authorization") + `User-Agent` obligatorio. `getStoreRevenue`
-  cuenta como facturación/ventas SOLO las órdenes **pagadas** (`payment_status === "paid"`), igual que
-  las estadísticas de Tienda Nube; las no canceladas pero sin pagar van aparte (`facturacionPendiente`,
-  `ordersPendientes`) y NO suman al titular.
+- `lib/tiendanube.js` — `listStores()`, `getStoreRevenue(name, since, until, criterio?)` y
+  `getTopProducts(...)`. Header de auth es `Authentication: bearer <token>` (NO "Authorization") +
+  `User-Agent` obligatorio. El endpoint `/orders` sin filtro devuelve TODO (abiertas + archivadas
+  `closed` + canceladas). **Criterio de VENTA configurable por tienda** (campo `ventas` en
+  `TIENDANUBE_STORES`, toggle "VENTA =" en la banda): `"pagadas"` (default, como el panel de stats
+  de TN: solo `payment_status === "paid"`) o `"no_canceladas"` (conteo interno de clientes como
+  MoraShop: toda orden no cancelada, pagada o pendiente). Las de pago **anulado (voided)** no son
+  venta bajo ningún criterio. Devuelve siempre el desglose (`facturacionPagada/Pendiente`, `anuladas`).
+  El criterio elegido se propaga a MER, objetivo del mes, Plan y chat.
 - `lib/dates.js` — `presetToRange(preset)` → `{since, until}`. Alinea Meta y Tienda Nube al mismo período.
 - `lib/store.js` — storage server-side en **Upstash Redis** (REST, sin dependencias): `storeEnabled()`,
   `kvGet(key)`, `kvSet(key, value)`. Para historiales/conversaciones compartidos. Sin env vars degrada
@@ -142,7 +146,8 @@ pushear a `main` sin romper prod.
 - `META_SYSTEM_TOKEN`, `META_API_VERSION` — Meta Marketing API.
 - `GOOGLE_SA_EMAIL`, `GOOGLE_SA_KEY` (private_key con `\n`), `SHEET_ID` — Google Sheets.
 - `APP_USERS` (JSON `[{u,p,admin?,accounts?}]`), `SESSION_SECRET` — login.
-- `TIENDANUBE_STORES` (JSON `[{name,store_id,token,account?}]`), `TIENDANUBE_UA`.
+- `TIENDANUBE_STORES` (JSON `[{name,store_id,token,account?,ventas?}]` — `ventas`:
+  `"pagadas"`|`"no_canceladas"`, criterio de venta default de esa tienda), `TIENDANUBE_UA`.
 - `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL` (`claude-sonnet-4-6`) — generador, cerebro, match-hooks y chat.
 - `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN` — historiales/conversaciones server-side
   (los inyecta sola la integración Upstash del Marketplace de Vercel; opcional, sin esto queda
