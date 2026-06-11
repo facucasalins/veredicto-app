@@ -1,5 +1,7 @@
 import { cookies } from "next/headers";
 import { getAds, getAdsetTargeting, getAdStatuses } from "@/lib/meta";
+import { isTikTok, ttId, getAds as ttGetAds, getAdStatuses as ttGetAdStatuses, getAdgroupAudiences } from "@/lib/tiktok";
+import { presetToRange } from "@/lib/dates";
 import { buildRows, buildAudienceRows, classifyTargeting, targetingTipo } from "@/lib/nomenclatura";
 import { enrichWithSheet } from "@/lib/sheet";
 import { SESSION_COOKIE, verifySession, authDisabled, canSeeAccount } from "@/lib/auth";
@@ -19,15 +21,32 @@ export async function GET(req) {
   if (!sess) return Response.json({ error: "No autorizado" }, { status: 401 });
   if (!canSeeAccount(sess, account)) return Response.json({ error: "Sin acceso a esta cuenta" }, { status: 403 });
   try {
-    // Insights + targeting real en paralelo. Si el targeting falla, audMap queda vacío y se cae
-    // al parseo del nombre del conjunto (degradación elegante).
-    const [ads, targeting, statuses] = await Promise.all([
-      getAds(account, preset, range),
-      getAdsetTargeting(account).catch(() => ({})),
-      getAdStatuses(account).catch(() => null),
-    ]);
-    const audMap = {}, tipoMap = {};
-    for (const id in targeting) { const lbl = classifyTargeting(targeting[id]); if (lbl) audMap[id] = lbl; tipoMap[id] = targetingTipo(targeting[id]); }
+    let ads, audMap = {}, tipoMap = {}, statuses;
+    if (isTikTok(account)) {
+      // TikTok: misma forma de fila que Meta (buildRows y el cruce con Sheet funcionan igual,
+      // porque dependen del nombre del anuncio). TikTok necesita fechas explícitas → presetToRange.
+      // Su API limita el rango del reporte → "maximum" se acota a ~1 año.
+      const adv = ttId(account);
+      const r = range || presetToRange(preset === "maximum" ? "last_90d" : preset);
+      if (preset === "maximum" && !range) { const d = new Date(); d.setUTCDate(d.getUTCDate() - 364); r.since = d.toISOString().slice(0, 10); }
+      const [ttAds, aud, st] = await Promise.all([
+        ttGetAds(adv, r.since, r.until),
+        getAdgroupAudiences(adv).catch(() => ({})),
+        ttGetAdStatuses(adv).catch(() => null),
+      ]);
+      ads = ttAds; audMap = aud; statuses = st;
+      for (const a of ads) tipoMap[a.adset_id] = "ventas"; // TikTok: sin campañas de mensajería
+    } else {
+      // Insights + targeting real en paralelo. Si el targeting falla, audMap queda vacío y se cae
+      // al parseo del nombre del conjunto (degradación elegante).
+      const [mAds, targeting, st] = await Promise.all([
+        getAds(account, preset, range),
+        getAdsetTargeting(account).catch(() => ({})),
+        getAdStatuses(account).catch(() => null),
+      ]);
+      ads = mAds; statuses = st;
+      for (const id in targeting) { const lbl = classifyTargeting(targeting[id]); if (lbl) audMap[id] = lbl; tipoMap[id] = targetingTipo(targeting[id]); }
+    }
     const statusMap = statuses && Object.keys(statuses).length ? statuses : null;
     let rows = buildRows(ads, audMap, statusMap, tipoMap);
     rows = await enrichWithSheet(rows, tab); // si hay pestaña, cruza el Sheet; si no, devuelve las rows igual

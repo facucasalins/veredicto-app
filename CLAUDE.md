@@ -53,6 +53,15 @@ respuestas concisas.
   venta bajo ningún criterio. Devuelve siempre el desglose (`facturacionPagada/Pendiente`, `anuladas`).
   El criterio elegido se propaga a MER, objetivo del mes, Plan y chat.
 - `lib/dates.js` — `presetToRange(preset)` → `{since, until}`. Alinea Meta y Tienda Nube al mismo período.
+- `lib/tiktok.js` — cliente de la **TikTok Marketing API** (Business API v1.3), espejo de `lib/meta.js`:
+  `ttEnabled()`, `getAccounts()` (ids prefijados **`tt:`**, conviven con Meta en el mismo dropdown),
+  `getAds(adv, since, until)` (misma forma de fila → buildRows/Sheet funcionan igual), `getAccountSpend`
+  (con `porDia`), `getAdStatuses` (mapea secondary_status → ACTIVE/ADSET_PAUSED/CAMPAIGN_PAUSED),
+  `getAdgroupAudiences` (clasificación básica), `getAdsetBudgets` (ABO/CBO vía budget_optimize_on),
+  `isTikTok(id)`/`ttId(id)`. Las rutas (`accounts/ads/plan/chat/tiendanube-summary`) branchean por el
+  prefijo. Sin env vars degrada (solo Meta). TikTok no tiene modo mensajes (todo `tipo:"ventas"`).
+  OJO: métricas escritas contra la doc SIN probar contra la API real (falta el token) — la primera
+  conexión puede necesitar ajuste fino de nombres (`complete_payment_roas`, `complete_payment`).
 - `lib/store.js` — storage server-side en **Upstash Redis** (REST, sin dependencias): `storeEnabled()`,
   `kvGet(key)`, `kvSet(key, value)`. Para historiales/conversaciones compartidos. Sin env vars degrada
   (el front sigue en localStorage). Lo consume `/api/history` (GET/POST, scopeado por sesión, claves
@@ -149,6 +158,8 @@ pushear a `main` sin romper prod.
 - `TIENDANUBE_STORES` (JSON `[{name,store_id,token,account?,ventas?}]` — `ventas`:
   `"pagadas"`|`"no_canceladas"`, criterio de venta default de esa tienda), `TIENDANUBE_UA`.
 - `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL` (`claude-sonnet-4-6`) — generador, cerebro, match-hooks y chat.
+- `TIKTOK_ACCESS_TOKEN`, `TIKTOK_APP_ID`, `TIKTOK_SECRET` (+ `TIKTOK_ADVERTISERS` JSON opcional para
+  limitar cuentas) — TikTok Ads. Sin esto, el dropdown muestra solo Meta.
 - `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN` — historiales/conversaciones server-side
   (los inyecta sola la integración Upstash del Marketplace de Vercel; opcional, sin esto queda
   localStorage). Alias legacy soportados: `KV_REST_API_URL`/`KV_REST_API_TOKEN`.
@@ -164,8 +175,11 @@ pushear a `main` sin romper prod.
 
 ## Pendientes / roadmap
 
-- **TikTok Ads**: misma estructura que Meta (otro `lib/tiktok.js` + auth). Le da al cerebro visión
-  cross-plataforma.
+- **TikTok Ads**: el código YA está (`lib/tiktok.js` + branches en rutas) pero falta el acceso:
+  crear la app de developer en business-api.tiktok.com (scopes read de Ads/Reporting), esperar la
+  aprobación, autorizar con el Business Center y cargar las env vars. Al conectar el primer token,
+  VERIFICAR los nombres de métricas del reporte (no se pudieron probar sin token).
+- **Google Ads**: mismo patrón que TikTok; requiere developer token de Google Ads API (aprobación lenta).
 - **Snapshots históricos + GA4**: para que el cerebro razone sobre tendencia y causas full-funnel.
 - **Refresh del token de Meta**: regenerarlo como **"Sin vencimiento"** en Meta Business → Usuarios
   del sistema (evita el bajón de los ~60 días).

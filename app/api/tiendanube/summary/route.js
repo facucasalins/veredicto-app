@@ -1,6 +1,7 @@
 import { cookies } from "next/headers";
 import { getStoreRevenue } from "@/lib/tiendanube";
 import { getAccountSpend } from "@/lib/meta";
+import { isTikTok, ttId, getAccountSpend as ttGetAccountSpend } from "@/lib/tiktok";
 import { convertMonto } from "@/lib/fx";
 import { presetToRange } from "@/lib/dates";
 import { SESSION_COOKIE, verifySession, authDisabled, canSeeAccount } from "@/lib/auth";
@@ -28,8 +29,10 @@ export async function GET(req) {
     const tienda = await getStoreRevenue(store, since, until, count);
     let inversion = 0, roasMeta = 0, ventasMeta = 0;
     if (account) {
-      try { const m = await getAccountSpend(account, since, until); inversion = m.spend; roasMeta = m.roasMeta; ventasMeta = m.ventasMeta; }
-      catch { /* si Meta falla, mostramos solo facturación */ }
+      try {
+        const m = isTikTok(account) ? await ttGetAccountSpend(ttId(account), since, until) : await getAccountSpend(account, since, until);
+        inversion = m.spend; roasMeta = m.roasMeta; ventasMeta = m.ventasMeta;
+      } catch { /* si la plataforma falla, mostramos solo facturación */ }
     }
     // Si la cuenta de Meta y la tienda están en monedas distintas (típico: Meta en USD, tienda en
     // ARS), convertimos la inversión a la moneda de la tienda con el dólar oficial. Si no se puede

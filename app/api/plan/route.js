@@ -1,5 +1,6 @@
 import { cookies } from "next/headers";
 import { getAds, getAdsetBudgets } from "@/lib/meta";
+import { isTikTok, ttId, getAds as ttGetAds, getAdsetBudgets as ttGetAdsetBudgets } from "@/lib/tiktok";
 import { getStoreRevenue } from "@/lib/tiendanube";
 import { convertMonto } from "@/lib/fx";
 import { presetToRange } from "@/lib/dates";
@@ -58,9 +59,10 @@ export async function POST(req) {
   const diasRestan = Math.max(0, diasMes - diasTrans);
 
   try {
+    const tt = isTikTok(account);
     const [ads, budgets, tienda] = await Promise.all([
-      getAds(account, "this_month", { since, until }),
-      getAdsetBudgets(account).catch(() => ({})),
+      tt ? ttGetAds(ttId(account), since, until) : getAds(account, "this_month", { since, until }),
+      (tt ? ttGetAdsetBudgets(ttId(account)) : getAdsetBudgets(account)).catch(() => ({})),
       store ? getStoreRevenue(store, since, until, count).catch(() => null) : Promise.resolve(null),
     ]);
 
