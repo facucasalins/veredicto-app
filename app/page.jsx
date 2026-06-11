@@ -736,7 +736,7 @@ function Analisis({ withV, stats, audiencias, tnSummary, u, accountName, periodo
       inversion: stats.spendTotal,
       ...(msg
         ? { conversaciones: stats.convTotal, costo_conv_prom: +stats.costoConvProm.toFixed(2) }
-        : { ventas: stats.ventasTotal, cpa: Math.round(stats.cpaProm), roas_cuenta: +stats.accountRoas.toFixed(1), tienda: tnSummary ? { facturacion: tnSummary.facturacion, mer: tnSummary.mer, roas_pixel: +(tnSummary.roasMeta || 0).toFixed(1) } : null }),
+        : { ventas: stats.ventasTotal, cpa: Math.round(stats.cpaProm), roas_cuenta: +stats.accountRoas.toFixed(1), tienda: tnSummary ? { facturacion: tnSummary.facturacion, criterio_venta: tnSummary.criterio === "no_canceladas" ? "todas las no canceladas (pagadas + pendientes)" : "solo pagadas", mer: tnSummary.mer, roas_pixel: +(tnSummary.roasMeta || 0).toFixed(1) } : null }),
       veredictos: stats.counts,
       umbral: msg ? { costo_conv_max: u.costoMax === Infinity ? null : u.costoMax, piso_spend: u.pisoSpend || null } : { roas_min: u.roasMin || null, cpa_max: u.cpaMax === Infinity ? null : u.cpaMax, piso_spend: u.pisoSpend || null },
       ranking: { angulo_venta: top("ang"), categoria: top("cat"), hook: top("hook"), audiencia: aud, formato: top("fmt") },

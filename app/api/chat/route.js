@@ -17,7 +17,10 @@ export const maxDuration = 60; // Vercel: el loop de tools + paginación de TN p
 
 const MAX_TURNS = 6; // tope del loop de herramientas por pregunta
 
-function tools({ hasStore, hasTab, plataforma = "Meta" }) {
+function tools({ hasStore, hasTab, plataforma = "Meta", criterio = null }) {
+  const ventaTxt = criterio === "no_canceladas"
+    ? "criterio del cliente: cuentan TODAS las órdenes no canceladas — pagadas + pendientes de pago, sin las de pago anulado"
+    : "criterio del cliente: SOLO órdenes pagadas";
   const t = [
     {
       name: "meta_resumen",
@@ -34,12 +37,12 @@ function tools({ hasStore, hasTab, plataforma = "Meta" }) {
     t.push(
       {
         name: "tiendanube_resumen",
-        description: "Facturación de la tienda (SOLO órdenes pagadas), cantidad de órdenes, ticket promedio y pendientes de pago, en un rango de fechas.",
+        description: `Facturación de la tienda (${ventaTxt}), cantidad de órdenes, ticket promedio y desglose pagadas/pendientes, en un rango de fechas.`,
         input_schema: { type: "object", properties: { since: { type: "string" }, until: { type: "string" } }, required: ["since", "until"] },
       },
       {
         name: "tiendanube_productos",
-        description: "Top productos vendidos de la tienda por unidades y facturación (solo órdenes pagadas) en un rango de fechas.",
+        description: `Top productos vendidos de la tienda por unidades y facturación (${ventaTxt}) en un rango de fechas.`,
         input_schema: { type: "object", properties: { since: { type: "string" }, until: { type: "string" }, limit: { type: "number", description: "cuántos productos (default 10, máx 50)" } }, required: ["since", "until"] },
       },
     );
@@ -136,7 +139,7 @@ REGLAS:
       return { since, until, criterio: t.criterio, facturacion: t.facturacion, ordenes: t.orders, ticket_promedio: t.ticket, facturacion_pagada: t.facturacionPagada, ordenes_pagadas: t.ordersPagadas, facturacion_pendiente: t.facturacionPendiente, ordenes_pendientes: t.ordersPendientes, ordenes_pago_anulado: t.anuladas, moneda: t.moneda };
     }
     if (name === "tiendanube_productos") {
-      return { since, until, productos: await getTopProducts(store, since, until, input.limit || 10) };
+      return { since, until, criterio: criterio || "pagadas", productos: await getTopProducts(store, since, until, input.limit || 10, criterio) };
     }
     if (name === "sheet_analisis") {
       const idx = await buildSheetIndex(tab);
@@ -155,7 +158,7 @@ REGLAS:
   // Loop de tool-use: Claude pide datos, se los damos, hasta que responde en texto.
   try {
     const apiMessages = messages.slice(-12).map((m) => ({ role: m.role === "assistant" ? "assistant" : "user", content: String(m.content || "") }));
-    const toolDefs = tools({ hasStore: !!store, hasTab: !!tab, plataforma: isTikTok(account) ? "TikTok" : "Meta" });
+    const toolDefs = tools({ hasStore: !!store, hasTab: !!tab, plataforma: isTikTok(account) ? "TikTok" : "Meta", criterio });
 
     for (let turn = 0; turn < MAX_TURNS; turn++) {
       const r = await fetch("https://api.anthropic.com/v1/messages", {

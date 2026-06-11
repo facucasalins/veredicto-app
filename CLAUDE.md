@@ -51,7 +51,9 @@ respuestas concisas.
   de TN: solo `payment_status === "paid"`) o `"no_canceladas"` (conteo interno de clientes como
   MoraShop: toda orden no cancelada, pagada o pendiente). Las de pago **anulado (voided)** no son
   venta bajo ningún criterio. Devuelve siempre el desglose (`facturacionPagada/Pendiente`, `anuladas`).
-  El criterio elegido se propaga a MER, objetivo del mes, Plan y chat.
+  El criterio se propaga a TODO: MER, objetivo del mes, vista Cliente, cerebro (snapshot con
+  `criterio_venta`), Plan y chat (system + tools `tiendanube_resumen` y `tiendanube_productos`,
+  incluido el top de productos — `getTopProducts` acepta el mismo `criterio`).
 - `lib/dates.js` — `presetToRange(preset)` → `{since, until}`. Alinea Meta y Tienda Nube al mismo período.
 - `lib/tiktok.js` — cliente de la **TikTok Marketing API** (Business API v1.3), espejo de `lib/meta.js`:
   `ttEnabled()`, `getAccounts()` (ids prefijados **`tt:`**, conviven con Meta en el mismo dropdown),
