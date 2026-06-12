@@ -25,7 +25,7 @@ export async function GET() {
   try {
     const users = (await kvGet(KEY)) || [];
     // nunca exponemos hash/salt al front
-    const safe = (Array.isArray(users) ? users : []).map((u) => ({ u: u.u, admin: !!u.admin, accounts: u.accounts || [], tabs: u.tabs || [], updated: u.updated || null }));
+    const safe = (Array.isArray(users) ? users : []).map((u) => ({ u: u.u, admin: !!u.admin, accounts: u.accounts || [], tabs: u.tabs || [], stores: u.stores || [], updated: u.updated || null }));
     const envUsers = getUsers().map((u) => u.u); // solo nombres, como referencia (se editan por env)
     return Response.json({ enabled: true, users: safe, envUsers });
   } catch (e) {
@@ -67,6 +67,7 @@ export async function POST(req) {
         admin: !!body.admin,
         accounts: Array.isArray(body.accounts) ? body.accounts.map(String) : (prev ? prev.accounts : []),
         tabs: Array.isArray(body.tabs) ? body.tabs.map(String) : (prev ? prev.tabs : []),
+        stores: Array.isArray(body.stores) ? body.stores.map(String) : (prev ? prev.stores || [] : []),
         updated: new Date().toISOString(),
       };
       if (idx >= 0) users[idx] = entry; else users.push(entry);
