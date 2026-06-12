@@ -132,14 +132,18 @@ pushear a `main` sin romper prod.
   si Upstash está conectado, también server-side → compartido entre máquinas/usuarios de la cuenta.
   Si el server tiene data manda el server; si está vacío y el browser tiene historial viejo, lo migra
   solo. Lo mismo aplica a las conversaciones del chat (PREGUNTAR).
-- **Chat de la cuenta (`/api/chat`, pestaña PREGUNTAR)**: preguntas en lenguaje natural sobre los datos
-  de la cuenta elegida. Loop de **tool-use** (máx 6 vueltas) con herramientas read-only scopeadas:
-  `meta_resumen` (spend cuenta, opcional día por día), `meta_anuncios` (rows con estado/audiencia, top
-  100 por spend), `tiendanube_resumen`, `tiendanube_productos` (line items de órdenes PAGADAS) y
-  `sheet_analisis` (análisis cualitativo de la pestaña elegida). **Capado doble**: el prompt rechaza
-  todo lo que no sea de la cuenta con respuesta fija, y las únicas tools que existen consultan esa
-  cuenta (account validado con `canSeeAccount`). Montos de Meta convertidos a pesos (misma regla que
-  el panel). Conversación por cliente en localStorage (`nusa_chat_<account>`, tope 30 mensajes).
+- **Chat de la cuenta (`/api/chat`, pestaña PREGUNTAR)**: asistente COMPLETO de la cuenta elegida —
+  datos en lenguaje natural Y generación creativa (guiones/hooks/copys/ángulos PARA esa marca,
+  fundados en su receta ganadora + planilla + biblioteca). Loop de **tool-use** (máx 6 vueltas) con
+  herramientas read-only scopeadas: `meta_resumen` (spend cuenta, opcional día por día; platform-aware
+  Meta/TikTok), `meta_anuncios` (rows con estado/audiencia, top 100 por spend), `estructura_campanas`
+  (campañas→conjuntos con ABO/CBO, budgets y performance — para opinar sobre estructura/reformas),
+  `tiendanube_resumen`/`tiendanube_productos` (con el criterio de venta del cliente),
+  `biblioteca_hooks` (los 271 templates de `lib/hooks.js`, filtrable por familia) y `sheet_analisis`
+  (análisis cualitativo de la pestaña elegida). **Capado doble**: el prompt rechaza con respuesta fija
+  lo que no sea de la cuenta (conocimiento general, otras marcas, buscar afuera), y las únicas tools
+  que existen consultan esa cuenta (account validado con `canSeeAccount`). Montos en pesos (misma
+  regla que el panel). Conversación por cliente en localStorage+Upstash (tope 30 mensajes).
 - **Audiencias desde targeting real**: la clasificación sale del spec de Meta, no del nombre del
   conjunto (Hot/Tibio por intención de las audiencias). Fallback al nombre si falla.
 - **Estado activo/pausado**: cada creativo muestra `⏸ PAUSADA` si su `effective_status` no es ACTIVE.
