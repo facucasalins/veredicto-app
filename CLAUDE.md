@@ -40,9 +40,13 @@ respuestas concisas.
   derivado del `tipo_gancho` viejo (Pregunta→Ruptura, Dato/Número→Evidencia, ...; lo ambiguo "nd").
   El Top Performers tiene la dimensión **Familia** (Ruptura/Evidencia/Pérdida/Identidad — la misma
   taxonomía que la Biblioteca).
-- `lib/auth.js` — login por cliente. Cookie firmada HMAC-SHA256 con **Web Crypto** (Edge + Node).
-  Usuarios en `APP_USERS`. `authenticate`, `makeSessionToken`, `verifySession`, `canSeeAccount`,
-  `authDisabled`.
+- `lib/auth.js` — login por cliente con DOS fuentes: **APP_USERS** (env, texto plano) = admin de
+  RESPALDO (nunca te quedás afuera; manda ante mismo usuario) y **Upstash** (`nusa:users`, passwords
+  **hasheadas PBKDF2-SHA256 100k iter** vía Web Crypto) = usuarios de clientes, administrados desde
+  la pestaña **USUARIOS** de la app (solo admin, `/api/users` ABM) sin env vars ni redeploy. Cookie
+  firmada HMAC-SHA256 (Edge + Node). `authenticate` (async), `hashPassword`, `makeSessionToken`,
+  `verifySession`, `canSeeAccount`, `authDisabled` (el gate de login sigue dependiendo SOLO de que
+  APP_USERS tenga al menos un usuario).
 - `lib/tiendanube.js` — `listStores()`, `getStoreRevenue(name, since, until, criterio?)` y
   `getTopProducts(...)`. Header de auth es `Authentication: bearer <token>` (NO "Authorization") +
   `User-Agent` obligatorio. El endpoint `/orders` sin filtro devuelve TODO (abiertas + archivadas
@@ -95,6 +99,9 @@ pushear a `main` sin romper prod.
 
 - **Login por cliente** (`APP_USERS`, `SESSION_SECRET`): sin `APP_USERS` el login está DESACTIVADO
   (app abierta). Con usuarios: admin ve todo, el resto solo sus cuentas. Header con usuario + "salir".
+  Los usuarios de CLIENTES se administran desde la pestaña **USUARIOS** (solo admin): alta/edición/
+  borrado, generador de contraseñas, checkboxes de cuentas y pestañas del Sheet. Viven en Upstash
+  hasheados — no se ven ni recuperan, solo se resetean. `APP_USERS` queda como respaldo del admin.
 - **Tienda Nube** (`TIENDANUBE_STORES`, `TIENDANUBE_UA`): selector 🛒 solo si hay tiendas. Muestra
   banda **Facturación (tienda) vs Inversión (Meta) + MER** (mismo período). El objetivo del mes del
   Dashboard también toma la facturación de la tienda.

@@ -340,6 +340,7 @@ export default function App() {
             <button className={"tab" + (effView === "bib" ? " active" : "")} onClick={() => setView("bib")}>BIBLIOTECA</button>
             <button className={"tab" + (effView === "gen" ? " active" : "")} onClick={() => setView("gen")}>GENERAR</button>
             <button className={"tab" + (effView === "chat" ? " active" : "")} onClick={() => setView("chat")}>PREGUNTAR</button>
+            {(me === null || me?.admin) && <button className={"tab" + (effView === "usuarios" ? " active" : "")} onClick={() => setView("usuarios")}>USUARIOS</button>}
           </nav>
 
           {!!withV.length && (
@@ -365,6 +366,7 @@ export default function App() {
           {effView === "bib" && <Biblioteca rows={withV} hookMatch={hookMatch} setHookMatch={setHookMatch} />}
           {effView === "gen" && <Generar rows={withV} accountName={(accounts.find((a) => a.id === account) || {}).name || ""} />}
           {effView === "chat" && (!account ? <EmptyState account={account} loading={loading} err={err} /> : <Chat account={account} accountName={(accounts.find((a) => a.id === account) || {}).name || ""} store={tnStore} tab={sheetTab} accCur={accCur} criterio={tnCount} />)}
+          {effView === "usuarios" && <Usuarios accounts={accounts} sheetTabs={sheetTabs} />}
         </>
       )}
     </div>
@@ -613,6 +615,94 @@ function Historial({ items, render }) {
         </div>
       ))}
     </div>
+  );
+}
+
+// ─────────── Vista: USUARIOS (ABM de logins de clientes, solo admin) ───────────
+// Los usuarios viven en Upstash con password hasheada (PBKDF2) y se administran desde acá: sin
+// tocar env vars ni redeploy. Los admin de respaldo siguen en APP_USERS (env) y solo se listan.
+function Usuarios({ accounts, sheetTabs }) {
+  const [data, setData] = useState(null); // { enabled, users, envUsers }
+  const [err, setErr] = useState("");
+  const [okMsg, setOkMsg] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [editing, setEditing] = useState(null); // usuario en edición (null = alta)
+  const [fu, setFu] = useState(""); const [fp, setFp] = useState("");
+  const [fAdmin, setFAdmin] = useState(false);
+  const [fAcc, setFAcc] = useState([]); const [fTabs, setFTabs] = useState([]);
+
+  const load = () => { fetch("/api/users").then((r) => r.json()).then((j) => j.error ? setErr(j.error) : setData(j)).catch((e) => setErr(String(e.message || e))); };
+  useEffect(load, []);
+
+  const genPass = () => { const a = new Uint8Array(10); crypto.getRandomValues(a); setFp(Array.from(a, (b) => "abcdefghjkmnpqrstuvwxyzACDEFHJKLMNPRTUVWXY3479".charAt(b % 46)).join("")); };
+  const toggleIn = (arr, set) => (v) => set(arr.includes(v) ? arr.filter((x) => x !== v) : [...arr, v]);
+  const startEdit = (u) => { setEditing(u.u); setFu(u.u); setFp(""); setFAdmin(!!u.admin); setFAcc(u.accounts || []); setFTabs(u.tabs || []); setOkMsg(""); setErr(""); };
+  const reset = () => { setEditing(null); setFu(""); setFp(""); setFAdmin(false); setFAcc([]); setFTabs([]); };
+
+  const save = async () => {
+    setSaving(true); setErr(""); setOkMsg("");
+    try {
+      const res = await fetch("/api/users", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "upsert", u: fu, p: fp || undefined, admin: fAdmin, accounts: fAcc, tabs: fTabs }) });
+      const j = await res.json();
+      if (j.error) throw new Error(j.error);
+      setOkMsg((editing ? "Actualizado: " : "Creado: ") + fu + (fp ? " · pasale la contraseña por un canal seguro" : ""));
+      reset(); load();
+    } catch (e) { setErr(e.message); } finally { setSaving(false); }
+  };
+  const del = async (u) => {
+    if (!window.confirm("¿Borrar el usuario \"" + u + "\"? Deja de poder entrar.")) return;
+    setErr(""); setOkMsg("");
+    try {
+      const res = await fetch("/api/users", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "delete", u }) });
+      const j = await res.json();
+      if (j.error) throw new Error(j.error);
+      setOkMsg("Borrado: " + u); load();
+    } catch (e) { setErr(e.message); }
+  };
+
+  return (
+    <section className="an">
+      <div className="anhead">
+        <div><div className="antitle">▸ USUARIOS</div><div className="ansub">Logins de clientes: alta, contraseña y qué cuentas/pestañas ve cada uno. Contraseñas hasheadas en Upstash — acá no se ven ni se recuperan, solo se resetean.</div></div>
+      </div>
+      {err && <div className="generr">{err}</div>}
+      {okMsg && <div className="usrok">✓ {okMsg}</div>}
+      {data && data.enabled === false && <div className="anplaceholder">Falta conectar <b>Upstash</b> (Vercel → Storage) para administrar usuarios desde acá. Mientras tanto siguen por la env var <b>APP_USERS</b>.</div>}
+      {data && data.enabled && (
+        <>
+          <div className="usrlist">
+            {(data.users || []).map((u) => (
+              <div className="usrrow" key={u.u}>
+                <span className="usrname">{u.u}{u.admin ? <i className="usradmin">ADMIN</i> : null}</span>
+                <span className="usrmeta">{u.admin ? "ve todo" : (u.accounts.length + (u.accounts.length === 1 ? " cuenta" : " cuentas") + (u.tabs.length ? " · " + u.tabs.length + " pestañas" : ""))}</span>
+                <button className="usrbtn" onClick={() => startEdit(u)}>editar</button>
+                <button className="usrbtn del" onClick={() => del(u.u)}>borrar</button>
+              </div>
+            ))}
+            {!data.users.length && <div className="sempty">Sin usuarios en Upstash todavía. Creá el primero abajo.</div>}
+            {data.envUsers && data.envUsers.length > 0 && <div className="usrenv">De respaldo en env (APP_USERS, se editan en Vercel): {data.envUsers.join(", ")}</div>}
+          </div>
+          <div className="usrform">
+            <div className="usrformtitle">{editing ? "EDITAR: " + editing : "NUEVO USUARIO"}</div>
+            <div className="usrfields">
+              <input className="chatinput" placeholder="usuario (ej: morashop)" value={fu} onChange={(e) => setFu(e.target.value)} disabled={!!editing} />
+              <span className="usrpass"><input className="chatinput" placeholder={editing ? "nueva contraseña (vacío = no cambiar)" : "contraseña (mín. 8)"} value={fp} onChange={(e) => setFp(e.target.value)} /><button className="usrbtn" onClick={genPass}>generar</button></span>
+              <label className="usrchk"><input type="checkbox" checked={fAdmin} onChange={(e) => setFAdmin(e.target.checked)} /> admin (ve todas las cuentas)</label>
+            </div>
+            {!fAdmin && (
+              <div className="usrpick">
+                <div className="usrpickcol"><div className="usrpicklab">CUENTAS QUE VE</div>{accounts.map((a) => <label key={a.id} className="usrchk"><input type="checkbox" checked={fAcc.includes(a.id)} onChange={() => toggleIn(fAcc, setFAcc)(a.id)} /> {a.name}</label>)}</div>
+                <div className="usrpickcol"><div className="usrpicklab">PESTAÑAS DEL SHEET</div>{sheetTabs.map((t) => <label key={t.gid} className="usrchk"><input type="checkbox" checked={fTabs.includes(t.title)} onChange={() => toggleIn(fTabs, setFTabs)(t.title)} /> {t.title}</label>)}{!sheetTabs.length && <div className="sempty">sin pestañas</div>}</div>
+              </div>
+            )}
+            <div className="usractions">
+              <button className="anbtn" onClick={save} disabled={saving || !fu.trim() || (!editing && (fp || "").length < 8)}>{saving ? "…" : editing ? "✓ GUARDAR" : "+ CREAR"}</button>
+              {editing && <button className="usrbtn" onClick={reset}>cancelar</button>}
+            </div>
+          </div>
+        </>
+      )}
+    </section>
   );
 }
 
@@ -1575,6 +1665,28 @@ td{padding:11px 12px;vertical-align:middle;}.num{text-align:right;}.name{font-we
 .chatrow{display:flex;gap:10px;}
 .chatinput{flex:1;font-family:'Space Mono',monospace;font-size:13px;color:var(--ink);background:var(--paper2);border:2px solid var(--ink);border-radius:10px;padding:11px 14px;outline:none;}
 .chatinput:focus{box-shadow:3px 3px 0 var(--ink);}
+.usrok{font-family:'Space Mono',monospace;font-size:12px;color:#2E8B6B;background:#DCE9E1;border:2px solid #2E8B6B;border-radius:8px;padding:8px 12px;}
+.usrlist{display:flex;flex-direction:column;gap:6px;margin-bottom:18px;}
+.usrrow{display:flex;align-items:center;gap:12px;background:var(--paper2);border:2px solid var(--ink);border-radius:10px;padding:9px 14px;}
+.usrname{font-family:'Space Mono',monospace;font-weight:700;font-size:13px;}
+.usradmin{font-style:normal;font-size:9px;letter-spacing:1px;background:var(--c6);color:var(--paper);border-radius:5px;padding:2px 6px;margin-left:8px;}
+.usrmeta{font-family:'Space Mono',monospace;font-size:11px;color:var(--soft);margin-left:auto;}
+.usrbtn{font-family:'Space Mono',monospace;font-size:11px;color:var(--ink);background:var(--paper);border:2px solid var(--ink);border-radius:7px;padding:4px 10px;cursor:pointer;}
+.usrbtn:hover{background:var(--ink);color:var(--paper);}
+.usrbtn.del{color:#C5362B;border-color:#C5362B;}
+.usrbtn.del:hover{background:#C5362B;color:var(--paper);}
+.usrenv{font-family:'Space Mono',monospace;font-size:10px;color:var(--soft);font-style:italic;margin-top:4px;}
+.usrform{background:var(--paper2);border:2px solid var(--ink);border-radius:12px;padding:16px;box-shadow:4px 4px 0 var(--ink);display:flex;flex-direction:column;gap:12px;}
+.usrformtitle{font-family:'Space Mono',monospace;font-size:10px;letter-spacing:2px;color:var(--soft);}
+.usrfields{display:flex;gap:10px;flex-wrap:wrap;align-items:center;}
+.usrfields .chatinput{flex:1;min-width:200px;}
+.usrpass{display:flex;gap:6px;flex:1;min-width:260px;}
+.usrpass .chatinput{flex:1;}
+.usrchk{font-family:'Space Mono',monospace;font-size:12px;display:flex;align-items:center;gap:7px;cursor:pointer;}
+.usrpick{display:grid;grid-template-columns:1fr 1fr;gap:14px;}
+.usrpickcol{display:flex;flex-direction:column;gap:6px;max-height:220px;overflow-y:auto;border:2px dashed var(--line);border-radius:10px;padding:10px 12px;}
+.usrpicklab{font-family:'Space Mono',monospace;font-size:9px;letter-spacing:2px;color:var(--soft);}
+.usractions{display:flex;gap:10px;align-items:center;}
 .anaccion{display:flex;gap:11px;align-items:flex-start;padding:9px 0;border-top:1px solid var(--line);}
 .anaccion:first-of-type{border-top:none;}
 .anprio{font-family:'Space Mono',monospace;font-size:9px;font-weight:700;letter-spacing:1px;color:#fff;border-radius:4px;padding:3px 7px;flex-shrink:0;margin-top:1px;}
