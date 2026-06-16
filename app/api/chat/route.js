@@ -53,7 +53,7 @@ function tools({ hasStore, hasTab, plataforma = "Meta", criterio = null }) {
       },
       {
         name: "tiendanube_clientes",
-        description: `Clientes NUEVOS vs RECURRENTES de la tienda en un rango (${ventaTxt}). Recurrente = ya existía como cliente antes del período; nuevo = primera compra/alta dentro del período. Devuelve cantidad de clientes, órdenes y facturación de cada segmento + su porcentaje. Para retención, fidelización y de dónde viene la facturación (clientes nuevos vs base).`,
+        description: `Clientes NUEVOS vs RECURRENTES de la tienda en un rango (${ventaTxt}). Recurrente = ya existía como cliente antes del período; nuevo = primera compra/alta dentro del período. Devuelve cantidad de clientes, órdenes y facturación de cada segmento + su porcentaje. Para retención, fidelización y de dónde viene la facturación (clientes nuevos vs base). IMPORTANTE: es una consulta PESADA (lee todas las órdenes del período). Usá rangos de COMO MUCHO ~1 mes por llamada. Si el usuario pide varios meses, consultá UN mes y aclarale que por el volumen conviene ir de a uno; NO dispares varias llamadas de meses distintos en la misma respuesta.`,
         input_schema: { type: "object", properties: { since: { type: "string" }, until: { type: "string" } }, required: ["since", "until"] },
       },
     );
@@ -111,8 +111,19 @@ REGLAS:
 - ${tab ? `La pestaña de la planilla de análisis es "${tab}".` : "No hay pestaña de planilla seleccionada: si preguntan por el análisis cualitativo, pedí que elijan la pestaña del Sheet en el panel."}
 - Español rioplatense (vos), conciso y directo. Sin relleno.`;
 
+  // Presupuesto de tiempo: el serverless de Vercel (plan Hobby) corta a los 60s y devuelve una
+  // página de error en TEXTO (no JSON) que el front no puede parsear. Algunas tools de Tienda Nube
+  // (clientes/productos) leen TODAS las órdenes del período y tardan ~25s en tiendas grandes: dos
+  // de esas en un mismo request se pasan de 60s. Si ya consumimos el presupuesto, la próxima tool
+  // se rechaza con un mensaje claro (JSON limpio) y el modelo responde con eso — nunca timeout.
+  const started = Date.now();
+  const BUDGET_MS = 24000;
+
   // Ejecuta una herramienta. Todo read-only, todo scopeado a `account`/`store`/`tab` ya validados.
   async function runTool(name, input = {}) {
+    if (Date.now() - started > BUDGET_MS) {
+      return { error: "Se agotó el tiempo disponible para esta consulta (es muy pesada para procesar de una). Pedímela con un período más corto — por ejemplo, un mes por vez." };
+    }
     const { since, until } = input;
     const tt = isTikTok(account);
     if (name === "meta_resumen") {
