@@ -25,7 +25,7 @@ function tools({ hasStore, hasTab, plataforma = "Meta", criterio = null }) {
   const t = [
     {
       name: "meta_resumen",
-      description: `Spend, ventas atribuidas y ROAS a nivel CUENTA de ${plataforma} en un rango de fechas. Con por_dia=true devuelve además el desglose día por día (para promedios diarios, picos, tendencia).`,
+      description: `Spend, ventas atribuidas y ROAS a nivel CUENTA de ${plataforma} en un rango de fechas.${plataforma === "Meta" ? " Incluye además TRÁFICO del período: visitas_web (landing page views = gente que cargó el sitio desde los anuncios), clics_enlace, impresiones y embudo (ver_contenido, add_to_cart, iniciar_checkout). OJO: es tráfico PAGO de Meta, NO el total del sitio (para el total de visitas haría falta Google Analytics)." : ""} Con por_dia=true devuelve además el desglose día por día (para promedios diarios, picos, tendencia).`,
       input_schema: { type: "object", properties: { since: { type: "string", description: "YYYY-MM-DD" }, until: { type: "string", description: "YYYY-MM-DD" }, por_dia: { type: "boolean" } }, required: ["since", "until"] },
     },
     {
@@ -129,6 +129,17 @@ REGLAS:
     if (name === "meta_resumen") {
       const r = tt ? await ttGetAccountSpend(ttId(account), since, until) : await getAccountSpend(account, since, until);
       const out = { since, until, plataforma: tt ? "TikTok" : "Meta", inversion: conv(r.spend), roas_pixel: r.roasMeta, ventas: r.ventasMeta, moneda: "ARS" };
+      // Tráfico/embudo de Meta (CONTEOS, NO plata → sin conv()). Solo Meta los trae (TikTok no).
+      // Son tráfico PAGO generado por los anuncios, NO el total del sitio (eso sería GA4).
+      if (r.visitasWeb != null) {
+        out.visitas_web = r.visitasWeb;           // landing page views: cargaron el sitio desde el ad
+        out.clics_enlace = r.clicsEnlace;         // clics al enlace
+        out.impresiones = r.impresiones;
+        out.ver_contenido = r.verContenido;
+        out.add_to_cart = r.addToCart;
+        out.iniciar_checkout = r.iniciarCheckout;
+        out.nota_trafico = "visitas_web/clics son tráfico PAGO de Meta del período, no el total del sitio (para el total haría falta Google Analytics).";
+      }
       if (input.por_dia) {
         const dias = tt ? await ttGetAccountSpend(ttId(account), since, until, true) : await getAccountSpendDaily(account, since, until);
         out.por_dia = dias.map((d) => ({ ...d, spend: conv(d.spend) }));
