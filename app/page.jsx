@@ -84,6 +84,16 @@ const tf = (r) => { const m = String(r?.id || "").match(/\((\d{1,2}\.\d{2}\.\d{2
 const TF = ({ r }) => tf(r) ? <span className="tf">{tf(r)}</span> : null;
 // Tag de estado: solo aparece si SABEMOS que el creativo está pausado (activa === false).
 const Paused = ({ r }) => r && r.activa === false ? <span className="pausedtag">⏸ PAUSADA</span> : null;
+// Clasificación de calidad de Meta (vs competencia por la misma audiencia). Solo aparece si Meta
+// la informó (≥500 impresiones); diagnóstico de creativo. Valor titular = ponderado por spend.
+const QUAL = {
+  ABOVE_AVERAGE:    { short: "Calidad ▲", lab: "Calidad arriba del promedio (Meta)", color: "#2E8B6B", bg: "#DCE9E1" },
+  AVERAGE:          { short: "Calidad =", lab: "Calidad promedio (Meta)", color: "#857A6A", bg: "#E5DBC8" },
+  BELOW_AVERAGE_35: { short: "Calidad ▼", lab: "Calidad debajo del promedio — peor 35% (Meta)", color: "#C5362B", bg: "#F1D9D3" },
+  BELOW_AVERAGE_20: { short: "Calidad ▼", lab: "Calidad debajo del promedio — peor 20% (Meta)", color: "#C5362B", bg: "#F1D9D3" },
+  BELOW_AVERAGE_10: { short: "Calidad ▼▼", lab: "Calidad debajo del promedio — peor 10% (Meta)", color: "#C5362B", bg: "#F1D9D3" },
+};
+const Calidad = ({ v, mix }) => { const q = v && QUAL[v]; if (!q) return null; return <span className="qualtag" style={{ color: q.color, background: q.bg }} title={q.lab + (mix ? " · varía entre conjuntos (apretá para ver el detalle)" : "")}>{q.short}{mix ? "*" : ""}</span>; };
 // Ganadores para coronar/iterar: prioriza creativos ACTIVOS y confiables (>=5 ventas). Así no
 // corona un HotSale pausado o un ROAS de chiripa. Cae a lo que haya si no llega.
 function topWinners(rows, n = 3) {
@@ -528,9 +538,9 @@ function Top({ withV, u, audData, modo = "ventas" }) {
                 <div className="rexp">
                   {membersFor(d.key).sort((a, b) => b.spend - a.spend).map((m) => (
                     <div className="rexad" key={m.id}>
-                      <div className="rexhead"><b>{m.nombre}</b><TF r={m} /><Paused r={m} /> <span className="rexkpi">{msg ? (money(m.costoConv) + "/conv · " + short(m.spend) + " · " + nf.format(m.conversaciones) + " conv") : (m.roas.toFixed(1) + "x · " + short(m.spend) + " · " + nf.format(m.ventas) + " vtas")}</span></div>
+                      <div className="rexhead"><b>{m.nombre}</b><TF r={m} /><Paused r={m} /><Calidad v={m.calidad} mix={m.calidadMix} /> <span className="rexkpi">{msg ? (money(m.costoConv) + "/conv · " + short(m.spend) + " · " + nf.format(m.conversaciones) + " conv") : (m.roas.toFixed(1) + "x · " + short(m.spend) + " · " + nf.format(m.ventas) + " vtas")}</span></div>
                       {(m.breakdown || []).map((b, j) => (
-                        <div className="rexline" key={j}><span className="rexcamp">{b.campaign}</span> › <span className="rexset">{b.adset}</span>{b.aud ? <span className="rexaud">{b.aud}</span> : null}<span className="rexmeta">{short(b.spend)} · {msg ? (nf.format(b.ventas) + " vtas") : (nf.format(b.ventas) + " vtas · " + b.roas.toFixed(1) + "x")}</span></div>
+                        <div className="rexline" key={j}><span className="rexcamp">{b.campaign}</span> › <span className="rexset">{b.adset}</span>{b.aud ? <span className="rexaud">{b.aud}</span> : null}<Calidad v={b.calidad} /><span className="rexmeta">{short(b.spend)} · {msg ? (nf.format(b.ventas) + " vtas") : (nf.format(b.ventas) + " vtas · " + b.roas.toFixed(1) + "x")}</span></div>
                       ))}
                     </div>
                   ))}
@@ -1042,7 +1052,7 @@ function Panel({ rows, stats, sort, setSortKey, modo = "ventas" }) {
           <tbody>
             {rows.map((r) => { const b = BUCKETS[r.v]; return (
               <tr key={r.id} style={{ "--bar": b.color }}>
-                <td className="name">{r.nombre} <span className="fmt">{r.fmt}</span><TF r={r} /><Paused r={r} /></td>
+                <td className="name">{r.nombre} <span className="fmt">{r.fmt}</span><TF r={r} /><Paused r={r} /><Calidad v={r.calidad} mix={r.calidadMix} /></td>
                 <td className="ang">{r.ang}{r.sec !== "—" ? <span className="sec"> / {r.sec}</span> : null}<span className="split">{r.split}</span></td>
                 <td className="aud">{r.aud}</td><td className="mono num">{money(r.spend)}</td>{msg ? <><td className="mono num strong">{nf.format(r.conversaciones)}</td><td className="mono num">{money(r.costoConv)}</td></> : <><td className="mono num strong">{r.roas.toFixed(1)}x</td><td className="mono num">{money(r.cpa)}</td></>}
                 <td><span className="badge" style={{ background: b.bg, color: b.color }}><span className="sq" style={{ background: b.color }} />{r.v}</span></td>
@@ -1556,6 +1566,7 @@ td{padding:11px 12px;vertical-align:middle;}.num{text-align:right;}.name{font-we
 .fmt{font-size:9px;color:var(--soft);border:1px solid var(--line);border-radius:3px;padding:1px 5px;margin-left:6px;font-family:'Space Mono',monospace;letter-spacing:1px;}
 .tf{font-size:9px;color:var(--soft);background:rgba(0,0,0,.04);border:1px solid var(--line);border-radius:3px;padding:1px 5px;margin-left:6px;font-family:'Space Mono',monospace;letter-spacing:.5px;white-space:nowrap;}
 .pausedtag{font-size:9px;color:#8A1C12;background:#FBE8E6;border:1px solid #E0A59E;border-radius:3px;padding:1px 5px;margin-left:6px;font-family:'Space Mono',monospace;letter-spacing:.5px;white-space:nowrap;font-weight:700;}
+.qualtag{font-size:9px;border:1px solid currentColor;border-radius:3px;padding:1px 5px;margin-left:6px;font-family:'Space Mono',monospace;letter-spacing:.5px;white-space:nowrap;font-weight:700;cursor:help;}
 .metaerr{background:#FBE8E6;color:#8A1C12;border-top:2px solid #C0392B;padding:9px 22px;font-size:12.5px;line-height:1.45;font-family:'Space Mono',monospace;}
 .metaerr-sample{color:#B05A50;}
 .userbox{display:flex;align-items:center;gap:8px;margin-left:10px;flex-shrink:0;white-space:nowrap;}

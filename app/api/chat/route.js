@@ -30,7 +30,7 @@ function tools({ hasStore, hasTab, plataforma = "Meta", criterio = null }) {
     },
     {
       name: "meta_anuncios",
-      description: `Lista de creativos/anuncios de ${plataforma} del período con spend, ROAS, ventas, conversaciones, CPA, costo por conversación, estado (activa true/false), audiencia, ángulo y formato. Viene ordenada por spend descendente (máx 100). Para rankings, filtros y conteos de anuncios.`,
+      description: `Lista de creativos/anuncios de ${plataforma} del período con spend, ROAS, ventas, conversaciones, CPA, costo por conversación, estado (activa true/false), audiencia, ángulo, formato y la clasificación de calidad de Meta (calidad/interaccion/conversion: ABOVE_AVERAGE | AVERAGE | BELOW_AVERAGE_* o null si no hay datos — diagnóstico de creativo vs competencia). Viene ordenada por spend descendente (máx 100). Para rankings, filtros, conteos y para detectar creativos que Meta califica mal.`,
       input_schema: { type: "object", properties: { since: { type: "string" }, until: { type: "string" } }, required: ["since", "until"] },
     },
     {
@@ -161,6 +161,8 @@ REGLAS:
           nombre: r.nombre, spend: conv(r.spend), roas: r.roas, ventas: r.ventas, cpa: conv(r.cpa),
           conversaciones: r.conversaciones, costo_conv: +((r.costoConv || 0) * rate).toFixed(2),
           tipo: r.tipo, activa: r.activa, audiencia: r.aud, angulo: r.ang, formato: r.fmt,
+          // clasificación de calidad de Meta (vs competencia) — diagnóstico de creativo, ponderado por spend
+          calidad: r.calidad, interaccion: r.interaccion, conversion: r.conversion,
         })),
       };
     }
