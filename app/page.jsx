@@ -94,6 +94,37 @@ const QUAL = {
   BELOW_AVERAGE_10: { short: "Calidad ▼▼", lab: "Calidad debajo del promedio — peor 10% (Meta)", color: "#C5362B", bg: "#F1D9D3" },
 };
 const Calidad = ({ v, mix }) => { const q = v && QUAL[v]; if (!q) return null; return <span className="qualtag" style={{ color: q.color, background: q.bg }} title={q.lab + (mix ? " · varía entre conjuntos (apretá para ver el detalle)" : "")}>{q.short}{mix ? "*" : ""}</span>; };
+// Frecuencia (impresiones/persona). Flag de fatiga: ≥max rojo, ≥max-1 amarillo (default max=4). Solo
+// se usa a nivel CONJUNTO (granularidad correcta): la frecuencia es por audiencia/adset y promediarla
+// entre conjuntos distintos no es una métrica de fatiga válida, así que NO se muestra por creativo.
+// max=null → sin flag.
+const Freq = ({ v, max = 4 }) => {
+  if (!v) return null;
+  const flag = max != null;
+  const tone = !flag ? { c: "#857A6A", b: "#E5DBC8" } : v >= max ? { c: "#C5362B", b: "#F1D9D3" } : v >= max - 1 ? { c: "#C2861F", b: "#F1E4C4" } : { c: "#2E8B6B", b: "#DCE9E1" };
+  return <span className="qualtag" style={{ color: tone.c, background: tone.b }} title={`Frecuencia: cada persona vio el aviso ~${v.toFixed(1)} veces en el período${flag && v >= max ? " · fatiga (alta)" : flag && v >= max - 1 ? " · vigilar" : ""}`}>✱ {v.toFixed(1)}</span>;
+};
+// Rol de embudo del creativo, combinando AUDIENCIA (targeting real) + ÁNGULO (Sheet/categoría).
+// 0 = arriba/frío (enganchar) … 2 = abajo/remate (cerrar). Audiencia pesa más (0.6) que ángulo (0.4).
+const AUD_POS = (aud) => { const s = String(aud || "").toLowerCase(); if (/retarget|rmkt/.test(s)) return 2; if (/lookalike|\blal\b/.test(s)) return 1; if (/advantage|amplio|inter/.test(s)) return 0; return null; };
+const ANG_POS = (ang) => { const s = String(ang || "").toLowerCase();
+  if (/transaccional|urgencia|comparativo|versus|oferta|descuento|promo|hot.?sale|fomo|escasez|stock|liquidaci|precio|ahorro/.test(s)) return 2; // remate
+  if (/demostrativo|testimonial|rese|educativo|lista|unboxing|prueba social|social proof|tutorial|como funciona/.test(s)) return 1; // consideración
+  if (/aspiracional|lanzamiento|cat[aá]logo|colecci|identidad|marca|storytelling|meme|humor/.test(s)) return 0; // awareness/frío
+  return null; };
+function rolEmbudo(r) {
+  const a = AUD_POS(r.aud), g = ANG_POS(r.sheet?.angulo || r.ang);
+  const ps = []; if (a != null) ps.push([a, 0.6]); if (g != null) ps.push([g, 0.4]);
+  if (!ps.length) return null;
+  const sc = ps.reduce((s, [v, w]) => s + v * w, 0) / ps.reduce((s, [, w]) => s + w, 0);
+  return sc < 0.67 ? "frio" : sc < 1.34 ? "medio" : "remate";
+}
+const ROL = {
+  frio:   { lab: "ARRIBA · frío", short: "ARRIBA", desc: "Enganchar y traer tráfico barato. Se juzga por hook rate y CTR, NO por ROAS.", color: "#2E6E94", bg: "#D9E6EE" },
+  medio:  { lab: "MEDIO · consideración", short: "MEDIO", desc: "Mover a carrito. Costo por add-to-cart y CTR.", color: "#6E3E94", bg: "#E6DCEE" },
+  remate: { lab: "ABAJO · remate", short: "REMATE", desc: "Cerrar la venta. ROAS y CPA mandan.", color: "#2E8B6B", bg: "#DCE9E1" },
+};
+const RolTag = ({ r }) => { const k = rolEmbudo(r); if (!k) return null; const x = ROL[k]; return <span className="qualtag" style={{ color: x.color, background: x.bg }} title={x.desc}>{x.short}</span>; };
 // Ganadores para coronar/iterar: prioriza creativos ACTIVOS y confiables (>=5 ventas). Así no
 // corona un HotSale pausado o un ROAS de chiripa. Cae a lo que haya si no llega.
 function topWinners(rows, n = 3) {
@@ -113,7 +144,7 @@ const EJECOLOR = { Identidad:"#2E8B6B", Ruptura:"#6E3E94", "Pérdida":"#C5362B",
 const PRESETS = [{ v: "today", l: "Hoy" }, { v: "last_7d", l: "Últimos 7 días" }, { v: "last_14d", l: "Últimos 14 días" }, { v: "last_30d", l: "Últimos 30 días" }, { v: "last_90d", l: "Últimos 90 días" }, { v: "this_month", l: "Este mes" }, { v: "last_month", l: "Mes pasado" }, { v: "maximum", l: "Máximo" }];
 
 export default function App() {
-  const [u, setU] = useState({ roasMin: 20, cpaMax: 3000, pisoSpend: 50000, costoMax: null });
+  const [u, setU] = useState({ roasMin: 20, cpaMax: 3000, pisoSpend: 50000, costoMax: null, freqMax: 4 });
   const [modo, setModo] = useState("ventas"); // ventas | mensajes
   const [goal, setGoal] = useState(0);
   const [sort, setSort] = useState({ key: "veredicto", dir: "asc" });
@@ -210,6 +241,7 @@ export default function App() {
     cpaMax: u.cpaMax == null ? Infinity : u.cpaMax,
     pisoSpend: u.pisoSpend == null ? 0 : u.pisoSpend,
     costoMax: u.costoMax == null ? Infinity : u.costoMax,
+    freqMax: u.freqMax == null ? null : u.freqMax, // null = sin flag de fatiga
   }), [u]);
   // Conversión a pesos: multiplicamos los montos de Meta (spend, cpa, costo/conv) por el dólar.
   // ROAS (ratio), ventas y conversaciones (conteos) no se tocan. Todo lo de abajo (stats, top,
@@ -348,6 +380,7 @@ export default function App() {
             <button className={"tab tabai" + (effView === "plan" ? " active" : "")} onClick={() => setView("plan")}>◎ PLAN</button>
             <button className={"tab" + (effView === "hoy" ? " active" : "")} onClick={() => setView("hoy")}>QUÉ HACER HOY {totalTasks ? <span className="tabn">{totalTasks}</span> : null}</button>
             <button className={"tab" + (effView === "top" ? " active" : "")} onClick={() => setView("top")}>TOP PERFORMERS</button>
+            <button className={"tab" + (effView === "embudo" ? " active" : "")} onClick={() => setView("embudo")}>EMBUDO</button>
             <button className={"tab" + (effView === "panel" ? " active" : "")} onClick={() => setView("panel")}>PANEL</button>
             <button className={"tab" + (effView === "bib" ? " active" : "")} onClick={() => setView("bib")}>BIBLIOTECA</button>
             <button className={"tab" + (effView === "gen" ? " active" : "")} onClick={() => setView("gen")}>GENERAR</button>
@@ -364,16 +397,18 @@ export default function App() {
                 <Field label="CPA máximo" prefix="$" value={u.cpaMax} step={100} locked={locked} onChange={(v) => setU({ ...u, cpaMax: v })} />
               </>)}
               <Field label="Piso de spend" prefix="$" value={u.pisoSpend} step={5000} locked={locked} onChange={(v) => setU({ ...u, pisoSpend: v })} />
+              <Field label="Frecuencia máx" suffix="✱" value={u.freqMax} step={1} locked={locked} onChange={(v) => setU({ ...u, freqMax: v })} />
               <div className="uhint">{locked ? "🔒 definido por la cuenta · no editable" : "cambiá los valores · todo recalcula en vivo"}</div>
             </section>
           )}
 
           {effView === "an" && (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Analisis withV={withV} stats={stats} audiencias={audConv} tnSummary={tnSummary} u={ueff} accountName={(accounts.find((a) => a.id === account) || {}).name || ""} periodo={preset === "custom" && cSince && cUntil ? cSince + " → " + cUntil : preset} analysis={analysis} setAnalysis={setAnalysis} modo={modo} account={account} />)}
           {effView === "plan" && (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Plan account={account} store={tnStore} goal={goal} plan={plan} setPlan={setPlan} modo={modo} accCur={accCur} count={tnCount} />)}
-          {effView === "dash" && (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Dash stats={stats} goal={goal} setGoal={setGoal} factTienda={tnSummary ? tnSummary.facturacion : null} tnStore={tnStore} modo={modo} />)}
+          {effView === "dash" && (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Dash stats={stats} u={ueff} goal={goal} setGoal={setGoal} factTienda={tnSummary ? tnSummary.facturacion : null} tnStore={tnStore} modo={modo} />)}
           {effView === "hoy" && (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Hoy acc={acciones} u={ueff} done={done} toggle={toggle} total={totalTasks} doneCount={doneCount} mantener={stats.counts.Mantener} modo={modo} />)}
           {effView === "top" && (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Top withV={withV} u={ueff} audData={audConv} modo={modo} />)}
-          {effView === "panel" && (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Panel rows={rows} stats={stats} sort={sort} setSortKey={setSortKey} modo={modo} />)}
+          {effView === "embudo" && (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Embudo withV={withV} u={ueff} modo={modo} accountName={(accounts.find((a) => a.id === account) || {}).name || ""} />)}
+          {effView === "panel" && (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Panel rows={rows} u={ueff} stats={stats} sort={sort} setSortKey={setSortKey} modo={modo} />)}
           {effView === "bib" && <Biblioteca rows={withV} hookMatch={hookMatch} setHookMatch={setHookMatch} />}
           {effView === "gen" && <Generar rows={withV} accountName={(accounts.find((a) => a.id === account) || {}).name || ""} />}
           {effView === "chat" && (!account ? <EmptyState account={account} loading={loading} err={err} /> : <Chat account={account} accountName={(accounts.find((a) => a.id === account) || {}).name || ""} store={tnStore} tab={sheetTab} accCur={accCur} criterio={tnCount} />)}
@@ -538,9 +573,9 @@ function Top({ withV, u, audData, modo = "ventas" }) {
                 <div className="rexp">
                   {membersFor(d.key).sort((a, b) => b.spend - a.spend).map((m) => (
                     <div className="rexad" key={m.id}>
-                      <div className="rexhead"><b>{m.nombre}</b><TF r={m} /><Paused r={m} /><Calidad v={m.calidad} mix={m.calidadMix} /> <span className="rexkpi">{msg ? (money(m.costoConv) + "/conv · " + short(m.spend) + " · " + nf.format(m.conversaciones) + " conv") : (m.roas.toFixed(1) + "x · " + short(m.spend) + " · " + nf.format(m.ventas) + " vtas")}</span></div>
+                      <div className="rexhead"><b>{m.nombre}</b><TF r={m} /><Paused r={m} /><RolTag r={m} /><Calidad v={m.calidad} mix={m.calidadMix} /> <span className="rexkpi">{msg ? (money(m.costoConv) + "/conv · " + short(m.spend) + " · " + nf.format(m.conversaciones) + " conv") : (m.roas.toFixed(1) + "x · " + short(m.spend) + " · " + nf.format(m.ventas) + " vtas")}</span></div>
                       {(m.breakdown || []).map((b, j) => (
-                        <div className="rexline" key={j}><span className="rexcamp">{b.campaign}</span> › <span className="rexset">{b.adset}</span>{b.aud ? <span className="rexaud">{b.aud}</span> : null}<Calidad v={b.calidad} /><span className="rexmeta">{short(b.spend)} · {msg ? (nf.format(b.conversaciones) + " conv") : (nf.format(b.ventas) + " vtas · " + b.roas.toFixed(1) + "x")}</span></div>
+                        <div className="rexline" key={j}><span className="rexcamp">{b.campaign}</span> › <span className="rexset">{b.adset}</span>{b.aud ? <span className="rexaud">{b.aud}</span> : null}<Calidad v={b.calidad} /><Freq v={b.freq} max={u.freqMax} /><span className="rexmeta">{short(b.spend)} · {msg ? (nf.format(b.conversaciones) + " conv") : (nf.format(b.ventas) + " vtas · " + b.roas.toFixed(1) + "x")}</span></div>
                       ))}
                     </div>
                   ))}
@@ -555,6 +590,120 @@ function Top({ withV, u, audData, modo = "ventas" }) {
   );
 }
 function Rec({ k, v }) { return <div className="recchip"><span className="reck">{k}</span><span className="recv">{v}</span></div>; }
+
+// ─────────── Vista: EMBUDO (full-funnel) ───────────
+// El problema que resuelve: rankear TODO por ROAS castiga a los creativos de arriba del embudo
+// (frío), cuyo trabajo es enganchar y traer tráfico, no rematar. Acá: (1) el embudo de la cuenta
+// (waterfall con % de paso y costo por etapa) y (2) los creativos agrupados por ROL de embudo, cada
+// uno juzgado por la métrica de SU etapa (frío→hook/CTR, medio→costo/ATC, remate→ROAS).
+function Embudo({ withV, u, modo = "ventas", accountName = "" }) {
+  const msg = modo === "mensajes";
+  const reliable = useMemo(() => withV.filter((r) => r.spend >= u.pisoSpend), [withV, u.pisoSpend]);
+  // Totales de cuenta: los CONTEOS se suman (reach no, pero acá no lo usamos).
+  const tot = useMemo(() => {
+    const s = { spend: 0, imp: 0, video3s: 0, clics: 0, lpv: 0, vc: 0, atc: 0, checkout: 0, ventas: 0, revenue: 0 };
+    withV.forEach((r) => { s.spend += r.spend; s.imp += (r.impresiones || 0); s.video3s += (r.video3s || 0); s.clics += (r.clics || 0); s.lpv += (r.lpv || 0); s.vc += (r.vc || 0); s.atc += (r.atc || 0); s.checkout += (r.checkout || 0); s.ventas += r.ventas; s.revenue += r.spend * r.roas; });
+    return s;
+  }, [withV]);
+  const rate = (n, d) => d ? n / d : 0;
+  const pc = (x) => (x * 100).toFixed(x < 0.1 && x > 0 ? 1 : 0) + "%";
+
+  if (!tot.imp) return (
+    <section className="empty"><div className="emptymark">◆</div><div className="emptytitle">Sin datos de embudo en este período</div><div className="emptysub">El embudo se arma con las impresiones, clics y eventos del pixel de Meta. (TikTok todavía no reporta el embudo completo.)</div></section>
+  );
+
+  // Cadena de conversión (los conteos de Meta no siempre son monótonos — VC puede superar a clics por
+  // multi-disparo/omni; lo mostramos honesto y el costo por etapa es lo más comparable).
+  const chain = [
+    { lab: "Clics al enlace", n: tot.clics },
+    { lab: "Landing page views", n: tot.lpv },
+    { lab: "View content", n: tot.vc },
+    { lab: "Add to cart", n: tot.atc },
+    { lab: "Checkout iniciado", n: tot.checkout },
+    { lab: "Compras", n: tot.ventas },
+  ];
+  const base = tot.clics || 1;
+
+  // Creativos por rol de embudo (solo confiables). Cada rol con su métrica de etapa.
+  const roles = useMemo(() => {
+    const g = { frio: [], medio: [], remate: [] };
+    reliable.forEach((r) => { const k = rolEmbudo(r); if (k) g[k].push(r); });
+    const ctr = (r) => rate(r.clics, r.impresiones);
+    g.frio.sort((a, b) => ctr(b) - ctr(a));
+    g.medio.sort((a, b) => (a.atc ? a.spend / a.atc : 9e12) - (b.atc ? b.spend / b.atc : 9e12));
+    g.remate.sort((a, b) => b.roas - a.roas);
+    return g;
+  }, [reliable]);
+
+  const KPI = ({ lab, val, sub }) => <div className="kpi"><div className="klab">{lab}</div><div className="kval">{val}</div>{sub ? <div className="ksub">{sub}</div> : null}</div>;
+
+  return (
+    <>
+      <div className="dayhead">
+        <div><div className="daytitle">EMBUDO</div><div className="daysub">{accountName || "Cuenta"} · de la impresión a la venta — para ver TODO el recorrido, no solo el remate</div></div>
+      </div>
+
+      {/* Entrega y atención (tasas, no es una cadena de personas) */}
+      <section className="kpis">
+        <KPI lab="IMPRESIONES" val={short(tot.imp).replace("$", "")} sub={`CPM ${money(rate(tot.spend, tot.imp) * 1000)}`} />
+        <KPI lab="HOOK RATE (3s)" val={pc(rate(tot.video3s, tot.imp))} sub={`${nf.format(tot.video3s)} reproducciones 3s`} />
+        <KPI lab="CTR (enlace)" val={pc(rate(tot.clics, tot.imp))} sub={`${nf.format(tot.clics)} clics`} />
+        <KPI lab="INVERSIÓN" val={short(tot.spend)} sub={msg ? "" : `ROAS cuenta ${rate(tot.revenue, tot.spend).toFixed(1)}x`} />
+      </section>
+
+      {/* Embudo de conversión */}
+      <section className="sect">
+        <div className="secthead"><span className="sverb" style={{ background: "#1E1812", color: "#F4C24A" }}><span className="sq" style={{ background: "#F4C24A" }} />▼</span><span className="stitle">EMBUDO DE CONVERSIÓN</span><span className="scount">cuenta · período</span></div>
+        <div className="ranklist">
+          {chain.map((st, i) => {
+            const prev = i > 0 ? chain[i - 1].n : null;
+            const step = prev ? st.n / prev : null;
+            return (
+              <div className="rankrow" key={st.lab}>
+                <span className="rname" style={{ minWidth: 150 }}>{st.lab}</span>
+                <div className="rbar"><span className="rfill" style={{ width: Math.max(2, (st.n / base) * 100) + "%", background: "#2E6E94" }} /></div>
+                <span className="rval">{nf.format(st.n)}</span>
+                <span className="rmeta">{step != null ? <b style={{ color: step < 0.5 ? "#C5362B" : step > 1.05 ? "#857A6A" : "#2E8B6B" }}>{pc(step)} del paso previo</b> : "—"} · {st.n ? money(tot.spend / st.n) + "/u" : "—"}</span>
+              </div>
+            );
+          })}
+        </div>
+        <div className="dedup">▦ Embudo de la <b>cuenta completa</b> (todos los anuncios del período). Los rankings por rol de abajo muestran solo creativos con <b>spend ≥ piso</b>. Los costos por etapa (spend ÷ acciones) son lo más comparable; algunos pasos pueden dar &gt;100% porque Meta cuenta ciertos eventos (view content) por múltiples vías — tomalo como dirección, no al centímetro.</div>
+      </section>
+
+      {/* Creativos por rol de embudo */}
+      {["frio", "medio", "remate"].map((k) => {
+        const list = roles[k]; const x = ROL[k]; if (!list.length) return null;
+        const top = list.slice(0, 6);
+        return (
+          <section className="sect" key={k}>
+            <div className="secthead"><span className="sverb" style={{ background: x.bg, color: x.color }}><span className="sq" style={{ background: x.color }} />{x.short}</span><span className="stitle">{x.lab}</span><span className="scount">{list.length} creativo{list.length !== 1 ? "s" : ""}</span></div>
+            <div className="dedup">▦ {x.desc}</div>
+            <div className="ranklist">
+              {top.map((r, i) => {
+                const ctr = rate(r.clics, r.impresiones), hook = rate(r.video3s, r.impresiones), cAtc = r.atc ? r.spend / r.atc : 0;
+                const val = k === "frio" ? pc(ctr) : k === "medio" ? (cAtc ? money(cAtc) : "—") : r.roas.toFixed(1) + "x";
+                const meta = k === "frio" ? `hook ${pc(hook)} · CPM ${money(rate(r.spend, r.impresiones) * 1000)} · ${short(r.spend)}`
+                  : k === "medio" ? `${nf.format(r.atc)} ATC · CTR ${pc(ctr)} · ${short(r.spend)}`
+                  : `CPA ${money(r.cpa)} · ${nf.format(r.ventas)} vtas · ${short(r.spend)}`;
+                return (
+                  <div className="rankrow" key={r.id}>
+                    <span className="rrank">{String(i + 1).padStart(2, "0")}</span>
+                    <span className="rname">{r.nombre} <TF r={r} /><Paused r={r} /></span>
+                    <span className="rval" style={{ color: x.color }}>{val}</span>
+                    <span className="rmeta">{meta}</span>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="thinnote">Métrica de orden: {k === "frio" ? "CTR (mayor = mejor)" : k === "medio" ? "costo por add-to-cart (menor = mejor)" : "ROAS (mayor = mejor)"}. {list.length > 6 ? `+${list.length - 6} más.` : ""}</div>
+          </section>
+        );
+      })}
+    </>
+  );
+}
+
 function EmptyState({ account, loading, err }) {
   return (
     <section className="empty">
@@ -952,7 +1101,7 @@ function Plan({ account, store, goal, plan, setPlan, modo = "ventas", accCur = "
 }
 
 // ─────────── Vista: DASHBOARD (Parte 3) ───────────
-function Dash({ stats, goal, setGoal, factTienda, tnStore, modo = "ventas" }) {
+function Dash({ stats, u = {}, goal, setGoal, factTienda, tnStore, modo = "ventas" }) {
   const msg = modo === "mensajes";
   const [openCard, setOpenCard] = useState(null); // card de Top Ads desplegada (detalle por conjunto)
   // El objetivo lo marca la facturación de Tienda Nube si hay tienda elegida; si no, la revenue de Meta.
@@ -994,7 +1143,7 @@ function Dash({ stats, goal, setGoal, factTienda, tnStore, modo = "ventas" }) {
               {isOpen && (
                 <div className="tcardexp" onClick={(e) => e.stopPropagation()}>
                   {bd.map((bk, j) => (
-                    <div className="rexline" key={j}><span className="rexcamp">{bk.campaign}</span> › <span className="rexset">{bk.adset}</span>{bk.aud ? <span className="rexaud">{bk.aud}</span> : null}<Calidad v={bk.calidad} /><span className="rexmeta">{short(bk.spend)} · {msg ? (nf.format(bk.conversaciones) + " conv") : (nf.format(bk.ventas) + " vtas · " + bk.roas.toFixed(1) + "x")}</span></div>
+                    <div className="rexline" key={j}><span className="rexcamp">{bk.campaign}</span> › <span className="rexset">{bk.adset}</span>{bk.aud ? <span className="rexaud">{bk.aud}</span> : null}<Calidad v={bk.calidad} /><Freq v={bk.freq} max={u.freqMax} /><span className="rexmeta">{short(bk.spend)} · {msg ? (nf.format(bk.conversaciones) + " conv") : (nf.format(bk.ventas) + " vtas · " + bk.roas.toFixed(1) + "x")}</span></div>
                   ))}
                 </div>
               )}
@@ -1037,7 +1186,7 @@ function Item({ r, done, toggle, reason, act, c }) {
 }
 
 // ─────────── Vista: PANEL DE CREATIVOS (Parte 1) ───────────
-function Panel({ rows, stats, sort, setSortKey, modo = "ventas" }) {
+function Panel({ rows, u = {}, stats, sort, setSortKey, modo = "ventas" }) {
   const msg = modo === "mensajes";
   return (
     <>
@@ -1061,7 +1210,7 @@ function Panel({ rows, stats, sort, setSortKey, modo = "ventas" }) {
           <tbody>
             {rows.map((r) => { const b = BUCKETS[r.v]; return (
               <tr key={r.id} style={{ "--bar": b.color }}>
-                <td className="name">{r.nombre} <span className="fmt">{r.fmt}</span><TF r={r} /><Paused r={r} /><Calidad v={r.calidad} mix={r.calidadMix} /></td>
+                <td className="name">{r.nombre} <span className="fmt">{r.fmt}</span><TF r={r} /><Paused r={r} /><RolTag r={r} /><Calidad v={r.calidad} mix={r.calidadMix} /></td>
                 <td className="ang">{r.ang}{r.sec !== "—" ? <span className="sec"> / {r.sec}</span> : null}<span className="split">{r.split}</span></td>
                 <td className="aud">{r.aud}</td><td className="mono num">{money(r.spend)}</td>{msg ? <><td className="mono num strong">{nf.format(r.conversaciones)}</td><td className="mono num">{money(r.costoConv)}</td></> : <><td className="mono num strong">{r.roas.toFixed(1)}x</td><td className="mono num">{money(r.cpa)}</td></>}
                 <td><span className="badge" style={{ background: b.bg, color: b.color }}><span className="sq" style={{ background: b.color }} />{r.v}</span></td>
@@ -1620,6 +1769,7 @@ td{padding:11px 12px;vertical-align:middle;}.num{text-align:right;}.name{font-we
   .kpis,.kpis.dashk,.kpis.repk,.topgrid{display:flex;grid-template-columns:none;overflow-x:auto;-webkit-overflow-scrolling:touch;scroll-snap-type:x proximity;padding-bottom:6px;}
   .kpis>*{flex:0 0 62%;scroll-snap-align:start;}
   .topgrid>*{flex:0 0 80%;scroll-snap-align:start;}
+  .ranklist{overflow-x:auto;-webkit-overflow-scrolling:touch;}
   .tnstats{display:flex;overflow-x:auto;grid-template-columns:none;}
   .tnstats>*{flex:0 0 78%;}
 }

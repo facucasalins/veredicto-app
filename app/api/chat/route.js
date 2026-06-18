@@ -30,7 +30,7 @@ function tools({ hasStore, hasTab, plataforma = "Meta", criterio = null }) {
     },
     {
       name: "meta_anuncios",
-      description: `Lista de creativos/anuncios de ${plataforma} del período con spend, ROAS, ventas, conversaciones, CPA, costo por conversación, estado (activa true/false), audiencia, ángulo, formato y la clasificación de calidad de Meta (calidad/interaccion/conversion: ABOVE_AVERAGE | AVERAGE | BELOW_AVERAGE_* o null si no hay datos — diagnóstico de creativo vs competencia). Viene ordenada por spend descendente (máx 100). Para rankings, filtros, conteos y para detectar creativos que Meta califica mal.`,
+      description: `Lista de creativos/anuncios de ${plataforma} del período con spend, ROAS, ventas, conversaciones, CPA, costo por conversación, estado (activa true/false), audiencia, ángulo, formato, la clasificación de calidad de Meta (calidad/interaccion/conversion: ABOVE_AVERAGE | AVERAGE | BELOW_AVERAGE_* o null — diagnóstico de creativo vs competencia) y métricas de EMBUDO/FATIGA (frecuencia = promedio ponderado por spend de los conjuntos del creativo, orientativo — la fatiga real se mira por conjunto/audiencia; ≥4 ya es alta; más impresiones, clics_enlace, landing_page_views, add_to_cart, video_3s — con esto calculás hook rate = video_3s/impresiones, CTR = clics/impresiones, etc.). Viene ordenada por spend descendente (máx 100). Para rankings, filtros, fatiga y para juzgar creativos de arriba del embudo por su trabajo (hook/CTR), no solo por ROAS.`,
       input_schema: { type: "object", properties: { since: { type: "string" }, until: { type: "string" } }, required: ["since", "until"] },
     },
     {
@@ -163,6 +163,8 @@ REGLAS:
           tipo: r.tipo, activa: r.activa, audiencia: r.aud, angulo: r.ang, formato: r.fmt,
           // clasificación de calidad de Meta (vs competencia) — diagnóstico de creativo, ponderado por spend
           calidad: r.calidad, interaccion: r.interaccion, conversion: r.conversion,
+          // embudo + fatiga (conteos, no plata): frecuencia, impresiones, clics, landing, ATC, video 3s
+          frecuencia: r.freq, impresiones: r.impresiones, clics_enlace: r.clics, landing_page_views: r.lpv, add_to_cart: r.atc, video_3s: r.video3s,
         })),
       };
     }
