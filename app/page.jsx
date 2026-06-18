@@ -540,7 +540,7 @@ function Top({ withV, u, audData, modo = "ventas" }) {
                     <div className="rexad" key={m.id}>
                       <div className="rexhead"><b>{m.nombre}</b><TF r={m} /><Paused r={m} /><Calidad v={m.calidad} mix={m.calidadMix} /> <span className="rexkpi">{msg ? (money(m.costoConv) + "/conv · " + short(m.spend) + " · " + nf.format(m.conversaciones) + " conv") : (m.roas.toFixed(1) + "x · " + short(m.spend) + " · " + nf.format(m.ventas) + " vtas")}</span></div>
                       {(m.breakdown || []).map((b, j) => (
-                        <div className="rexline" key={j}><span className="rexcamp">{b.campaign}</span> › <span className="rexset">{b.adset}</span>{b.aud ? <span className="rexaud">{b.aud}</span> : null}<Calidad v={b.calidad} /><span className="rexmeta">{short(b.spend)} · {msg ? (nf.format(b.ventas) + " vtas") : (nf.format(b.ventas) + " vtas · " + b.roas.toFixed(1) + "x")}</span></div>
+                        <div className="rexline" key={j}><span className="rexcamp">{b.campaign}</span> › <span className="rexset">{b.adset}</span>{b.aud ? <span className="rexaud">{b.aud}</span> : null}<Calidad v={b.calidad} /><span className="rexmeta">{short(b.spend)} · {msg ? (nf.format(b.conversaciones) + " conv") : (nf.format(b.ventas) + " vtas · " + b.roas.toFixed(1) + "x")}</span></div>
                       ))}
                     </div>
                   ))}
@@ -954,6 +954,7 @@ function Plan({ account, store, goal, plan, setPlan, modo = "ventas", accCur = "
 // ─────────── Vista: DASHBOARD (Parte 3) ───────────
 function Dash({ stats, goal, setGoal, factTienda, tnStore, modo = "ventas" }) {
   const msg = modo === "mensajes";
+  const [openCard, setOpenCard] = useState(null); // card de Top Ads desplegada (detalle por conjunto)
   // El objetivo lo marca la facturación de Tienda Nube si hay tienda elegida; si no, la revenue de Meta.
   const facturado = factTienda != null ? factTienda : stats.revenue;
   const fuenteTienda = factTienda != null;
@@ -985,10 +986,18 @@ function Dash({ stats, goal, setGoal, factTienda, tnStore, modo = "ventas" }) {
       <section className="sect">
         <div className="secthead"><span className="sverb" style={{ background: "#1E1812", color: "#F4C24A" }}><span className="sq" style={{ background: "#F4C24A" }} />TOP</span><span className="stitle">TOP ADS DEL MES</span><span className="scount">{msg ? "por costo/conv · spend ≥ piso" : "por ROAS · spend ≥ piso"}</span></div>
         <div className="topgrid">
-          {stats.topAds.map((r, i) => { const b = BUCKETS[r.v]; return (
-            <div className="topcard" key={r.id} style={{ "--bar": b.color }}>
+          {stats.topAds.map((r, i) => { const b = BUCKETS[r.v]; const bd = r.breakdown || []; const exp = bd.length > 0; const isOpen = openCard === r.id; return (
+            <div className={"topcard" + (exp ? " clickable" : "") + (isOpen ? " open" : "")} key={r.id} style={{ "--bar": b.color }} onClick={exp ? () => setOpenCard(isOpen ? null : r.id) : undefined}>
               <div className="tcardtop"><span className="trank">{String(i + 1).padStart(2, "0")}</span><span className="badge" style={{ background: b.bg, color: b.color }}><span className="sq" style={{ background: b.color }} />{r.v}</span></div>
-              <div className="tname">{r.nombre} <span className="fmt">{r.fmt}</span><TF r={r} /><Paused r={r} /></div>{msg ? <div className="troas">{money(r.costoConv)}</div> : <div className="troas">{r.roas.toFixed(1)}<small>x</small></div>}<div className="tmeta mono">{msg ? (nf.format(r.conversaciones) + " conv · " + short(r.spend)) : (short(r.spend) + " spend · " + r.ang)}</div>
+              <div className="tname">{r.nombre} <span className="fmt">{r.fmt}</span><TF r={r} /><Paused r={r} /><Calidad v={r.calidad} mix={r.calidadMix} /></div>{msg ? <div className="troas">{money(r.costoConv)}</div> : <div className="troas">{r.roas.toFixed(1)}<small>x</small></div>}<div className="tmeta mono">{msg ? (nf.format(r.conversaciones) + " conv · " + short(r.spend)) : (short(r.spend) + " spend · " + r.ang)}</div>
+              {exp && <div className="tcardmore"><span className="tcardcaret">{isOpen ? "▾" : "▸"}</span>{isOpen ? "ocultar" : "ver"} {bd.length} conjunto{bd.length !== 1 ? "s" : ""}</div>}
+              {isOpen && (
+                <div className="tcardexp" onClick={(e) => e.stopPropagation()}>
+                  {bd.map((bk, j) => (
+                    <div className="rexline" key={j}><span className="rexcamp">{bk.campaign}</span> › <span className="rexset">{bk.adset}</span>{bk.aud ? <span className="rexaud">{bk.aud}</span> : null}<Calidad v={bk.calidad} /><span className="rexmeta">{short(bk.spend)} · {msg ? (nf.format(bk.conversaciones) + " conv") : (nf.format(bk.ventas) + " vtas · " + bk.roas.toFixed(1) + "x")}</span></div>
+                  ))}
+                </div>
+              )}
             </div>); })}
         </div>
       </section>
@@ -1522,7 +1531,7 @@ const CSS = `
 .ksub{font-size:10.5px;color:var(--soft);margin-top:6px;font-family:'Space Mono',monospace;}
 .kpi.chips{display:flex;flex-wrap:wrap;gap:7px;align-content:center;}
 .chip{font-size:12px;padding:5px 11px;border-radius:5px;font-weight:700;border:2px solid currentColor;}.chip b{font-family:'Anton',Impact,sans-serif;margin-right:3px;}
-.topgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;}
+.topgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;align-items:start;}
 .topcard{background:var(--paper2);border:2px solid var(--ink);border-left:7px solid var(--bar);border-radius:10px;padding:13px 15px;box-shadow:3px 3px 0 var(--ink);transition:transform .08s,box-shadow .08s;}
 .topcard:hover{transform:translate(-1px,-1px);box-shadow:5px 5px 0 var(--ink);}
 .tcardtop{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;}
@@ -1530,6 +1539,11 @@ const CSS = `
 .tname{font-weight:700;font-size:13.5px;line-height:1.2;}
 .troas{font-family:'Anton',Impact,sans-serif;font-size:38px;line-height:1;margin-top:6px;color:var(--ink);}.troas small{font-size:18px;color:var(--soft);}
 .tmeta{font-size:11px;color:var(--soft);margin-top:2px;}
+.topcard.clickable{cursor:pointer;}
+.topcard.open{transform:translate(-1px,-1px);box-shadow:5px 5px 0 var(--ink);background:rgba(0,0,0,.04);}
+.tcardmore{font-size:10px;color:var(--soft);margin-top:9px;font-family:'Space Mono',monospace;letter-spacing:.5px;display:flex;align-items:center;gap:5px;}
+.tcardcaret{font-size:10px;}
+.tcardexp{margin-top:8px;padding-top:8px;border-top:1px dashed var(--line);font-family:'Space Mono',monospace;cursor:default;}
 
 /* HOY */
 .dayhead{display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:18px;}
