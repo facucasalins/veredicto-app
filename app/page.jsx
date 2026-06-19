@@ -68,6 +68,9 @@ function aggregate(rows, dim) {
         : dim === "hook" ? (r.sheet?.tipo_gancho || r.hook)
         : dim === "fam" ? r.sheet?.familia // familia psicológica del hook (Ruptura/Evidencia/Pérdida/Identidad); solo con Sheet
         : dim === "ang" ? (r.sheet?.angulo || r.ang)
+        : dim === "estr" ? r.sheet?.estructura  // estructura_narrativa del Sheet (solo con cruce)
+        : dim === "fvideo" ? r.sheet?.formato   // formato_video del Sheet (≠ r.fmt, que sale del nombre)
+        : dim === "catp" ? r.ang                // categoría primaria sola (sin ponderar split como "cat")
         : r.fmt;
       add(key, 1, r);
     }
@@ -379,6 +382,7 @@ export default function App() {
             <button className={"tab tabai" + (effView === "an" ? " active" : "")} onClick={() => setView("an")}>◆ ANÁLISIS</button>
             <button className={"tab tabai" + (effView === "plan" ? " active" : "")} onClick={() => setView("plan")}>◎ PLAN</button>
             <button className={"tab" + (effView === "hoy" ? " active" : "")} onClick={() => setView("hoy")}>QUÉ HACER HOY {totalTasks ? <span className="tabn">{totalTasks}</span> : null}</button>
+            <button className={"tab" + (effView === "grabar" ? " active" : "")} onClick={() => setView("grabar")}>QUÉ GRABAR</button>
             <button className={"tab" + (effView === "top" ? " active" : "")} onClick={() => setView("top")}>TOP PERFORMERS</button>
             <button className={"tab" + (effView === "embudo" ? " active" : "")} onClick={() => setView("embudo")}>EMBUDO</button>
             <button className={"tab" + (effView === "panel" ? " active" : "")} onClick={() => setView("panel")}>PANEL</button>
@@ -406,6 +410,7 @@ export default function App() {
           {effView === "plan" && (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Plan account={account} store={tnStore} goal={goal} plan={plan} setPlan={setPlan} modo={modo} accCur={accCur} count={tnCount} />)}
           {effView === "dash" && (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Dash stats={stats} u={ueff} goal={goal} setGoal={setGoal} factTienda={tnSummary ? tnSummary.facturacion : null} tnStore={tnStore} modo={modo} />)}
           {effView === "hoy" && (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Hoy acc={acciones} u={ueff} done={done} toggle={toggle} total={totalTasks} doneCount={doneCount} mantener={stats.counts.Mantener} modo={modo} />)}
+          {effView === "grabar" && (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <QueGrabar withV={withV} u={ueff} modo={modo} role={role} accountName={(accounts.find((a) => a.id === account) || {}).name || ""} />)}
           {effView === "top" && (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Top withV={withV} u={ueff} audData={audConv} modo={modo} />)}
           {effView === "embudo" && (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Embudo withV={withV} u={ueff} modo={modo} accountName={(accounts.find((a) => a.id === account) || {}).name || ""} />)}
           {effView === "panel" && (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Panel rows={rows} u={ueff} stats={stats} sort={sort} setSortKey={setSortKey} modo={modo} />)}
@@ -478,6 +483,8 @@ function Cliente({ withV, u, stats, goal, accountName, factTienda, modo = "venta
         <div className="repcard"><div className="repcardh">RESUMEN DEL MES</div><p>{resumen}</p></div>
         <div className="repcard"><div className="repcardh">PRÓXIMO MES</div><ul className="plan"><li>Escalar los anuncios ganadores</li><li>Producir variantes del ángulo {topAng}</li><li>Testear 2 ángulos nuevos de alto potencial</li></ul></div>
       </section>
+
+      <QueGrabar withV={withV} u={u} modo={modo} role="cliente" accountName={accountName} />
     </>
   );
 }
@@ -697,6 +704,145 @@ function Embudo({ withV, u, modo = "ventas", accountName = "" }) {
               })}
             </div>
             <div className="thinnote">Métrica de orden: {k === "frio" ? "CTR (mayor = mejor)" : k === "medio" ? "costo por add-to-cart (menor = mejor)" : "ROAS (mayor = mejor)"}. {list.length > 6 ? `+${list.length - 6} más.` : ""}</div>
+          </section>
+        );
+      })}
+    </>
+  );
+}
+
+// ─────────── Vista: QUÉ GRABAR (prescripción de la próxima tanda) ───────────
+// NO es "Qué hacer hoy" (eso opera sobre ads que YA corren). Acá miramos PATRONES históricos para
+// decir qué conviene GRABAR la próxima vez. Agrupamos los creativos confiables (spend ≥ piso) por
+// cada dimensión creativa del Sheet (gancho_familia, categoría primaria, ángulo, formato_video,
+// estructura) y rankeamos cada valor por ROAS ponderado (o costo/conv en mensajes) vs el promedio
+// de la cuenta. Exigimos N≥3 por grupo: con menos es ruido y va aparte. Honestidad estadística: si
+// la cobertura o el N son bajos, lo enmarcamos como TENDENCIA, nunca como comprobado.
+const QG_MINV = 3;
+function QueGrabar({ withV, u, modo = "ventas", role = "vos", accountName = "" }) {
+  const msg = modo === "mensajes";
+  const cli = role === "cliente";
+  const reliable = useMemo(() => withV.filter((r) => r.spend >= u.pisoSpend), [withV, u.pisoSpend]);
+
+  // Referencia de cuenta: ROAS confiable ponderado (ventas) o costo/conv promedio (mensajes).
+  const ref = useMemo(() => {
+    let sp = 0, rev = 0, conv = 0;
+    reliable.forEach((r) => { sp += r.spend; rev += r.spend * r.roas; conv += (r.conversaciones || 0); });
+    return msg ? (conv ? sp / conv : 0) : (sp ? rev / sp : 0);
+  }, [reliable, msg]);
+
+  // Cobertura: % del spend de la cuenta matcheado a un creativo con gancho_familia real.
+  const coverage = useMemo(() => {
+    let tot = 0, fam = 0;
+    withV.forEach((r) => { tot += r.spend; if (r.sheet?.familia && r.sheet.familia !== "nd") fam += r.spend; });
+    return tot ? fam / tot : 0;
+  }, [withV]);
+
+  const valOf = (g) => msg ? (g.costoConv || 0) : g.roas;
+  const better = (a, b) => msg ? valOf(a) - valOf(b) : valOf(b) - valOf(a); // mejor primero
+  const beats = (g) => msg ? (g.costoConv > 0 && g.costoConv < ref) : g.roas > ref;
+  const deltaFrac = (g) => !ref ? 0 : (msg ? (g.costoConv - ref) / ref : (g.roas - ref) / ref);
+  // ↑ = mejor que la cuenta (más ROAS, o menor costo/conv en mensajes). Cliente: sin número crudo.
+  const deltaLabel = (g) => {
+    const up = msg ? deltaFrac(g) < 0 : deltaFrac(g) > 0;
+    if (cli) return up ? "↑ por encima del promedio" : "↓ por debajo del promedio";
+    return `${up ? "↑" : "↓"} ${Math.abs(Math.round(deltaFrac(g) * 100))}% vs cuenta`;
+  };
+  const rowColor = (g) => beats(g) ? BUCKETS.Escalar.color
+    : (msg ? g.costoConv > ref * 1.15 : g.roas < ref * 0.85) ? BUCKETS.Pausar.color
+    : BUCKETS.Mantener.color;
+
+  const DIMS = [
+    { key: "fam",    label: "GANCHO (FAMILIA)",     noun: "GANCHO" },
+    { key: "ang",    label: "ÁNGULO DE VENTA",      noun: "ÁNGULO" },
+    { key: "fvideo", label: "FORMATO DE VIDEO",     noun: "FORMATO" },
+    { key: "estr",   label: "ESTRUCTURA NARRATIVA", noun: "ESTRUCT" },
+    { key: "catp",   label: "CATEGORÍA PRIMARIA",   noun: "CATEG" },
+  ];
+  const dims = useMemo(() => DIMS.map((d) => {
+    const groups = aggregate(reliable, d.key);
+    const ranked = groups.filter((g) => g.n >= QG_MINV).sort(better);
+    const thin = groups.filter((g) => g.n < QG_MINV);
+    const best = ranked[0] || null; // mejor valor disponible con muestra suficiente (top del ranking)
+    const worst = ranked.length >= 2 ? ranked[ranked.length - 1] : null;
+    return { ...d, ranked, thin, best, worst };
+  }), [reliable, msg, ref]);
+
+  const byKey = (k) => dims.find((d) => d.key === k);
+  const famDim = byKey("fam"), angDim = byKey("ang"), fvDim = byKey("fvideo");
+
+  const hasAnySheet = withV.some((r) => r.sheet);
+  if (!reliable.length) return (
+    <section className="empty"><div className="emptymark">◆</div><div className="emptytitle">Sin creativos sobre el piso de spend</div><div className="emptysub">Bajá el piso de spend del umbral o esperá a que junten recorrido para prescribir la próxima tanda.</div></section>
+  );
+  if (!hasAnySheet) return (
+    <section className="empty"><div className="emptymark">◆</div><div className="emptytitle">Falta el cruce con el Sheet</div><div className="emptysub">QUÉ GRABAR lee los patrones creativos (gancho, ángulo, formato, estructura) del análisis de Gemini. Elegí una pestaña del Sheet arriba para activarla.</div></section>
+  );
+
+  // Directiva sintetizada: el mejor valor (N≥3) de cada dimensión clave + el peor gancho a evitar.
+  const parts = [];
+  if (famDim.best) parts.push(`gancho ${famDim.best.key}`);
+  if (angDim.best) parts.push(`ángulo ${angDim.best.key}`);
+  if (fvDim.best) parts.push(`formato ${fvDim.best.key}`);
+  const avoid = famDim.worst && (!famDim.best || famDim.worst.key !== famDim.best.key) && !beats(famDim.worst) ? famDim.worst.key : null;
+  const directiva = parts.length
+    ? `Próxima tanda para ${accountName || "el cliente"}: ${parts.join(", ")}.${avoid ? ` Evitá ${avoid}.` : ""}`
+    : `Todavía no hay un patrón con muestra suficiente (N≥${QG_MINV}) para prescribir la próxima tanda en ${accountName || "esta cuenta"}.`;
+  // Tendencia (no comprobado) si la cobertura es baja o el mejor gancho se apoya en pocos casos.
+  const tendencia = coverage < 0.6 || !famDim.best || famDim.best.n < 5;
+
+  return (
+    <>
+      <div className="dayhead">
+        <div>
+          <div className="daytitle">QUÉ GRABAR</div>
+          <div className="daysub">Prescripción para la próxima tanda · patrones de {cli ? "tus creativos con más recorrido" : `${reliable.length} creativos confiables (spend ≥ ${money(u.pisoSpend)})`}</div>
+        </div>
+      </div>
+
+      <section className="combo">
+        <div className="combohead"><span className="combotag">{tendencia ? "◷ TENDENCIA" : "▶ DIRECTIVA"}</span><span className="comboname">{accountName || "Cliente"}</span></div>
+        <div className="combostats" style={{ fontSize: "15px", lineHeight: 1.5 }}>{directiva}</div>
+        <div className="combonote">
+          {tendencia
+            ? `Muestra parcial o pocos casos por grupo: tomalo como TENDENCIA, no como comprobado. Más volumen grabado = más certeza.`
+            : `Combinación de los valores con mejor rendimiento (N≥${QG_MINV}) en cada dimensión. Un editor lo ejecuta sin vueltas.`}
+          {cli
+            ? (coverage < 0.6 ? " · ⚠ Muestra parcial: parte de la pauta todavía no está clasificada." : "")
+            : (coverage < 0.6 ? ` · ⚠ Solo el ${Math.round(coverage * 100)}% del spend está clasificado con gancho_familia — muestra parcial.` : ` · Cobertura ${Math.round(coverage * 100)}% del spend clasificado.`)}
+        </div>
+      </section>
+
+      {dims.map((d) => {
+        if (!d.ranked.length) {
+          if (cli) return null; // en el reporte del cliente no mostramos dimensiones sin data
+          return (
+          <section className="sect" key={d.key}>
+            <div className="secthead"><span className="sverb" style={{ background: "#1E1812", color: "#F4C24A" }}><span className="sq" style={{ background: "#F4C24A" }} />{d.noun}</span><span className="stitle">{d.label}</span><span className="scount">sin data</span></div>
+            <div className="dedup">Sin grupos con N≥{QG_MINV}.{d.thin.length ? ` Muestra chica (no rankeada): ${d.thin.map((g) => `${g.key} ·${g.n}`).join(", ")}.` : " Todavía no hay creativos clasificados en esta dimensión."}</div>
+          </section>
+          );
+        }
+        const max = Math.max(...d.ranked.map(valOf), msg ? 0 : 1) || 1;
+        const barOf = (g) => msg ? Math.max(8, (1 - valOf(g) / max) * 100) : (valOf(g) / max) * 100;
+        const winners = d.ranked.slice(0, 3);
+        const losers = d.ranked.length > 3 ? [...d.ranked].slice(-3).reverse().filter((g) => !winners.includes(g)) : [];
+        return (
+          <section className="sect" key={d.key}>
+            <div className="secthead"><span className="sverb" style={{ background: "#1E1812", color: "#F4C24A" }}><span className="sq" style={{ background: "#F4C24A" }} />{d.noun}</span><span className="stitle">{d.label}</span><span className="scount">{d.ranked.length} grupo{d.ranked.length !== 1 ? "s" : ""}</span></div>
+            <div className="ranklist">
+              {winners.map((g, i) => (
+                <div className="rankrow" key={g.key}>
+                  <span className="rrank">{String(i + 1).padStart(2, "0")}</span>
+                  <span className="rname">{g.key}</span>
+                  <div className="rbar"><span className="rfill" style={{ width: barOf(g) + "%", background: rowColor(g) }} /></div>
+                  {!cli && <span className="rval" style={{ color: rowColor(g) }}>{msg ? money(g.costoConv) : g.roas.toFixed(1) + "x"}</span>}
+                  <span className="rmeta">{cli ? deltaLabel(g) : `${g.n} ads · ${short(g.spend)} · ${deltaLabel(g)}`}</span>
+                </div>
+              ))}
+            </div>
+            {losers.length > 0 && <div className="thinnote">⚠ Por debajo del promedio: {losers.map((g) => `${g.key} (${cli ? deltaLabel(g) : (msg ? money(g.costoConv) : g.roas.toFixed(1) + "x") + ", " + g.n + " ads"})`).join(" · ")}.</div>}
+            {!cli && d.thin.length > 0 && <div className="thinnote">Sin data suficiente (N&lt;{QG_MINV}, no rankeados): {d.thin.map((g) => `${g.key} ·${g.n}`).join(", ")}.</div>}
           </section>
         );
       })}
