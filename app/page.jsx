@@ -1127,6 +1127,17 @@ function Analisis({ withV, stats, audiencias, tnSummary, u, accountName, periodo
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
 
+  // Salud de tracking (pixel) — fase 2A. Se trae aparte porque no vive en withV. Degrada a null.
+  const [tracking, setTracking] = useState(null);
+  useEffect(() => {
+    if (!account) { setTracking(null); return; }
+    let vivo = true;
+    fetch("/api/tracking?account=" + encodeURIComponent(account))
+      .then((r) => r.json()).then((d) => { if (vivo) setTracking(d && d.tracking ? d.tracking : null); })
+      .catch(() => { if (vivo) setTracking(null); });
+    return () => { vivo = false; };
+  }, [account]);
+
   // Resumen COMPACTO calculado acá (no mandamos anuncios crudos → pocos tokens).
   const snapshot = useMemo(() => {
     const reliable = withV.filter((r) => r.spend >= u.pisoSpend);
@@ -1167,8 +1178,9 @@ function Analisis({ withV, stats, audiencias, tnSummary, u, accountName, periodo
       top_activos: topActivos,
       receta_ganadora: b ? { angulo: b.sheet?.angulo || b.ang, categoria: b.ang, hook: b.sheet?.tipo_gancho || b.hook, audiencia: b.aud, formato: b.fmt, ...(msg ? { costo_conv: b.costoConv, conversaciones: b.conversaciones } : { roas: b.roas, ventas: b.ventas }), spend: b.spend, activa: b.activa !== false } : null,
       salud_estructural,
+      ...(tracking ? { salud_tracking: tracking } : {}),
     };
-  }, [withV, stats, audiencias, tnSummary, u, accountName, periodo, msg, modo]);
+  }, [withV, stats, audiencias, tnSummary, u, accountName, periodo, msg, modo, tracking]);
 
   // Historial por cliente: localStorage + Upstash si está conectado (compartido entre máquinas)
   const [hist, saveHist] = useHistSync("hist_an", account);
