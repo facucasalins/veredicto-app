@@ -110,6 +110,10 @@ const Freq = ({ v, max = 4 }) => {
 // Rol de embudo del creativo, combinando AUDIENCIA (targeting real) + ÁNGULO (Sheet/categoría).
 // 0 = arriba/frío (enganchar) … 2 = abajo/remate (cerrar). Audiencia pesa más (0.6) que ángulo (0.4).
 const AUD_POS = (aud) => { const s = String(aud || "").toLowerCase(); if (/retarget|rmkt/.test(s)) return 2; if (/lookalike|\blal\b/.test(s)) return 1; if (/advantage|amplio|inter/.test(s)) return 0; return null; };
+// Umbral de fatiga POR NIVEL de audiencia: retargeting (audiencia chica) tolera el doble que
+// prospecting — una frecuencia 6 en remarketing es normal, en frío ya es fatiga. base = umbral de
+// prospecting (configurable en el panel). null = sin flag.
+const freqCap = (aud, base) => base == null ? null : (AUD_POS(aud) === 2 ? base * 2 : base);
 const ANG_POS = (ang) => { const s = String(ang || "").toLowerCase();
   if (/transaccional|urgencia|comparativo|versus|oferta|descuento|promo|hot.?sale|fomo|escasez|stock|liquidaci|precio|ahorro/.test(s)) return 2; // remate
   if (/demostrativo|testimonial|rese|educativo|lista|unboxing|prueba social|social proof|tutorial|como funciona/.test(s)) return 1; // consideración
@@ -582,7 +586,7 @@ function Top({ withV, u, audData, modo = "ventas" }) {
                     <div className="rexad" key={m.id}>
                       <div className="rexhead"><b>{m.nombre}</b><TF r={m} /><Paused r={m} /><RolTag r={m} /><Calidad v={m.calidad} mix={m.calidadMix} /> <span className="rexkpi">{msg ? (money(m.costoConv) + "/conv · " + short(m.spend) + " · " + nf.format(m.conversaciones) + " conv") : (m.roas.toFixed(1) + "x · " + short(m.spend) + " · " + nf.format(m.ventas) + " vtas")}</span></div>
                       {(m.breakdown || []).map((b, j) => (
-                        <div className="rexline" key={j}><span className="rexcamp">{b.campaign}</span> › <span className="rexset">{b.adset}</span>{b.aud ? <span className="rexaud">{b.aud}</span> : null}<Calidad v={b.calidad} /><Freq v={b.freq} max={u.freqMax} /><span className="rexmeta">{short(b.spend)} · {msg ? (nf.format(b.conversaciones) + " conv") : (nf.format(b.ventas) + " vtas · " + b.roas.toFixed(1) + "x")}</span></div>
+                        <div className="rexline" key={j}><span className="rexcamp">{b.campaign}</span> › <span className="rexset">{b.adset}</span>{b.aud ? <span className="rexaud">{b.aud}</span> : null}<Calidad v={b.calidad} /><Freq v={b.freq} max={freqCap(b.aud, u.freqMax)} /><span className="rexmeta">{short(b.spend)} · {msg ? (nf.format(b.conversaciones) + " conv") : (nf.format(b.ventas) + " vtas · " + b.roas.toFixed(1) + "x")}</span></div>
                       ))}
                     </div>
                   ))}
@@ -1133,6 +1137,23 @@ function Analisis({ withV, stats, audiencias, tnSummary, u, accountName, periodo
     const sangrado = [...withV].filter((r) => r.v === "Pausar").sort((a, b) => b.spend - a.spend).slice(0, 5).map(r2);
     const topActivos = [...reliable.filter((r) => r.activa !== false)].sort((a, b) => msg ? (a.costoConv || 9e12) - (b.costoConv || 9e12) : b.roas - a.roas).slice(0, 5).map((r) => ({ ...r2(r), activa: true }));
     const b = msg ? (topActivos[0] && withV.find((r) => r.nombre === topActivos[0].nombre)) : topWinners(reliable, 1)[0];
+    // Salud estructural (auditoría plegada en el cerebro, no en una pestaña): diversidad de formatos,
+    // conjuntos fatigados (frecuencia sobre el cap por nivel de audiencia) y concentración de audiencia.
+    const formatos = new Set(reliable.map((r) => r.fmt).filter((f) => f && f !== "nd"));
+    let conjFat = 0, conjTot = 0;
+    reliable.forEach((r) => (r.breakdown || []).forEach((bk) => {
+      if (!bk.freq) return; conjTot += 1;
+      const cap = freqCap(bk.aud, u.freqMax);
+      if (cap != null && bk.freq >= cap) conjFat += 1;
+    }));
+    const audList = (audiencias && audiencias.length ? audiencias : []);
+    const audTotalSpend = audList.reduce((s, a) => s + (a.spend || 0), 0);
+    const audTop = [...audList].sort((a, b2) => (b2.spend || 0) - (a.spend || 0))[0];
+    const salud_estructural = {
+      formatos_distintos: formatos.size,
+      conjuntos_fatigados: conjFat, total_conjuntos: conjTot,
+      audiencia_concentracion_pct: audTotalSpend && audTop ? Math.round((audTop.spend / audTotalSpend) * 100) : null,
+    };
     return {
       modo, cuenta: accountName || "—", periodo,
       inversion: stats.spendTotal,
@@ -1145,6 +1166,7 @@ function Analisis({ withV, stats, audiencias, tnSummary, u, accountName, periodo
       sangrando: sangrado,
       top_activos: topActivos,
       receta_ganadora: b ? { angulo: b.sheet?.angulo || b.ang, categoria: b.ang, hook: b.sheet?.tipo_gancho || b.hook, audiencia: b.aud, formato: b.fmt, ...(msg ? { costo_conv: b.costoConv, conversaciones: b.conversaciones } : { roas: b.roas, ventas: b.ventas }), spend: b.spend, activa: b.activa !== false } : null,
+      salud_estructural,
     };
   }, [withV, stats, audiencias, tnSummary, u, accountName, periodo, msg, modo]);
 
@@ -1289,7 +1311,7 @@ function Dash({ stats, u = {}, goal, setGoal, factTienda, tnStore, modo = "venta
               {isOpen && (
                 <div className="tcardexp" onClick={(e) => e.stopPropagation()}>
                   {bd.map((bk, j) => (
-                    <div className="rexline" key={j}><span className="rexcamp">{bk.campaign}</span> › <span className="rexset">{bk.adset}</span>{bk.aud ? <span className="rexaud">{bk.aud}</span> : null}<Calidad v={bk.calidad} /><Freq v={bk.freq} max={u.freqMax} /><span className="rexmeta">{short(bk.spend)} · {msg ? (nf.format(bk.conversaciones) + " conv") : (nf.format(bk.ventas) + " vtas · " + bk.roas.toFixed(1) + "x")}</span></div>
+                    <div className="rexline" key={j}><span className="rexcamp">{bk.campaign}</span> › <span className="rexset">{bk.adset}</span>{bk.aud ? <span className="rexaud">{bk.aud}</span> : null}<Calidad v={bk.calidad} /><Freq v={bk.freq} max={freqCap(bk.aud, u.freqMax)} /><span className="rexmeta">{short(bk.spend)} · {msg ? (nf.format(bk.conversaciones) + " conv") : (nf.format(bk.ventas) + " vtas · " + bk.roas.toFixed(1) + "x")}</span></div>
                   ))}
                 </div>
               )}
