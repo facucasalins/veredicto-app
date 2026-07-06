@@ -2,7 +2,7 @@ import { cookies } from "next/headers";
 import { getAds, getAdsetTargeting, getAdStatuses } from "@/lib/meta";
 import { isTikTok, ttId, getAds as ttGetAds, getAdStatuses as ttGetAdStatuses, getAdgroupAudiences } from "@/lib/tiktok";
 import { presetToRange } from "@/lib/dates";
-import { buildRows, buildAudienceRows, classifyTargeting, targetingTipo } from "@/lib/nomenclatura";
+import { buildRows, buildAudienceRows, classifyTargeting, targetingTipo, goalEmbudo } from "@/lib/nomenclatura";
 import { enrichWithSheet } from "@/lib/sheet";
 import { SESSION_COOKIE, verifySession, authDisabled, canSeeAccount } from "@/lib/auth";
 
@@ -21,7 +21,7 @@ export async function GET(req) {
   if (!sess) return Response.json({ error: "No autorizado" }, { status: 401 });
   if (!canSeeAccount(sess, account)) return Response.json({ error: "Sin acceso a esta cuenta" }, { status: 403 });
   try {
-    let ads, audMap = {}, tipoMap = {}, statuses;
+    let ads, audMap = {}, tipoMap = {}, goalMap = {}, statuses;
     if (isTikTok(account)) {
       // TikTok: misma forma de fila que Meta (buildRows y el cruce con Sheet funcionan igual,
       // porque dependen del nombre del anuncio). TikTok necesita fechas explícitas → presetToRange.
@@ -45,10 +45,10 @@ export async function GET(req) {
         getAdStatuses(account).catch(() => null),
       ]);
       ads = mAds; statuses = st;
-      for (const id in targeting) { const lbl = classifyTargeting(targeting[id]); if (lbl) audMap[id] = lbl; tipoMap[id] = targetingTipo(targeting[id]); }
+      for (const id in targeting) { const lbl = classifyTargeting(targeting[id]); if (lbl) audMap[id] = lbl; tipoMap[id] = targetingTipo(targeting[id]); const gp = goalEmbudo(targeting[id]); if (gp != null) goalMap[id] = gp; }
     }
     const statusMap = statuses && Object.keys(statuses).length ? statuses : null;
-    let rows = buildRows(ads, audMap, statusMap, tipoMap);
+    let rows = buildRows(ads, audMap, statusMap, tipoMap, goalMap); // goalMap vacío en TikTok → sin techo, degrada
     rows = await enrichWithSheet(rows, tab); // si hay pestaña, cruza el Sheet; si no, devuelve las rows igual
     return Response.json({ rows, audiencias: buildAudienceRows(ads, audMap) });
   } catch (e) {

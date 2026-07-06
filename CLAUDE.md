@@ -16,7 +16,8 @@ respuestas concisas.
 
 - `lib/meta.js` — cliente Marketing API. `getAccounts()`, `getAds(account, preset, range?)` (range
   `{since,until}` para fechas custom), `getAccountSpend(account, since, until)` (spend a nivel cuenta,
-  modo Tienda Nube), **`getAdsetTargeting(account)`** (targeting REAL de cada adset, 1 call paginada),
+  modo Tienda Nube), **`getAdsetTargeting(account)`** (targeting REAL de cada adset + objetivo
+  declarado `optimization_goal`/`promoted_object`, 1 call paginada),
   **`getAdStatuses(account)`** (estado de entrega por ad mirando la CADENA completa: pide el
   effective_status del ad + del adset + de la campaña y devuelve `"ACTIVE"` solo si todo entrega; si
   el conjunto o la campaña de arriba están apagados devuelve `ADSET_PAUSED`/`CAMPAIGN_PAUSED`, porque
@@ -25,13 +26,21 @@ respuestas concisas.
   y `conversaciones` (`messaging_conversation_started_7d`, para campañas de mensajes). TODAS las
   llamadas paginan siguiendo `paging.next` — sin eso Meta corta en `limit` y el panel mostraría una
   foto incompleta SIN avisar (pasaba en `getAds` con >500 anuncios).
-- `lib/nomenclatura.js` — parser del nombre + armado de filas. `buildRows(ads, audMap?, statusMap?, tipoMap?)`
-  agrupa por **fingerprint de tiempo** `(HH.MM.SS)`; cada fila: `id`, `ang`, `sec`, `split`, `aud`,
-  `hook`, `fmt`, `spend`, `roas`, `cpa`, `ventas`, `conversaciones`, `costoConv`, `tipo` (ventas|mensajes),
-  `activa` (true/false/null), `breakdown` (campaña/adset/aud). **`classifyTargeting(adset)`** clasifica
-  la audiencia desde el targeting real (Retargeting Hot/Tibio por intención de las audiencias custom,
-  Lookalike+%, Advantage+, Amplio/Intereses, Mensajería). **`targetingTipo(adset)`** marca ventas|mensajes
-  por optimization_goal/destination_type. `parseAudience(nombre)` queda como **fallback**.
+- `lib/nomenclatura.js` — parser del nombre + armado de filas. `buildRows(ads, audMap?, statusMap?,
+  tipoMap?, goalMap?)` agrupa por **fingerprint de tiempo** `(HH.MM.SS)`; cada fila: `id`, `ang`, `sec`,
+  `split`, `aud`, `hook`, `fmt`, `spend`, `roas`, `cpa`, `ventas`, `conversaciones`, `costoConv`, `tipo`
+  (ventas|mensajes), `activa` (true/false/null), `breakdown` (campaña/adset/aud), y para el rol de
+  embudo: **`audPos`** (posición 0–2 de la audiencia PONDERADA POR SPEND — un creativo en varias
+  audiencias no pierde la señal; graduada Hot 2 / Tibio 1.5 / LAL 1 / frío 0 con `audEmbudoPos`),
+  **`audMix`** (plata repartida entre frío y remate sin dominante → el front muestra "±") y
+  **`goalPos`** (etapa declarada del adset vía **`goalEmbudo(adset)`**; en e-commerce ~90% optimiza
+  PURCHASE así que NO asigna el rol — solo lo techea en `rolEmbudo` de page.jsx: tráfico/awareness →
+  frío, ATC/checkout → medio). OJO: "catálogo" NO es keyword de ángulo (es formato, no mensaje —
+  un DPA sobre retargeting Hot es remate; decide la audiencia). Validado contra las 4 cuentas reales
+  (jul 2026). **`classifyTargeting(adset)`** clasifica la audiencia desde el targeting real
+  (Retargeting Hot/Tibio por intención de las audiencias custom, Lookalike+%, Advantage+,
+  Amplio/Intereses, Mensajería). **`targetingTipo(adset)`** marca ventas|mensajes por
+  optimization_goal/destination_type. `parseAudience(nombre)` queda como **fallback**.
 - `lib/sheet.js` — cruza el Google Sheet (cuenta de servicio, JWT RS256). Cruce por `(HH.MM.SS)` de
   `nuevo_nombre`. `listTabs()`, `enrichWithSheet(rows, tab)`. Degrada: sin tab devuelve `sheet:null`.
   **Normalización v1→v2 al leer** (el Sheet NO se toca, los videos viejos no se re-procesan):
