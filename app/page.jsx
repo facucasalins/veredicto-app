@@ -176,7 +176,9 @@ const TN_SERIES = [
 function TnDaily({ dias }) {
   const [hover, setHover] = useState(null);
   const n = dias.length;
-  const W = 860, PADL = 56, PADR = 10, plotW = W - PADL - PADR;
+  // INSET separa la primera/última marca del borde del plot — sin esto la primera barra se come
+  // el margen y queda pegada a las etiquetas del eje y.
+  const W = 860, PADL = 64, PADR = 10, INSET = 10, plotW = W - PADL - PADR - INSET * 2;
   const hasVis = dias.some((d) => d.visitas != null);
   // paneles: [título, alto, series que dibuja, máximo]
   const maxMoney = Math.max(1, ...dias.map((d) => Math.max(d.facturacion || 0, d.inversion || 0)));
@@ -191,14 +193,14 @@ function TnDaily({ dias }) {
   let y0 = TOP;
   for (const p of panels) { p.y = y0; y0 += p.h + GAP; }
   const H = y0 + 14; // + espacio para las fechas
-  const x = (i) => PADL + (n <= 1 ? plotW / 2 : (i * plotW) / (n - 1));
+  const x = (i) => PADL + INSET + (n <= 1 ? plotW / 2 : (i * plotW) / (n - 1));
   const yOf = (p, v) => p.y + p.h - (Math.max(0, v) / p.max) * p.h;
   const path = (p, key) => dias.map((d, i) => (i ? "L" : "M") + x(i).toFixed(1) + "," + yOf(p, d[key] || 0).toFixed(1)).join(" ");
   const col = (k) => TN_SERIES.find((s) => s.k === k).color;
   const onMove = (e) => {
     const r = e.currentTarget.getBoundingClientRect();
     const mx = ((e.clientX - r.left) / r.width) * W;
-    const i = Math.round(((mx - PADL) / plotW) * (n - 1));
+    const i = Math.round(((mx - PADL - INSET) / plotW) * (n - 1));
     setHover(i >= 0 && i < n ? i : null);
   };
   const fshort = (f) => f.slice(8, 10) + "/" + f.slice(5, 7);
@@ -254,7 +256,7 @@ function TnDaily({ dias }) {
 }
 
 export default function App() {
-  const [u, setU] = useState({ roasMin: 20, cpaMax: 3000, pisoSpend: 50000, costoMax: null, freqMax: 4 });
+  const [u, setU] = useState({ roasMin: 10, cpaMax: null, pisoSpend: 20000, costoMax: null, freqMax: 3 });
   const [modo, setModo] = useState("ventas"); // ventas | mensajes
   const [goal, setGoal] = useState(0);
   const [sort, setSort] = useState({ key: "veredicto", dir: "asc" });
