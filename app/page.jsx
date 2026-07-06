@@ -161,6 +161,98 @@ const EJECOLOR = { Identidad:"#2E8B6B", Ruptura:"#6E3E94", "Pérdida":"#C5362B",
 
 const PRESETS = [{ v: "today", l: "Hoy" }, { v: "last_7d", l: "Últimos 7 días" }, { v: "last_14d", l: "Últimos 14 días" }, { v: "last_30d", l: "Últimos 30 días" }, { v: "last_90d", l: "Últimos 90 días" }, { v: "this_month", l: "Este mes" }, { v: "last_month", l: "Mes pasado" }, { v: "maximum", l: "Máximo" }];
 
+// ─────────── Gráfico diario de la banda Tienda Nube ───────────
+// Cruza por día: inversión (Meta/TikTok) vs facturación (tienda) + órdenes + visitas (LPV del
+// pixel). Tres paneles apilados con el MISMO eje x — nunca doble eje y: la plata comparte escala
+// en el panel 1 (misma unidad) y los conteos van cada uno en su panel. Paleta validada contra el
+// fondo oscuro de la banda (#1A1A17): inversión #4E97D1 · facturación #35A276 · órdenes #BD8722 ·
+// visitas #A97FD1. Hover con crosshair + tooltip con los 4 valores del día; tabla plegada abajo.
+const TN_SERIES = [
+  { k: "inversion", lab: "INVERSIÓN", color: "#4E97D1", money: true },
+  { k: "facturacion", lab: "FACTURACIÓN", color: "#35A276", money: true },
+  { k: "ordenes", lab: "ÓRDENES", color: "#BD8722", money: false },
+  { k: "visitas", lab: "VISITAS", color: "#A97FD1", money: false },
+];
+function TnDaily({ dias }) {
+  const [hover, setHover] = useState(null);
+  const n = dias.length;
+  const W = 860, PADL = 56, PADR = 10, plotW = W - PADL - PADR;
+  const hasVis = dias.some((d) => d.visitas != null);
+  // paneles: [título, alto, series que dibuja, máximo]
+  const maxMoney = Math.max(1, ...dias.map((d) => Math.max(d.facturacion || 0, d.inversion || 0)));
+  const maxOrd = Math.max(1, ...dias.map((d) => d.ordenes || 0));
+  const maxVis = Math.max(1, ...dias.map((d) => d.visitas || 0));
+  const panels = [
+    { titulo: "$ POR DÍA", h: 148, max: maxMoney, series: ["inversion", "facturacion"], fmt: short },
+    { titulo: "ÓRDENES", h: 56, max: maxOrd, series: ["ordenes"], fmt: (v) => nf.format(Math.round(v)) },
+    ...(hasVis ? [{ titulo: "VISITAS (pixel)", h: 56, max: maxVis, series: ["visitas"], fmt: (v) => nf.format(Math.round(v)) }] : []),
+  ];
+  const GAP = 24, TOP = 6;
+  let y0 = TOP;
+  for (const p of panels) { p.y = y0; y0 += p.h + GAP; }
+  const H = y0 + 14; // + espacio para las fechas
+  const x = (i) => PADL + (n <= 1 ? plotW / 2 : (i * plotW) / (n - 1));
+  const yOf = (p, v) => p.y + p.h - (Math.max(0, v) / p.max) * p.h;
+  const path = (p, key) => dias.map((d, i) => (i ? "L" : "M") + x(i).toFixed(1) + "," + yOf(p, d[key] || 0).toFixed(1)).join(" ");
+  const col = (k) => TN_SERIES.find((s) => s.k === k).color;
+  const onMove = (e) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    const mx = ((e.clientX - r.left) / r.width) * W;
+    const i = Math.round(((mx - PADL) / plotW) * (n - 1));
+    setHover(i >= 0 && i < n ? i : null);
+  };
+  const fshort = (f) => f.slice(8, 10) + "/" + f.slice(5, 7);
+  const step = Math.max(1, Math.ceil(n / 9)); // etiquetas de fecha cada ~9
+  const bw = Math.max(2, Math.min(12, plotW / n - 3)); // ancho de barra (órdenes)
+  const d = hover != null ? dias[hover] : null;
+  return (
+    <div className="tnchart">
+      <div className="tnlegend">{TN_SERIES.filter((s) => s.k !== "visitas" || hasVis).map((s) => <span key={s.k} className="tnchip"><i style={{ background: s.color }} />{s.lab}</span>)}</div>
+      <div className="tnchart-wrap">
+        <svg viewBox={`0 0 ${W} ${H}`} onMouseMove={onMove} onMouseLeave={() => setHover(null)}>
+          {panels.map((p) => (
+            <g key={p.titulo}>
+              <text x={PADL} y={p.y - 7} className="tnax tnaxt">{p.titulo}</text>
+              {[0, 0.5, 1].map((t) => (
+                <g key={t}>
+                  <line x1={PADL} x2={W - PADR} y1={p.y + p.h * (1 - t)} y2={p.y + p.h * (1 - t)} stroke="rgba(242,235,217,0.09)" strokeWidth="1" />
+                  <text x={PADL - 6} y={p.y + p.h * (1 - t) + 3} className="tnax" textAnchor="end">{p.fmt(p.max * t)}</text>
+                </g>
+              ))}
+              {p.series.map((k) => k === "ordenes"
+                ? dias.map((dd, i) => { const yv = yOf(p, dd.ordenes || 0); return (dd.ordenes || 0) > 0 ? <rect key={i} x={x(i) - bw / 2} y={yv} width={bw} height={p.y + p.h - yv} rx="2" fill={col(k)} /> : null; })
+                : <path key={k} d={path(p, k)} fill="none" stroke={col(k)} strokeWidth="2" strokeLinejoin="round" />)}
+              {hover != null && p.series.map((k) => (k !== "ordenes" && dias[hover][k] != null)
+                ? <circle key={k} cx={x(hover)} cy={yOf(p, dias[hover][k] || 0)} r="4" fill={col(k)} stroke="#1A1A17" strokeWidth="2" />
+                : null)}
+            </g>
+          ))}
+          {/* la última fecha siempre se etiqueta; las periódicas se saltean si quedan pegadas a ella */}
+          {dias.map((dd, i) => ((i % step === 0 && n - 1 - i >= step / 2) || i === n - 1) ? <text key={i} x={i === n - 1 ? x(i) + 8 : x(i)} y={H - 2} className="tnax" textAnchor={i === n - 1 ? "end" : "middle"}>{fshort(dd.fecha)}</text> : null)}
+          {hover != null && <line x1={x(hover)} x2={x(hover)} y1={TOP} y2={H - 14} stroke="rgba(242,235,217,0.35)" strokeWidth="1" strokeDasharray="3 3" />}
+        </svg>
+        {d && (
+          <div className="tntip" style={{ left: `${(x(hover) / W) * 100}%`, transform: x(hover) > W * 0.7 ? "translateX(-105%)" : "translateX(8px)" }}>
+            <div className="tntipf">{d.fecha}</div>
+            {TN_SERIES.filter((s) => s.k !== "visitas" || d.visitas != null).map((s) => (
+              <div key={s.k} className="tntipr"><i style={{ background: s.color }} />{s.lab.toLowerCase()}: <b>{s.money ? money(d[s.k] || 0) : nf.format(d[s.k] || 0)}</b></div>
+            ))}
+          </div>
+        )}
+      </div>
+      <details className="tntable">
+        <summary>ver tabla</summary>
+        <div className="tntable-scroll">
+          <table>
+            <thead><tr><th>fecha</th><th>inversión</th><th>facturación</th><th>órdenes</th>{hasVis && <th>visitas</th>}</tr></thead>
+            <tbody>{dias.map((dd) => <tr key={dd.fecha}><td>{dd.fecha}</td><td>{money(dd.inversion || 0)}</td><td>{money(dd.facturacion || 0)}</td><td>{nf.format(dd.ordenes || 0)}</td>{hasVis && <td>{dd.visitas != null ? nf.format(dd.visitas) : "—"}</td>}</tr>)}</tbody>
+          </table>
+        </div>
+      </details>
+    </div>
+  );
+}
+
 export default function App() {
   const [u, setU] = useState({ roasMin: 20, cpaMax: 3000, pisoSpend: 50000, costoMax: null, freqMax: 4 });
   const [modo, setModo] = useState("ventas"); // ventas | mensajes
@@ -233,6 +325,28 @@ export default function App() {
       .finally(() => { if (!cancelled) setTnLoading(false); });
     return () => { cancelled = true; };
   }, [tnStore, account, preset, customRange, accCur, tnCount]);
+  // Detalle diario de la banda (CAC + gráfico día por día): va APARTE del summary porque el barrido
+  // de órdenes con el customer embebido es lento — la banda pinta al toque y esto completa después.
+  const [tnDetail, setTnDetail] = useState(null);
+  const [tnDetailLoading, setTnDetailLoading] = useState(false);
+  const [tnChartOpen, setTnChartOpen] = useState(false);
+  useEffect(() => {
+    if (!tnStore) { setTnDetail(null); return; }
+    if (preset === "custom" && !(cSince && cUntil)) return;
+    let cancelled = false;
+    setTnDetailLoading(true); setTnDetail(null);
+    fetch("/api/tiendanube/daily?store=" + encodeURIComponent(tnStore) + "&preset=" + preset + "&count=" + tnCount + (account ? "&account=" + account + "&accCur=" + accCur : "") + customRange)
+      .then((r) => r.json())
+      .then((j) => { if (!cancelled) setTnDetail(j); })
+      .catch(() => { if (!cancelled) setTnDetail(null); })
+      .finally(() => { if (!cancelled) setTnDetailLoading(false); });
+    return () => { cancelled = true; };
+  }, [tnStore, account, preset, customRange, accCur, tnCount]);
+  // Margen bruto % del cliente (producto − costo, ANTES de la pauta) para el margen de contribución.
+  // Lo carga el usuario una vez y queda por tienda en este browser.
+  const [margen, setMargen] = useState("");
+  useEffect(() => { if (!tnStore) return; try { setMargen(localStorage.getItem("nusa_margen_" + tnStore) || ""); } catch {} }, [tnStore]);
+  const setMargenP = (v) => { setMargen(v); try { localStorage.setItem("nusa_margen_" + tnStore, v); } catch {} };
   useEffect(() => {
     if (!account) { setData([]); setAudiencias([]); setErr(""); return; }
     if (preset === "custom" && !(cSince && cUntil)) return; // esperá a que cargue las dos fechas
@@ -362,10 +476,31 @@ export default function App() {
                 <div className="tnstat"><div className="tnlab">FACTURACIÓN TIENDA</div><div className="tnval">{money(tnSummary.facturacion)}</div><div className="tnsub">{tnSummary.orders} órdenes {tnSummary.criterio === "no_canceladas" ? "(pagadas + pendientes)" : "pagadas"} · ticket {money(tnSummary.ticket)}</div></div>
                 <div className="tnstat"><div className="tnlab">INVERSIÓN {String(account || "").startsWith("tt:") ? "TIKTOK" : "META"}</div><div className="tnval">{account ? money(tnSummary.fx && !tnSummary.fx.error ? tnSummary.inversionConv : tnSummary.inversion) : "—"}</div><div className="tnsub">{!account ? "elegí el cliente de Meta" : tnSummary.fx && !tnSummary.fx.error ? ("USD " + money(tnSummary.inversion) + " · " + tnSummary.fx.fuente + " $" + nf.format(Math.round(tnSummary.fx.rate))) : tnSummary.fx && tnSummary.fx.error ? ("⚠ no pude cotizar el dólar — MER sin convertir") : ("ROAS pixel " + (tnSummary.roasMeta || 0).toFixed(1) + "x")}</div></div>
                 <div className="tnstat tnmer"><div className="tnlab">MER (FACT / INV)</div><div className="tnval">{tnSummary.mer != null ? tnSummary.mer.toFixed(2) + "x" : "—"}</div><div className="tnsub">{tnSummary.criterio === "no_canceladas" ? ("pagadas: " + money(tnSummary.facturacionPagada) + " (" + tnSummary.ordersPagadas + ") · pendientes: " + money(tnSummary.facturacionPendiente) + " (" + tnSummary.ordersPendientes + ")") : tnSummary.ordersPendientes ? ("+ " + money(tnSummary.facturacionPendiente) + " pendientes (" + tnSummary.ordersPendientes + " órd.) sin contar") : "facturación / inversión"}</div></div>
+                <div className="tnstat" title="Inversión en pauta ÷ clientes NUEVOS de la tienda en el período (primera compra). No es el CPA del pixel: acá cuentan personas nuevas reales, no compras atribuidas.">
+                  <div className="tnlab">CAC (CLIENTE NUEVO)</div>
+                  <div className="tnval">{tnDetail && tnDetail.cac != null ? money(tnDetail.cac) : tnDetailLoading ? "…" : "—"}</div>
+                  <div className="tnsub">{tnDetail && tnDetail.cac != null ? (nf.format(tnDetail.clientesNuevos) + " nuevos · " + nf.format(tnDetail.clientesRecurrentes) + " recurrentes") : tnDetailLoading ? "contando clientes nuevos…" : tnDetail && tnDetail.error ? (tnDetail.code === "RANGO_MUY_GRANDE" ? "rango muy grande — acotá el período" : "no se pudo calcular") : "inversión / clientes nuevos"}</div>
+                </div>
+                <div className="tnstat" title="Margen de contribución del período: facturación × tu margen bruto (producto − costo, antes de la pauta) − inversión en pauta. Lo que queda para cubrir fijos y ganar.">
+                  <div className="tnlab">MARGEN CONTRIBUCIÓN</div>
+                  {(() => {
+                    const m = parseFloat(String(margen).replace(",", "."));
+                    const inv = account ? (tnSummary.fx && !tnSummary.fx.error ? tnSummary.inversionConv : tnSummary.inversion) : 0;
+                    const cm = isFinite(m) && m > 0 ? Math.round(tnSummary.facturacion * (m / 100) - inv) : null;
+                    return <>
+                      <div className="tnval" style={cm != null && cm < 0 ? { color: "#E08578" } : undefined}>{cm != null ? money(cm) : "—"}</div>
+                      <div className="tnsub">fact × <input className="tnmargin" type="number" min="1" max="95" placeholder="%" value={margen} onChange={(e) => setMargenP(e.target.value)} />% margen bruto − inversión{cm == null ? " → cargá tu margen" : ""}</div>
+                    </>;
+                  })()}
+                </div>
               </div>
               <div className="tnnote">{tnSummary.criterio === "no_canceladas"
                 ? "MER = facturación de TODAS las órdenes no canceladas (pagadas + pendientes de pago, sin las de pago anulado — criterio interno del cliente) dividida la inversión en Meta, mismo período. Mide la eficiencia global del marketing, no solo lo atribuido al pixel."
                 : "MER = facturación COBRADA de la tienda (órdenes pagadas, igual que Tienda Nube) dividida la inversión en Meta, mismo período. Las pendientes de pago no suman al titular. Mide la eficiencia global del marketing, no solo lo atribuido al pixel."}</div>
+              <button className="tnchart-toggle" onClick={() => setTnChartOpen(!tnChartOpen)}>{tnChartOpen ? "▴ OCULTAR DÍA POR DÍA" : "▾ VER DÍA POR DÍA — inversión · facturación · órdenes · visitas"}</button>
+              {tnChartOpen && (tnDetail && Array.isArray(tnDetail.dias) && tnDetail.dias.length
+                ? <TnDaily dias={tnDetail.dias} />
+                : <div className="tnsub" style={{ marginTop: 8 }}>{tnDetailLoading ? "cargando la serie diaria…" : tnDetail && tnDetail.error ? tnDetail.error : "sin datos del período"}</div>)}
             </>
           )}
         </section>
@@ -1937,13 +2072,42 @@ td{padding:11px 12px;vertical-align:middle;}.num{text-align:right;}.name{font-we
 .tncountlab{font-family:'Space Mono',monospace;font-size:10px;letter-spacing:2px;color:#9A937F;}
 .modotgl.tng{background:transparent;color:#9A937F;border-color:#5A5447;font-size:10px;padding:4px 10px;}
 .modotgl.tng.on{background:#E9DEC8;color:#1E1812;border-color:#E9DEC8;}
-.tnstats{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;}
+.tnstats{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;}
+@media(max-width:1000px){.tnstats{grid-template-columns:repeat(2,1fr);}}
 .tnstat{background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.12);border-radius:9px;padding:13px 15px;}
 .tnstat.tnmer{background:rgba(46,139,107,.18);border-color:rgba(46,139,107,.5);}
 .tnlab{font-family:'Space Mono',monospace;font-size:10px;letter-spacing:1.2px;color:#9A937F;margin-bottom:5px;}
 .tnval{font-weight:700;font-size:26px;line-height:1;letter-spacing:-.5px;}
 .tnsub{font-family:'Space Mono',monospace;font-size:10.5px;color:#9A937F;margin-top:6px;}
 .tnnote{font-family:'Space Mono',monospace;font-size:10.5px;color:#7A7259;margin-top:11px;line-height:1.4;}
+/* margen bruto %: input chico embebido en el cell de margen de contribución */
+.tnmargin{width:42px;background:transparent;border:1px solid #5A5447;color:#F2EBD9;border-radius:4px;padding:1px 4px;font-family:'Space Mono',monospace;font-size:10.5px;text-align:right;-moz-appearance:textfield;}
+.tnmargin::-webkit-outer-spin-button,.tnmargin::-webkit-inner-spin-button{-webkit-appearance:none;margin:0;}
+.tnmargin:focus{outline:none;border-color:#E9DEC8;}
+/* desplegable del gráfico diario */
+.tnchart-toggle{display:block;margin-top:10px;background:transparent;border:1px solid #5A5447;color:#9A937F;border-radius:6px;padding:6px 12px;font-family:'Space Mono',monospace;font-size:10.5px;letter-spacing:1px;cursor:pointer;}
+.tnchart-toggle:hover{color:#E9DEC8;border-color:#9A937F;}
+.tnchart{margin-top:12px;}
+.tnchart-wrap{position:relative;}
+.tnchart svg{width:100%;height:auto;display:block;cursor:crosshair;}
+.tnlegend{display:flex;gap:16px;flex-wrap:wrap;margin-bottom:8px;}
+.tnchip{display:inline-flex;align-items:center;gap:6px;font-family:'Space Mono',monospace;font-size:10px;letter-spacing:1px;color:#9A937F;}
+.tnchip i{width:10px;height:10px;border-radius:3px;display:inline-block;}
+.tnax{font-family:'Space Mono',monospace;font-size:9.5px;fill:#9A937F;}
+.tnaxt{letter-spacing:1.5px;fill:#7A7259;}
+.tntip{position:absolute;top:8px;pointer-events:none;background:#26241F;border:1px solid #5A5447;border-radius:7px;padding:8px 10px;font-family:'Space Mono',monospace;font-size:10.5px;color:#F2EBD9;white-space:nowrap;z-index:5;box-shadow:3px 3px 0 #0006;}
+.tntipf{color:#9A937F;margin-bottom:5px;}
+.tntipr{display:flex;align-items:center;gap:6px;margin-top:2px;color:#C9C0AA;}
+.tntipr b{color:#F2EBD9;font-weight:700;}
+.tntipr i{width:8px;height:8px;border-radius:2px;display:inline-block;}
+/* tabla accesible plegada bajo el gráfico */
+.tntable{margin-top:8px;}
+.tntable summary{font-family:'Space Mono',monospace;font-size:10px;letter-spacing:1px;color:#7A7259;cursor:pointer;}
+.tntable-scroll{overflow-x:auto;margin-top:6px;}
+.tntable table{border-collapse:collapse;font-family:'Space Mono',monospace;font-size:10.5px;color:#C9C0AA;}
+.tntable th,.tntable td{padding:3px 12px 3px 0;text-align:right;border-bottom:1px solid rgba(242,235,217,0.08);}
+.tntable th:first-child,.tntable td:first-child{text-align:left;}
+.tntable th{color:#7A7259;letter-spacing:1px;font-weight:400;}
 @media(max-width:760px){
   .root{padding:14px 12px 32px;}
   .topinner{flex-direction:column;align-items:stretch;gap:14px;}
