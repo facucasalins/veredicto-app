@@ -107,23 +107,34 @@ const Freq = ({ v, max = 4 }) => {
   const tone = !flag ? { c: "#857A6A", b: "#E5DBC8" } : v >= max ? { c: "#C5362B", b: "#F1D9D3" } : v >= max - 1 ? { c: "#C2861F", b: "#F1E4C4" } : { c: "#2E8B6B", b: "#DCE9E1" };
   return <span className="qualtag" style={{ color: tone.c, background: tone.b }} title={`Frecuencia: cada persona vio el aviso ~${v.toFixed(1)} veces en el período${flag && v >= max ? " · fatiga (alta)" : flag && v >= max - 1 ? " · vigilar" : ""}`}>✱ {v.toFixed(1)}</span>;
 };
-// Rol de embudo del creativo, combinando AUDIENCIA (targeting real) + ÁNGULO (Sheet/categoría).
-// 0 = arriba/frío (enganchar) … 2 = abajo/remate (cerrar). Audiencia pesa más (0.6) que ángulo (0.4).
-const AUD_POS = (aud) => { const s = String(aud || "").toLowerCase(); if (/retarget|rmkt/.test(s)) return 2; if (/lookalike|\blal\b/.test(s)) return 1; if (/advantage|amplio|inter/.test(s)) return 0; return null; };
-// Umbral de fatiga POR NIVEL de audiencia: retargeting (audiencia chica) tolera el doble que
-// prospecting — una frecuencia 6 en remarketing es normal, en frío ya es fatiga. base = umbral de
-// prospecting (configurable en el panel). null = sin flag.
-const freqCap = (aud, base) => base == null ? null : (AUD_POS(aud) === 2 ? base * 2 : base);
+// Rol de embudo del creativo: AUDIENCIA real (0.6) + ÁNGULO Sheet/categoría (0.4), 0 = arriba/frío
+// (enganchar) … 2 = abajo/remate (cerrar). La audiencia llega PONDERADA POR SPEND desde buildRows
+// (r.audPos): un creativo que corre en varias audiencias se clasifica por dónde está la plata, no
+// por la etiqueta dominante. Graduada por intención: Hot 2 / Tibio 1.5 / LAL 1 / frío 0.
+// AUD_POS (por etiqueta) queda como fallback (data vieja / creativos sin spend) y para freqCap.
+const AUD_POS = (aud) => { const s = String(aud || "").toLowerCase(); if (/retarget|rmkt/.test(s)) return /hot/.test(s) ? 2 : 1.5; if (/lookalike|\blal\b/.test(s)) return 1; if (/advantage|amplio|inter/.test(s)) return 0; return null; };
+// Umbral de fatiga POR NIVEL de audiencia: retargeting (audiencia chica, Hot o Tibio) tolera el
+// doble que prospecting — una frecuencia 6 en remarketing es normal, en frío ya es fatiga.
+// base = umbral de prospecting (configurable en el panel). null = sin flag.
+const freqCap = (aud, base) => base == null ? null : (AUD_POS(aud) >= 1.5 ? base * 2 : base);
 const ANG_POS = (ang) => { const s = String(ang || "").toLowerCase();
   if (/transaccional|urgencia|comparativo|versus|oferta|descuento|promo|hot.?sale|fomo|escasez|stock|liquidaci|precio|ahorro/.test(s)) return 2; // remate
   if (/demostrativo|testimonial|rese|educativo|lista|unboxing|prueba social|social proof|tutorial|como funciona/.test(s)) return 1; // consideración
-  if (/aspiracional|lanzamiento|cat[aá]logo|colecci|identidad|marca|storytelling|meme|humor/.test(s)) return 0; // awareness/frío
+  if (/aspiracional|lanzamiento|identidad|marca|storytelling|meme|humor/.test(s)) return 0; // awareness/frío
+  // OJO: "catálogo/colección" NO clasifica — es formato, no mensaje (un DPA sobre retargeting Hot
+  // es remate puro; el mismo catálogo sobre Advantage+ es prospecting). Decide la audiencia.
   return null; };
 function rolEmbudo(r) {
-  const a = AUD_POS(r.aud), g = ANG_POS(r.sheet?.angulo || r.ang);
+  const a = r.audPos != null ? r.audPos : AUD_POS(r.aud);
+  const g = ANG_POS(r.sheet?.angulo || r.ang);
   const ps = []; if (a != null) ps.push([a, 0.6]); if (g != null) ps.push([g, 0.4]);
   if (!ps.length) return null;
-  const sc = ps.reduce((s, [v, w]) => s + v * w, 0) / ps.reduce((s, [, w]) => s + w, 0);
+  let sc = ps.reduce((s, [v, w]) => s + v * w, 0) / ps.reduce((s, [, w]) => s + w, 0);
+  // El objetivo DECLARADO del adset (r.goalPos) no asigna el rol — en e-commerce ~90% del spend
+  // optimiza a PURCHASE y no discrimina — pero sí lo TECHEA: si el buyer configuró tráfico/awareness
+  // o ATC/checkout, el creativo no puede clasificar más abajo de esa etapa.
+  if (r.goalPos != null && r.goalPos <= 0.5) sc = Math.min(sc, 0.5);
+  else if (r.goalPos === 1) sc = Math.min(sc, 1);
   return sc < 0.67 ? "frio" : sc < 1.34 ? "medio" : "remate";
 }
 const ROL = {
@@ -131,7 +142,7 @@ const ROL = {
   medio:  { lab: "MEDIO · consideración", short: "MEDIO", desc: "Mover a carrito. Costo por add-to-cart y CTR.", color: "#6E3E94", bg: "#E6DCEE" },
   remate: { lab: "ABAJO · remate", short: "REMATE", desc: "Cerrar la venta. ROAS y CPA mandan.", color: "#2E8B6B", bg: "#DCE9E1" },
 };
-const RolTag = ({ r }) => { const k = rolEmbudo(r); if (!k) return null; const x = ROL[k]; return <span className="qualtag" style={{ color: x.color, background: x.bg }} title={x.desc}>{x.short}</span>; };
+const RolTag = ({ r }) => { const k = rolEmbudo(r); if (!k) return null; const x = ROL[k]; return <span className="qualtag" style={{ color: x.color, background: x.bg }} title={x.desc + (r.audMix ? " · MIXTO: la inversión está repartida entre audiencias frías y de remate — el rol es el promedio ponderado por spend, mirá el desglose." : "")}>{x.short}{r.audMix ? " ±" : ""}</span>; };
 // Ganadores para coronar/iterar: prioriza creativos ACTIVOS y confiables (>=5 ventas). Así no
 // corona un HotSale pausado o un ROAS de chiripa. Cae a lo que haya si no llega.
 function topWinners(rows, n = 3) {
