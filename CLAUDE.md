@@ -112,7 +112,17 @@ pushear a `main` sin romper prod.
   borrado, generador de contraseñas, checkboxes de cuentas y pestañas del Sheet. Viven en Upstash
   hasheados — no se ven ni recuperan, solo se resetean. `APP_USERS` queda como respaldo del admin.
 - **Tienda Nube** (`TIENDANUBE_STORES`, `TIENDANUBE_UA`): selector 🛒 solo si hay tiendas. Muestra
-  banda **Facturación (tienda) vs Inversión (Meta) + MER** (mismo período). El objetivo del mes del
+  banda **Facturación (tienda) vs Inversión (Meta) + MER + CAC + Margen de contribución** (mismo
+  período) y un desplegable **"VER DÍA POR DÍA"** con gráfico (inversión/facturación/órdenes/visitas).
+  El **CAC** = inversión / clientes NUEVOS reales de la tienda (no CPA pixel) — sale de
+  `/api/tiendanube/daily`, que llama `getStoreDaily` (UN barrido de /orders con customer embebido →
+  porDia + split nuevos/recurrentes; PAGE_CAP 22 → error RANGO_MUY_GRANDE en rangos enormes) y se
+  fetchea APARTE del summary para no frenar la banda. El **margen de contribución** = facturación ×
+  margen bruto % (input en el cell, localStorage `nusa_margen_<tienda>`) − inversión. El gráfico
+  (`TnDaily` en page.jsx) son 3 paneles apilados con mismo eje x (nunca doble eje y), paleta validada
+  contra el fondo #1A1A17 (inversión #4E97D1 / facturación #35A276 / órdenes #BD8722 / visitas
+  #A97FD1), crosshair + tooltip y tabla plegada. Las visitas son LPV del pixel (fallback link clicks,
+  campos nuevos de `getAccountSpendDaily`); TikTok degrada sin visitas. El objetivo del mes del
   Dashboard también toma la facturación de la tienda.
 - **Moneda de la cuenta** (toggle "MONEDA CUENTA", `accCur`): se detecta solo el `currency` de la cuenta
   de Meta (override manual Pesos/USD). Si está en **USD**, TODA la plata de Meta se convierte a **pesos**
