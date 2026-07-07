@@ -561,8 +561,8 @@ export default function App() {
             </section>
           )}
 
-          {effView === "an" && (isG ? <SinGoogle que="El análisis con IA" /> : !withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Analisis withV={withV} stats={stats} audiencias={audConv} tnSummary={tnSummary} u={ueff} accountName={(accounts.find((a) => a.id === account) || {}).name || ""} periodo={preset === "custom" && cSince && cUntil ? cSince + " → " + cUntil : preset} analysis={analysis} setAnalysis={setAnalysis} modo={modo} account={account} />)}
-          {effView === "plan" && (isG ? <SinGoogle que="El Plan" /> : !withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Plan account={account} store={tnStore} goal={goal} plan={plan} setPlan={setPlan} modo={modo} accCur={accCur} count={tnCount} />)}
+          {effView === "an" && (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Analisis withV={withV} stats={stats} audiencias={audConv} tnSummary={tnSummary} u={ueff} accountName={(accounts.find((a) => a.id === account) || {}).name || ""} periodo={preset === "custom" && cSince && cUntil ? cSince + " → " + cUntil : preset} analysis={analysis} setAnalysis={setAnalysis} modo={modo} account={account} />)}
+          {effView === "plan" && (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Plan account={account} store={tnStore} goal={goal} plan={plan} setPlan={setPlan} modo={modo} accCur={accCur} count={tnCount} />)}
           {effView === "dash" && (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Dash stats={stats} u={ueff} goal={goal} setGoal={setGoal} factTienda={tnSummary ? tnSummary.facturacion : null} tnStore={tnStore} modo={modo} />)}
           {effView === "hoy" && (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Hoy acc={acciones} u={ueff} done={done} toggle={toggle} total={totalTasks} doneCount={doneCount} mantener={stats.counts.Mantener} modo={modo} />)}
           {effView === "grabar" && (isG ? <SinGoogle que="Qué grabar" /> : !withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <QueGrabar withV={withV} u={ueff} modo={modo} role={role} accountName={(accounts.find((a) => a.id === account) || {}).name || ""} />)}
@@ -571,7 +571,7 @@ export default function App() {
           {effView === "panel" && (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Panel rows={rows} u={ueff} stats={stats} sort={sort} setSortKey={setSortKey} modo={modo} />)}
           {effView === "bib" && <Biblioteca rows={withV} hookMatch={hookMatch} setHookMatch={setHookMatch} />}
           {effView === "gen" && (isG ? <SinGoogle que="El generador" /> : <Generar rows={withV} accountName={(accounts.find((a) => a.id === account) || {}).name || ""} />)}
-          {effView === "chat" && (isG ? <SinGoogle que="El chat de la cuenta" /> : !account ? <EmptyState account={account} loading={loading} err={err} /> : <Chat account={account} accountName={(accounts.find((a) => a.id === account) || {}).name || ""} store={tnStore} tab={sheetTab} accCur={accCur} criterio={tnCount} />)}
+          {effView === "chat" && (!account ? <EmptyState account={account} loading={loading} err={err} /> : <Chat account={account} accountName={(accounts.find((a) => a.id === account) || {}).name || ""} store={tnStore} tab={sheetTab} accCur={accCur} criterio={tnCount} />)}
           {effView === "usuarios" && <Usuarios accounts={accounts} sheetTabs={sheetTabs} tnStores={tnStores} />}
         </>
       )}
@@ -1005,14 +1005,14 @@ function QueGrabar({ withV, u, modo = "ventas", role = "vos", accountName = "" }
   );
 }
 
-// Aviso para las pestañas que todavía no funcionan con cuentas de Google Ads (dependen de la
-// nomenclatura de los nombres, del Sheet o de tools de Meta). Los veredictos sí andan.
+// Aviso para las pestañas creativas que no aplican a Google Ads (dependen de la nomenclatura de
+// los nombres, de los hooks o del Sheet — los anuncios de Google no llevan nada de eso).
 function SinGoogle({ que }) {
   return (
     <section className="empty">
       <div className="emptymark">🔍</div>
-      <div className="emptytitle">Todavía no disponible para Google Ads</div>
-      <div className="emptysub">{que} por ahora funciona solo con cuentas de Meta y TikTok. Con Google ya tenés los veredictos, el Panel, Top Performers y Qué hacer hoy.</div>
+      <div className="emptytitle">No disponible para Google Ads</div>
+      <div className="emptysub">{que} depende de la nomenclatura y los hooks de los creativos, que los anuncios de Google (RSA/PMax) no llevan. Con Google tenés veredictos, Panel, Top, Qué hacer hoy, Análisis, Plan y el chat.</div>
     </section>
   );
 }
@@ -1290,10 +1290,12 @@ function Analisis({ withV, stats, audiencias, tnSummary, u, accountName, periodo
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
 
-  // Salud de tracking (pixel) — fase 2A. Se trae aparte porque no vive en withV. Degrada a null.
+  // Salud de tracking (pixel de Meta) — fase 2A. Se trae aparte porque no vive en withV. Degrada a
+  // null. En Google/TikTok no hay pixel de Meta → ni fetcheamos.
   const [tracking, setTracking] = useState(null);
+  const plataforma = String(account || "").startsWith("g:") ? "google" : String(account || "").startsWith("tt:") ? "tiktok" : "meta";
   useEffect(() => {
-    if (!account) { setTracking(null); return; }
+    if (!account || plataforma !== "meta") { setTracking(null); return; }
     let vivo = true;
     fetch("/api/tracking?account=" + encodeURIComponent(account))
       .then((r) => r.json()).then((d) => { if (vivo) setTracking(d && d.tracking ? d.tracking : null); })
@@ -1329,7 +1331,7 @@ function Analisis({ withV, stats, audiencias, tnSummary, u, accountName, periodo
       audiencia_concentracion_pct: audTotalSpend && audTop ? Math.round((audTop.spend / audTotalSpend) * 100) : null,
     };
     return {
-      modo, cuenta: accountName || "—", periodo,
+      modo, plataforma, cuenta: accountName || "—", periodo,
       inversion: stats.spendTotal,
       ...(msg
         ? { conversaciones: stats.convTotal, costo_conv_prom: +stats.costoConvProm.toFixed(2) }
@@ -1343,7 +1345,7 @@ function Analisis({ withV, stats, audiencias, tnSummary, u, accountName, periodo
       salud_estructural,
       ...(tracking ? { salud_tracking: tracking } : {}),
     };
-  }, [withV, stats, audiencias, tnSummary, u, accountName, periodo, msg, modo, tracking]);
+  }, [withV, stats, audiencias, tnSummary, u, accountName, periodo, msg, modo, tracking, plataforma]);
 
   // Historial por cliente: localStorage + Upstash si está conectado (compartido entre máquinas)
   const [hist, saveHist] = useHistSync("hist_an", account);

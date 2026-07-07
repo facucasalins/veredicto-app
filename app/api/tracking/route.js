@@ -1,6 +1,7 @@
 import { cookies } from "next/headers";
 import { getTrackingHealth } from "@/lib/meta";
 import { isTikTok } from "@/lib/tiktok";
+import { isGoogle } from "@/lib/google";
 import { SESSION_COOKIE, verifySession, authDisabled, canSeeAccount } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
@@ -14,7 +15,7 @@ export async function GET(req) {
   const sess = authDisabled() ? { admin: true } : await verifySession(cookies().get(SESSION_COOKIE)?.value);
   if (!sess) return Response.json({ error: "No autorizado" }, { status: 401 });
   if (!canSeeAccount(sess, account)) return Response.json({ error: "Sin acceso" }, { status: 403 });
-  if (isTikTok(account)) return Response.json({ tracking: null }); // TikTok no tiene pixel de Meta
+  if (isTikTok(account) || isGoogle(account)) return Response.json({ tracking: null }); // el pixel es de Meta
   try {
     return Response.json({ tracking: await getTrackingHealth(account) });
   } catch (e) {

@@ -1,7 +1,7 @@
 import { cookies } from "next/headers";
 import { getAds, getAdsetTargeting, getAdStatuses } from "@/lib/meta";
 import { isTikTok, ttId, getAds as ttGetAds, getAdStatuses as ttGetAdStatuses, getAdgroupAudiences } from "@/lib/tiktok";
-import { isGoogle, gId, getAds as gGetAds, getAdStatuses as gGetAdStatuses } from "@/lib/google";
+import { isGoogle, gId, getAds as gGetAds, getAdStatuses as gGetAdStatuses, getChannelAudiences } from "@/lib/google";
 import { presetToRange } from "@/lib/dates";
 import { buildRows, buildAudienceRows, classifyTargeting, targetingTipo, goalEmbudo } from "@/lib/nomenclatura";
 import { enrichWithSheet } from "@/lib/sheet";
@@ -40,15 +40,17 @@ export async function GET(req) {
     } else if (isGoogle(account)) {
       // Google Ads: los nombres (RSA, PMax) NO llevan nuestra nomenclatura → sin fingerprint cada
       // anuncio queda como su propia fila y el cruce con el Sheet no aplica (se saltea más abajo).
-      // Sin clasificación de audiencias todavía: el desglose cae al nombre del ad group. Todo tipo
-      // "ventas" (Google no tiene modo mensajes). PMax no reporta a nivel anuncio (queda afuera).
+      // La "audiencia" es el CANAL de la campaña (Búsqueda/PMax/Shopping/...) — Google no tiene
+      // Hot/Tibio/LAL como Meta. Todo tipo "ventas" (sin modo mensajes). PMax entra como filas
+      // propias por asset group (getAds las trae con id "ag:...").
       const cid = gId(account);
       const r = range || presetToRange(preset);
-      const [gAds, st] = await Promise.all([
+      const [gAds, aud, st] = await Promise.all([
         gGetAds(cid, r),
+        getChannelAudiences(cid).catch(() => ({})),
         gGetAdStatuses(cid).catch(() => null),
       ]);
-      ads = gAds; statuses = st;
+      ads = gAds; audMap = aud; statuses = st;
       for (const a of ads) tipoMap[a.adset_id] = "ventas";
     } else {
       // Insights + targeting real en paralelo. Si el targeting falla, audMap queda vacío y se cae

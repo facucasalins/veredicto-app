@@ -1,6 +1,7 @@
 import { cookies } from "next/headers";
 import { getAds, getAdsetBudgets } from "@/lib/meta";
 import { isTikTok, ttId, getAds as ttGetAds, getAdsetBudgets as ttGetAdsetBudgets } from "@/lib/tiktok";
+import { isGoogle, gId, getAds as gGetAds, getAdsetBudgets as gGetAdsetBudgets } from "@/lib/google";
 import { getStoreRevenue } from "@/lib/tiendanube";
 import { convertMonto } from "@/lib/fx";
 import { presetToRange } from "@/lib/dates";
@@ -8,12 +9,12 @@ import { SESSION_COOKIE, verifySession, authDisabled, canSeeAccount } from "@/li
 
 export const dynamic = "force-dynamic";
 
-const SYSTEM = `Sos un media buyer senior y planificador de presupuestos para ecommerce en Argentina. Hablás en español rioplatense (vos), directo. Te paso un resumen YA CALCULADO del MES EN CURSO de una cuenta de META: la meta de facturación, lo facturado hasta hoy (MTD), la inversión en Meta, el MER, los días que faltan, y las UNIDADES DE PRESUPUESTO reales (cada una es un adset si la campaña es ABO, o una campaña si es CBO) con su budget diario actual, spend del mes, ROAS, ventas y estado.
+const SYSTEM = `Sos un media buyer senior y planificador de presupuestos para ecommerce en Argentina. Hablás en español rioplatense (vos), directo. Te paso un resumen YA CALCULADO del MES EN CURSO de una cuenta de ads (el campo "plataforma" te dice cuál: Meta, TikTok o Google): la meta de facturación, lo facturado hasta hoy (MTD), la inversión en esa plataforma, el MER, los días que faltan, y las UNIDADES DE PRESUPUESTO reales (cada una es un adset si la campaña es ABO, o una campaña si es CBO; en Google el budget vive SIEMPRE en la campaña, así que todas las unidades son campañas/CBO) con su budget diario actual, spend del mes, ROAS, ventas y estado.
 
 CONTEXTO CLAVE SOBRE EL MER — NO LO USES PARA PROYECTAR:
-La facturación de la tienda la empujan VARIOS canales (Meta, Google, TikTok, orgánico, recompra). Acá solo ves la inversión de META, así que el MER (facturación total ÷ inversión Meta) NO es el retorno de Meta: está inflado por los otros canales. Si proyectás "facturación extra = inversión extra × MER" estás asumiendo que Meta genera todo, y eso es FALSO. El MER te sirve solo como contexto de salud general y para detectar tendencia, nunca como multiplicador.
+La facturación de la tienda la empujan VARIOS canales (Meta, Google, TikTok, orgánico, recompra). Acá solo ves la inversión de UNA plataforma, así que el MER (facturación total ÷ inversión de esta plataforma) NO es el retorno de esta plataforma: está inflado por los otros canales. Si proyectás "facturación extra = inversión extra × MER" estás asumiendo que esta plataforma genera todo, y eso es FALSO. El MER te sirve solo como contexto de salud general y para detectar tendencia, nunca como multiplicador.
 
-CÓMO PROYECTAR (en su lugar): usá la data ATRIBUIDA por la plataforma a nivel unidad — el ROAS y las ventas de cada unidad son lo que Meta efectivamente atribuye a esa plata. Facturación incremental esperada ≈ Σ (inversión extra en la unidad × ROAS esperado de esa unidad en el escenario). El ROAS esperado NUNCA es el actual al escalar: aplicale decaimiento por saturación según el escenario y el tamaño del salto de budget (saltos chicos ~10-20% degradan poco; duplicar budget degrada mucho).
+CÓMO PROYECTAR (en su lugar): usá la data ATRIBUIDA por la plataforma a nivel unidad — el ROAS y las ventas de cada unidad son lo que la plataforma efectivamente atribuye a esa plata. Facturación incremental esperada ≈ Σ (inversión extra en la unidad × ROAS esperado de esa unidad en el escenario). El ROAS esperado NUNCA es el actual al escalar: aplicale decaimiento por saturación según el escenario y el tamaño del salto de budget (saltos chicos ~10-20% degradan poco; duplicar budget degrada mucho).
 
 Tu tarea: armar un plan para llegar a la meta, en TRES escenarios — PESIMISTA, NORMAL y OPTIMISTA — que se diferencian por cuánto asumís que decae el ROAS de cada unidad al escalar:
 - Pesimista: decaimiento fuerte (auction saturada, fatiga creativa). Escalar rinde bastante menos que el ROAS actual.
@@ -25,7 +26,7 @@ REGLAS DURAS:
 - Proyectá SIEMPRE desde el ROAS por unidad con decaimiento, NUNCA desde el MER (ver arriba). La facturacion_proyectada del escenario = facturado MTD + ritmo actual por los días restantes + el incremental de tus acciones.
 - Concentrá la inversión en las unidades más eficientes CON margen; recomendá DESINVERTIR/reasignar lo que sangra (ROAS bajo, mucho spend). Mové budget de lo malo a lo bueno antes de pedir plata nueva.
 - Para cada acción decí la unidad, su nivel (ABO/CBO), y el budget diario de→a (o pausar). Recordá que faltan N días: la inversión extra total = extra diario × días restantes.
-- Si ni el escenario optimista llega a la meta CON la inversión de Meta sola, decilo con honestidad y aclará que el resto debe venir de otros canales (Google/TikTok/orgánico) que acá no ves.
+- Si ni el escenario optimista llega a la meta CON la inversión de esta plataforma sola, decilo con honestidad y aclará que el resto debe venir de los otros canales que acá no ves.
 - SÉ CONCISO: máximo 5 acciones por escenario (las de mayor impacto), "porque" en una frase corta. Máximo 4 ítems en desinversión.
 
 SI modo="mensajes" (campañas de mensajería): NO hay facturación, ROAS ni meta de plata. El resultado son CONVERSACIONES y la eficiencia es el COSTO POR CONVERSACIÓN (menor = mejor). El plan es de OPTIMIZACIÓN: cómo escalar conversaciones manteniendo o bajando el costo por conversación. Los 3 escenarios se diferencian por cómo asumís que se comporta el costo por conversación al escalar (sube por saturación / se mantiene / baja). Concentrá budget en las unidades con costo por conversación más bajo y margen; desinvertí las de costo alto o sin conversaciones. En vez de "facturacion_proyectada" y "alcanza_meta", devolvé "conversaciones_proyectadas" (cuántas conversaciones proyectás al cierre del mes en ese escenario).
@@ -60,9 +61,10 @@ export async function POST(req) {
 
   try {
     const tt = isTikTok(account);
+    const gg = isGoogle(account);
     const [ads, budgets, tienda] = await Promise.all([
-      tt ? ttGetAds(ttId(account), since, until) : getAds(account, "this_month", { since, until }),
-      (tt ? ttGetAdsetBudgets(ttId(account)) : getAdsetBudgets(account)).catch(() => ({})),
+      tt ? ttGetAds(ttId(account), since, until) : gg ? gGetAds(gId(account), { since, until }) : getAds(account, "this_month", { since, until }),
+      (tt ? ttGetAdsetBudgets(ttId(account)) : gg ? gGetAdsetBudgets(gId(account)) : getAdsetBudgets(account)).catch(() => ({})),
       store ? getStoreRevenue(store, since, until, count).catch(() => null) : Promise.resolve(null),
     ]);
 
@@ -103,15 +105,16 @@ export async function POST(req) {
       .map((u) => ({ nombre: u.nombre, nivel: u.nivel, campania: u.campania, budget_diario: conv(u.budget_diario), spend_mtd: conv(Math.round(u.spend)), activa: u.activa, ...(msg ? { conversaciones: Math.round(u.conversaciones), costo_conv: u.conversaciones ? +convF(u.spend / u.conversaciones).toFixed(2) : 0 } : { roas: u.spend ? +(u.revenue / u.spend).toFixed(1) : 0, ventas: Math.round(u.ventas) }) }))
       .sort((a, b) => b.spend_mtd - a.spend_mtd).slice(0, 25);
 
+    const plataforma = tt ? "TikTok" : gg ? "Google" : "Meta";
     const snapshot = msg ? {
-      modo, dias_transcurridos: diasTrans, dias_del_mes: diasMes, dias_restantes: diasRestan,
+      modo, plataforma, dias_transcurridos: diasTrans, dias_del_mes: diasMes, dias_restantes: diasRestan,
       conversaciones_mtd: convTotal, inversion_mtd: inversionConv, costo_conv: convTotal ? +convF(inversion / convTotal).toFixed(2) : 0,
       ...(rate ? { moneda: tCur, nota_moneda: `inversión y budgets convertidos de ${accCur} a ${tCur} al dólar oficial ($${Math.round(rate)})` } : {}),
       proyeccion_conversaciones: diasTrans ? Math.round(convTotal / diasTrans * diasMes) : convTotal,
       unidades,
     } : {
-      modo, meta: goal, facturacion_mtd: facturacion, inversion_mtd: inversionConv, mer,
-      fuente_facturacion: tienda ? "tienda" : "meta (pixel)",
+      modo, plataforma, meta: goal, facturacion_mtd: facturacion, inversion_mtd: inversionConv, mer,
+      fuente_facturacion: tienda ? "tienda" : plataforma.toLowerCase() + " (atribuida por la plataforma)",
       ...(rate ? { moneda: tCur, nota_moneda: `inversión y budgets convertidos de ${accCur} a ${tCur} al dólar oficial ($${Math.round(rate)})` } : {}),
       dias_transcurridos: diasTrans, dias_del_mes: diasMes, dias_restantes: diasRestan,
       proyeccion_sin_cambios: proyeccion, gap_vs_meta: Math.round(goal - proyeccion),

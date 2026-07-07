@@ -81,12 +81,18 @@ respuestas concisas.
   Auth: refresh token OAuth → access token cacheado ~50 min en memoria. `gEnabled()`,
   `getAccounts()` (cuentas cliente ENABLED no-manager, ids prefijados **`g:`**, mismo dropdown que
   Meta/TikTok), `getAds(customerId, range)` (misma forma de fila que Meta; `range` = keyword GAQL o
-  `{since,until}` → BETWEEN), `getAdStatuses` (cadena ad + ad group + campaña → ACTIVE /
-  ADSET_PAUSED / CAMPAIGN_PAUSED), `isGoogle(id)`/`gId(id)`. Solo panel/veredictos en v1: los
-  nombres de Google (RSA/PMax) NO llevan nomenclatura → cada anuncio es su propia fila (fingerprint
-  = nombre completo; `/api/ads` pisa `nombre:"nd"` con el nombre real), SIN cruce con Sheet, y el
-  front gatea con `SinGoogle` las pestañas Análisis/Plan/Generar/Chat/Embudo/Qué grabar. OJO:
-  **PMax no reporta a nivel anuncio** (asset groups) — su spend no aparece en el panel.
+  `{since,until}` → BETWEEN; **incluye PMax**: cada asset group con spend entra como fila propia,
+  ids `ag:<id>`, nombre "PMax · campaña · asset group"), `getAdStatuses` (cadena ad + ad group +
+  campaña → ACTIVE / ADSET_PAUSED / CAMPAIGN_PAUSED; también asset groups), **`getAccountSpend`**
+  (spend/conversiones a nivel customer, con `porDia` — mismo contrato que TikTok),
+  **`getChannelAudiences`** (adset_id → canal de la campaña: Búsqueda/PMax/Shopping/Display/Video —
+  hace de "audiencia" porque Google no tiene Hot/Tibio/LAL) y **`getAdsetBudgets`** (mismo contrato
+  que Meta/TikTok; en Google el budget vive SIEMPRE en la campaña → todas las unidades son "CBO"),
+  `isGoogle(id)`/`gId(id)`. Los nombres de Google (RSA/PMax) NO llevan nomenclatura → cada anuncio
+  es su propia fila (fingerprint = nombre completo; `/api/ads` y el chat pisan `nombre:"nd"` con el
+  nombre real) y SIN cruce con Sheet. Cerebro/Plan/chat FUNCIONAN con Google (prompts
+  platform-aware; `/api/tracking` devuelve null — el pixel es de Meta); `SinGoogle` solo gatea las
+  pestañas creativas (Generar/Embudo/Qué grabar), que dependen de nomenclatura/hooks.
 - `lib/store.js` — storage server-side en **Upstash Redis** (REST, sin dependencias): `storeEnabled()`,
   `kvGet(key)`, `kvSet(key, value)`. Para historiales/conversaciones compartidos. Sin env vars degrada
   (el front sigue en localStorage). Lo consume `/api/history` (GET/POST, scopeado por sesión, claves
@@ -224,9 +230,9 @@ pushear a `main` sin romper prod.
   crear la app de developer en business-api.tiktok.com (scopes read de Ads/Reporting), esperar la
   aprobación, autorizar con el Business Center y cargar las env vars. Al conectar el primer token,
   VERIFICAR los nombres de métricas del reporte (no se pudieron probar sin token).
-- **Google Ads**: v1 YA integrada (panel/veredictos, ver `lib/google.js`). Pendiente: sumar PMax
-  (asset groups), clasificación de audiencias/embudo, y extender cerebro/Plan/chat (budgets +
-  estructura vía GAQL).
+- **Google Ads**: v2 YA integrada (panel/veredictos + PMax + canal como audiencia + cerebro/Plan/
+  chat, ver `lib/google.js`). Pendiente: keywords/términos de búsqueda como dimensión propia, y
+  mapear el embudo (hoy los canales de Google no entran a `audEmbudoPos`).
 - **Snapshots históricos + GA4**: para que el cerebro razone sobre tendencia y causas full-funnel.
 - **Refresh del token de Meta**: regenerarlo como **"Sin vencimiento"** en Meta Business → Usuarios
   del sistema (evita el bajón de los ~60 días).
