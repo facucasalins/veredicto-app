@@ -1,6 +1,7 @@
 import { cookies } from "next/headers";
 import { getAds, getAdsetTargeting, getAdStatuses } from "@/lib/meta";
 import { isTikTok, ttId, getAds as ttGetAds, getAdStatuses as ttGetAdStatuses, getAdgroupAudiences } from "@/lib/tiktok";
+import { isGoogle, gId, getAds as gGetAds, getAdStatuses as gGetAdStatuses } from "@/lib/google";
 import { presetToRange } from "@/lib/dates";
 import { buildRows, buildAudienceRows, classifyTargeting, targetingTipo, goalEmbudo } from "@/lib/nomenclatura";
 import { enrichWithSheet } from "@/lib/sheet";
@@ -36,6 +37,19 @@ export async function GET(req) {
       ]);
       ads = ttAds; audMap = aud; statuses = st;
       for (const a of ads) tipoMap[a.adset_id] = "ventas"; // TikTok: sin campañas de mensajería
+    } else if (isGoogle(account)) {
+      // Google Ads: los nombres (RSA, PMax) NO llevan nuestra nomenclatura → sin fingerprint cada
+      // anuncio queda como su propia fila y el cruce con el Sheet no aplica (se saltea más abajo).
+      // Sin clasificación de audiencias todavía: el desglose cae al nombre del ad group. Todo tipo
+      // "ventas" (Google no tiene modo mensajes). PMax no reporta a nivel anuncio (queda afuera).
+      const cid = gId(account);
+      const r = range || presetToRange(preset);
+      const [gAds, st] = await Promise.all([
+        gGetAds(cid, r),
+        gGetAdStatuses(cid).catch(() => null),
+      ]);
+      ads = gAds; statuses = st;
+      for (const a of ads) tipoMap[a.adset_id] = "ventas";
     } else {
       // Insights + targeting real en paralelo. Si el targeting falla, audMap queda vacío y se cae
       // al parseo del nombre del conjunto (degradación elegante).
@@ -48,8 +62,14 @@ export async function GET(req) {
       for (const id in targeting) { const lbl = classifyTargeting(targeting[id]); if (lbl) audMap[id] = lbl; tipoMap[id] = targetingTipo(targeting[id]); const gp = goalEmbudo(targeting[id]); if (gp != null) goalMap[id] = gp; }
     }
     const statusMap = statuses && Object.keys(statuses).length ? statuses : null;
-    let rows = buildRows(ads, audMap, statusMap, tipoMap, goalMap); // goalMap vacío en TikTok → sin techo, degrada
-    rows = await enrichWithSheet(rows, tab); // si hay pestaña, cruza el Sheet; si no, devuelve las rows igual
+    let rows = buildRows(ads, audMap, statusMap, tipoMap, goalMap); // goalMap vacío en TikTok/Google → sin techo, degrada
+    if (isGoogle(account)) {
+      // Sin nomenclatura, label() devuelve "nd" para todos → usamos el nombre real del anuncio
+      // (el fingerprint ES el nombre completo cuando no hay timestamp). Y el Sheet no se cruza.
+      rows = rows.map((r) => (r.nombre === "nd" ? { ...r, nombre: r.id } : r));
+    } else {
+      rows = await enrichWithSheet(rows, tab); // si hay pestaña, cruza el Sheet; si no, devuelve las rows igual
+    }
     return Response.json({ rows, audiencias: buildAudienceRows(ads, audMap) });
   } catch (e) {
     return Response.json({ error: e.message }, { status: 500 });

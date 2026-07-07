@@ -77,6 +77,16 @@ respuestas concisas.
   prefijo. Sin env vars degrada (solo Meta). TikTok no tiene modo mensajes (todo `tipo:"ventas"`).
   OJO: métricas escritas contra la doc SIN probar contra la API real (falta el token) — la primera
   conexión puede necesitar ajuste fino de nombres (`complete_payment_roas`, `complete_payment`).
+- `lib/google.js` — cliente de la **Google Ads API** (REST + GAQL vía `searchStream`, bajo la MCC).
+  Auth: refresh token OAuth → access token cacheado ~50 min en memoria. `gEnabled()`,
+  `getAccounts()` (cuentas cliente ENABLED no-manager, ids prefijados **`g:`**, mismo dropdown que
+  Meta/TikTok), `getAds(customerId, range)` (misma forma de fila que Meta; `range` = keyword GAQL o
+  `{since,until}` → BETWEEN), `getAdStatuses` (cadena ad + ad group + campaña → ACTIVE /
+  ADSET_PAUSED / CAMPAIGN_PAUSED), `isGoogle(id)`/`gId(id)`. Solo panel/veredictos en v1: los
+  nombres de Google (RSA/PMax) NO llevan nomenclatura → cada anuncio es su propia fila (fingerprint
+  = nombre completo; `/api/ads` pisa `nombre:"nd"` con el nombre real), SIN cruce con Sheet, y el
+  front gatea con `SinGoogle` las pestañas Análisis/Plan/Generar/Chat/Embudo/Qué grabar. OJO:
+  **PMax no reporta a nivel anuncio** (asset groups) — su spend no aparece en el panel.
 - `lib/store.js` — storage server-side en **Upstash Redis** (REST, sin dependencias): `storeEnabled()`,
   `kvGet(key)`, `kvSet(key, value)`. Para historiales/conversaciones compartidos. Sin env vars degrada
   (el front sigue en localStorage). Lo consume `/api/history` (GET/POST, scopeado por sesión, claves
@@ -192,6 +202,9 @@ pushear a `main` sin romper prod.
 - `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL` (`claude-sonnet-4-6`) — generador, cerebro, match-hooks y chat.
 - `TIKTOK_ACCESS_TOKEN`, `TIKTOK_APP_ID`, `TIKTOK_SECRET` (+ `TIKTOK_ADVERTISERS` JSON opcional para
   limitar cuentas) — TikTok Ads. Sin esto, el dropdown muestra solo Meta.
+- `GOOGLE_ADS_DEVELOPER_TOKEN`, `GOOGLE_ADS_CLIENT_ID`, `GOOGLE_ADS_CLIENT_SECRET`,
+  `GOOGLE_ADS_REFRESH_TOKEN`, `GOOGLE_ADS_MCC_ID` (+ `GOOGLE_ADS_API_VERSION` opcional, default
+  v24) — Google Ads. Sin esto (o si la API falla) el dropdown no muestra cuentas de Google.
 - `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN` — historiales/conversaciones server-side
   (los inyecta sola la integración Upstash del Marketplace de Vercel; opcional, sin esto queda
   localStorage). Alias legacy soportados: `KV_REST_API_URL`/`KV_REST_API_TOKEN`.
@@ -211,7 +224,9 @@ pushear a `main` sin romper prod.
   crear la app de developer en business-api.tiktok.com (scopes read de Ads/Reporting), esperar la
   aprobación, autorizar con el Business Center y cargar las env vars. Al conectar el primer token,
   VERIFICAR los nombres de métricas del reporte (no se pudieron probar sin token).
-- **Google Ads**: mismo patrón que TikTok; requiere developer token de Google Ads API (aprobación lenta).
+- **Google Ads**: v1 YA integrada (panel/veredictos, ver `lib/google.js`). Pendiente: sumar PMax
+  (asset groups), clasificación de audiencias/embudo, y extender cerebro/Plan/chat (budgets +
+  estructura vía GAQL).
 - **Snapshots históricos + GA4**: para que el cerebro razone sobre tendencia y causas full-funnel.
 - **Refresh del token de Meta**: regenerarlo como **"Sin vencimiento"** en Meta Business → Usuarios
   del sistema (evita el bajón de los ~60 días).
