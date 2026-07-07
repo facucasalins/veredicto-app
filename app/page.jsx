@@ -524,7 +524,7 @@ export default function App() {
             <div className="modobox"><span className="rlabel">$ MONEDA CUENTA</span>
               <button className={"modotgl" + (accCur === "ARS" ? " on" : "")} onClick={() => setCurForce("ARS")}>PESOS</button>
               <button className={"modotgl" + (accCur === "USD" ? " on" : "")} onClick={() => setCurForce("USD")}>USD</button>
-              <span className="curhint">{(curForce ? "manual" : (curDetected ? "auto · Meta " + curDetected : "auto")) + (accCur === "USD" ? (convirtiendo ? " · todo en $ARS @ $" + nf.format(Math.round(fxRate)) : " · ⚠ sin cotización") : "")}</span>
+              <span className="curhint">{(curForce ? "manual" : (curDetected ? "auto · " + (isG ? "Google " : String(account || "").startsWith("tt:") ? "TikTok " : "Meta ") + curDetected : "auto")) + (accCur === "USD" ? (convirtiendo ? " · todo en $ARS @ $" + nf.format(Math.round(fxRate)) : " · ⚠ sin cotización") : "")}</span>
             </div>
           )}
         </div>
