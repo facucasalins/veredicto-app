@@ -284,12 +284,18 @@ pushear a `main` sin romper prod.
   existente, con el ID de cada cuenta) o (b) pedir **Basic access** en API Center y correr
   `node scripts/link-google-accounts.mjs <ids...>` (invita desde la MCC y acepta desde cada
   cuenta; ya probado hasta el punto del bloqueo).
-- **GA4 (piloto listo, falta conectar)**: el código YA está (`lib/ga4.js` + `/api/ga4` + banda +
-  cerebro). Para activarlo con datos reales: (1) regenerar el refresh token de Google pidiendo
-  los scopes `adwords` + `analytics.readonly` (mismo client id/secret; guardarlo en
-  `GOOGLE_OAUTH_REFRESH_TOKEN`), (2) cargar `GA4_PROPERTIES` (JSON `[{name, property_id,
-  account?, store?}]`) y (3) verificar los nombres de métricas contra la primera propiedad real.
-  Mientras tanto `GA4_DEMO=1` muestra el módulo con datos de muestra.
+- **GA4 (funcionando en local, falta prod)**: `lib/ga4.js` + `/api/ga4` + banda + cerebro,
+  VERIFICADO contra propiedades reales (jul 2026 — métricas OK sin ajustes; el usuario accede a
+  12 propiedades: morashop.ar 252454981, Juanitashoes 355886412, LegART, ADBlick, etc.). El token
+  con scopes `adwords`+`analytics.readonly` ya está en `.env.local` local
+  (`GOOGLE_OAUTH_REFRESH_TOKEN`, generado con `scripts/ga4-auth.mjs` — OJO: requiere
+  `http://localhost:53682/callback` como redirect URI del OAuth client, y las APIs
+  analyticsadmin + analyticsdata habilitadas en el proyecto). Para PROD: copiar
+  `GOOGLE_OAUTH_REFRESH_TOKEN` y `GA4_PROPERTIES` de `.env.local` a Vercel + redeploy.
+  **Confiabilidad medida** (Juanita, 30 días): compras GA4 694 vs 682 no-canceladas TN (+1,8%),
+  revenue GA4 $107,3M vs $113,7M pagadas TN (−5,6%) → totales muy confiables. CAVEAT morashop.ar:
+  46% de las compras caen en canal "Unassigned" (purchase sin sesión atribuida) → ahí el MIX por
+  canal es débil hasta arreglar el tagging; los totales sirven igual.
 - **Snapshots históricos**: para que el cerebro razone sobre tendencia.
 - **Refresh del token de Meta**: regenerarlo como **"Sin vencimiento"** en Meta Business → Usuarios
   del sistema (evita el bajón de los ~60 días).
