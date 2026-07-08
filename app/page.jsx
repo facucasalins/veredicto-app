@@ -433,6 +433,19 @@ export default function App() {
     }).finally(() => { if (!cancelled) setCmpLoading(false); });
     return () => { cancelled = true; };
   }, [accountsQS, cmpOn, cmpRange ? cmpRange.since + cmpRange.until : ""]); // eslint-disable-line react-hooks/exhaustive-deps
+  // La banda de Tienda Nube también compara: summary (facturación/inversión/MER/margen) y daily
+  // (CAC) del período comparado. Solo con el checkbox activo — son dos fetches extra.
+  const [tnSummaryCmp, setTnSummaryCmp] = useState(null);
+  const [tnDetailCmp, setTnDetailCmp] = useState(null);
+  useEffect(() => {
+    if (!tnStore || !cmpOn || !cmpRange) { setTnSummaryCmp(null); setTnDetailCmp(null); return; }
+    let cancelled = false;
+    setTnSummaryCmp(null); setTnDetailCmp(null);
+    const base = "store=" + encodeURIComponent(tnStore) + "&count=" + tnCount + (account ? "&accounts=" + encodeURIComponent(accountsQS) + "&curs=" + cursQS : "") + "&since=" + cmpRange.since + "&until=" + cmpRange.until;
+    fetch("/api/tiendanube/summary?" + base).then((r) => r.json()).then((j) => { if (!cancelled) setTnSummaryCmp(j.error ? null : j); }).catch(() => { if (!cancelled) setTnSummaryCmp(null); });
+    fetch("/api/tiendanube/daily?" + base).then((r) => r.json()).then((j) => { if (!cancelled) setTnDetailCmp(j && !j.error ? j : null); }).catch(() => { if (!cancelled) setTnDetailCmp(null); });
+    return () => { cancelled = true; };
+  }, [tnStore, accountsQS, cursQS, tnCount, cmpOn, cmpRange ? cmpRange.since + cmpRange.until : ""]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Umbral EFECTIVO: un umbral vacío (null) deja de ser condición. roasMin→0 (sin mínimo),
   // cpaMax→∞ (sin tope), pisoSpend→0 (sin piso). Así filtrás solo por los que cargaste.
@@ -596,13 +609,20 @@ export default function App() {
           {tnSummary && (
             <>
               <div className="tnstats">
-                <div className="tnstat"><div className="tnlab">FACTURACIÓN TIENDA</div><div className="tnval">{money(tnSummary.facturacion)}</div><div className="tnsub">{tnSummary.orders} órdenes {tnSummary.criterio === "no_canceladas" ? "(pagadas + pendientes)" : "pagadas"} · ticket {money(tnSummary.ticket)}</div></div>
-                <div className="tnstat"><div className="tnlab">INVERSIÓN {mixOn ? "ADS" : String(account || "").startsWith("g:") ? "GOOGLE" : String(account || "").startsWith("tt:") ? "TIKTOK" : "META"}</div><div className="tnval">{account ? money(tnSummary.fx && !tnSummary.fx.error ? tnSummary.inversionConv : tnSummary.inversion) : "—"}</div><div className="tnsub">{!account ? "elegí el cliente de Meta" : tnSummary.porPlataforma ? tnSummary.porPlataforma.map((p) => (p.plataforma === "Google" ? "G " : p.plataforma === "TikTok" ? "TT " : "M ") + short(p.inversion)).join(" · ") : tnSummary.fx && !tnSummary.fx.error ? ("USD " + money(tnSummary.inversion) + " · " + tnSummary.fx.fuente + " $" + nf.format(Math.round(tnSummary.fx.rate))) : tnSummary.fx && tnSummary.fx.error ? ("⚠ no pude cotizar el dólar — MER sin convertir") : ("ROAS pixel " + (tnSummary.roasMeta || 0).toFixed(1) + "x")}</div></div>
-                <div className="tnstat tnmer"><div className="tnlab">MER (FACT / INV)</div><div className="tnval">{tnSummary.mer != null ? tnSummary.mer.toFixed(2) + "x" : "—"}</div><div className="tnsub">{tnSummary.criterio === "no_canceladas" ? ("pagadas: " + money(tnSummary.facturacionPagada) + " (" + tnSummary.ordersPagadas + ") · pendientes: " + money(tnSummary.facturacionPendiente) + " (" + tnSummary.ordersPendientes + ")") : tnSummary.ordersPendientes ? ("+ " + money(tnSummary.facturacionPendiente) + " pendientes (" + tnSummary.ordersPendientes + " órd.) sin contar") : "facturación / inversión"}</div></div>
+                {(() => {
+                  // COMPARAR activo → cada métrica de la banda suma su delta contra el período comparado
+                  const cS = cmpOn ? tnSummaryCmp : null;
+                  const cD = cmpOn ? tnDetailCmp : null;
+                  const invOf = (s) => (s.fx && !s.fx.error ? s.inversionConv : s.inversion);
+                  return <>
+                <div className="tnstat"><div className="tnlab">FACTURACIÓN TIENDA</div><div className="tnval">{money(tnSummary.facturacion)}</div><div className="tnsub">{tnSummary.orders} órdenes {tnSummary.criterio === "no_canceladas" ? "(pagadas + pendientes)" : "pagadas"} · ticket {money(tnSummary.ticket)}</div>{cS && <TnDelta cur={tnSummary.facturacion} prev={cS.facturacion} />}</div>
+                <div className="tnstat"><div className="tnlab">INVERSIÓN {mixOn ? "ADS" : String(account || "").startsWith("g:") ? "GOOGLE" : String(account || "").startsWith("tt:") ? "TIKTOK" : "META"}</div><div className="tnval">{account ? money(tnSummary.fx && !tnSummary.fx.error ? tnSummary.inversionConv : tnSummary.inversion) : "—"}</div><div className="tnsub">{!account ? "elegí el cliente de Meta" : tnSummary.porPlataforma ? tnSummary.porPlataforma.map((p) => (p.plataforma === "Google" ? "G " : p.plataforma === "TikTok" ? "TT " : "M ") + short(p.inversion)).join(" · ") : tnSummary.fx && !tnSummary.fx.error ? ("USD " + money(tnSummary.inversion) + " · " + tnSummary.fx.fuente + " $" + nf.format(Math.round(tnSummary.fx.rate))) : tnSummary.fx && tnSummary.fx.error ? ("⚠ no pude cotizar el dólar — MER sin convertir") : ("ROAS pixel " + (tnSummary.roasMeta || 0).toFixed(1) + "x")}</div>{account && cS && <TnDelta cur={invOf(tnSummary)} prev={invOf(cS)} invert={null} />}</div>
+                <div className="tnstat tnmer"><div className="tnlab">MER (FACT / INV)</div><div className="tnval">{tnSummary.mer != null ? tnSummary.mer.toFixed(2) + "x" : "—"}</div><div className="tnsub">{tnSummary.criterio === "no_canceladas" ? ("pagadas: " + money(tnSummary.facturacionPagada) + " (" + tnSummary.ordersPagadas + ") · pendientes: " + money(tnSummary.facturacionPendiente) + " (" + tnSummary.ordersPendientes + ")") : tnSummary.ordersPendientes ? ("+ " + money(tnSummary.facturacionPendiente) + " pendientes (" + tnSummary.ordersPendientes + " órd.) sin contar") : "facturación / inversión"}</div>{cS && tnSummary.mer != null && <TnDelta cur={tnSummary.mer} prev={cS.mer} fmt={(x) => x.toFixed(2) + "x"} />}</div>
                 <div className="tnstat" title="Inversión en pauta ÷ clientes NUEVOS de la tienda en el período (primera compra). No es el CPA del pixel: acá cuentan personas nuevas reales, no compras atribuidas.">
                   <div className="tnlab">CAC (CLIENTE NUEVO)</div>
                   <div className="tnval">{tnDetail && tnDetail.cac != null ? money(tnDetail.cac) : tnDetailLoading ? "…" : "—"}</div>
                   <div className="tnsub">{tnDetail && tnDetail.cac != null ? (nf.format(tnDetail.clientesNuevos) + " nuevos · " + nf.format(tnDetail.clientesRecurrentes) + " recurrentes") : tnDetailLoading ? "contando clientes nuevos…" : tnDetail && tnDetail.error ? (tnDetail.code === "RANGO_MUY_GRANDE" ? "rango muy grande — acotá el período" : "no se pudo calcular") : "inversión / clientes nuevos"}</div>
+                  {cD && tnDetail && tnDetail.cac != null && <TnDelta cur={tnDetail.cac} prev={cD.cac} invert={true} />}
                 </div>
                 <div className="tnstat" title="Margen de contribución del período: facturación × tu margen bruto (producto − costo, antes de la pauta) − inversión en pauta. Lo que queda para cubrir fijos y ganar.">
                   <div className="tnlab">MARGEN CONTRIBUCIÓN</div>
@@ -610,12 +630,16 @@ export default function App() {
                     const m = parseFloat(String(margen).replace(",", "."));
                     const inv = account ? (tnSummary.fx && !tnSummary.fx.error ? tnSummary.inversionConv : tnSummary.inversion) : 0;
                     const cm = isFinite(m) && m > 0 ? Math.round(tnSummary.facturacion * (m / 100) - inv) : null;
+                    const cmPrev = cm != null && cS ? Math.round(cS.facturacion * (m / 100) - (account ? invOf(cS) : 0)) : null;
                     return <>
                       <div className="tnval" style={cm != null && cm < 0 ? { color: "#E08578" } : undefined}>{cm != null ? money(cm) : "—"}</div>
                       <div className="tnsub">fact × <input className="tnmargin" type="number" min="1" max="95" placeholder="%" value={margen} onChange={(e) => setMargenP(e.target.value)} />% margen bruto − inversión{cm == null ? " → cargá tu margen" : ""}</div>
+                      {cmPrev != null && <TnDelta cur={cm} prev={cmPrev} />}
                     </>;
                   })()}
                 </div>
+                  </>;
+                })()}
               </div>
               <div className="tnnote">{tnSummary.criterio === "no_canceladas"
                 ? "MER = facturación de TODAS las órdenes no canceladas (pagadas + pendientes de pago, sin las de pago anulado — criterio interno del cliente) dividida la inversión en Meta, mismo período. Mide la eficiencia global del marketing, no solo lo atribuido al pixel."
@@ -1652,6 +1676,15 @@ function Kpi({ lab, val, mod, sub, cmp }) {
   return <div className={"kpi" + (mod === "grn" ? " good" : "")}><div className="klab">{lab}</div><div className={"kval" + (mod === "grn" ? " grn" : "")}>{val}</div>{sub ? <div className="ksub">{sub}</div> : null}{dline}</div>;
 }
 
+// Delta % de la banda de Tienda Nube (módulo COMPARAR): misma lógica que los KPIs del Dash.
+// invert=true cuando BAJAR es bueno (CAC); invert=null → neutro (inversión).
+function TnDelta({ cur, prev, fmt = money, invert = false }) {
+  if (prev == null || !isFinite(prev)) return null;
+  const d = prev !== 0 ? ((cur || 0) - prev) / Math.abs(prev) : null;
+  const cls = d == null || invert == null ? "dneu" : (invert ? d < 0 : d > 0) ? "dup" : "ddown";
+  return <div className="tnsub tndelta">{d != null && <span className={cls}>{(d >= 0 ? "▲ +" : "▼ −") + (Math.abs(d) * 100).toFixed(1).replace(".", ",") + "%"}</span>}{d != null ? " " : ""}vs {fmt(prev)}</div>;
+}
+
 // Badge de plataforma para la vista combinada (M = Meta, G = Google, TT = TikTok).
 function PlatTag({ p }) {
   const l = p === "google" ? "G" : p === "tiktok" ? "TT" : "M";
@@ -2358,6 +2391,10 @@ td{padding:11px 12px;vertical-align:middle;}.num{text-align:right;}.name{font-we
 .dup{color:#2E8B6B;font-weight:700;}
 .ddown{color:#C5362B;font-weight:700;}
 .dneu{color:#857A6A;font-weight:700;}
+.tndelta{margin-top:4px;}
+.tnband .dup{color:#4CC392;}
+.tnband .ddown{color:#E06052;}
+.tnband .dneu{color:#9A907C;}
 .mixchip{display:inline-flex;align-items:center;gap:6px;font-family:'Space Mono',monospace;font-size:12px;border:2px solid var(--ink);border-radius:6px;padding:4px 8px;background:var(--ink);color:var(--paper);margin:4px 0;}
 .mixchip button{border:0;background:none;color:inherit;cursor:pointer;font-size:11px;padding:0;line-height:1;opacity:.7;}
 .mixchip button:hover{opacity:1;}
