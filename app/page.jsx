@@ -555,8 +555,11 @@ export default function App() {
         <div className="topinner">
           <div className="brand">
             <div className="mark">◆</div>
-            <div><div className="bname">NUSA APP</div><div className="bsub">{account && data.length > 0 && !loading && <span className="rec">● REC</span>}PANEL DE CREATIVOS<br />MOTOR DE DECISIÓN</div></div>
-            {me && <div className="userbox"><span className="uname">▸ {me.u}{me.admin ? " · admin" : ""}</span><button className="logout" onClick={logout}>salir</button></div>}
+            <div>
+              <div className="bname">NUSA APP</div>
+              <div className="bsub">{account && data.length > 0 && !loading && <span className="rec">● REC</span>}PANEL DE CREATIVOS<br />MOTOR DE DECISIÓN</div>
+              {me && <div className="userbox"><span className="uname">▸ {me.u}{me.admin ? " · admin" : ""}</span><button className="logout" onClick={logout}>salir</button></div>}
+            </div>
           </div>
           <div className="client">
             <div className="clabel">▦ CLIENTE</div>
@@ -2281,7 +2284,7 @@ td{padding:11px 12px;vertical-align:middle;}.num{text-align:right;}.name{font-we
 .qualtag{font-size:9px;border:1px solid currentColor;border-radius:3px;padding:1px 5px;margin-left:6px;font-family:'Space Mono',monospace;letter-spacing:.5px;white-space:nowrap;font-weight:700;cursor:help;}
 .metaerr{background:#FBE8E6;color:#8A1C12;border-top:2px solid #C0392B;padding:9px 22px;font-size:12.5px;line-height:1.45;font-family:'Space Mono',monospace;}
 .metaerr-sample{color:#B05A50;}
-.userbox{display:flex;align-items:center;gap:8px;margin-left:10px;flex-shrink:0;white-space:nowrap;}
+.userbox{display:flex;align-items:center;gap:8px;margin-top:7px;flex-shrink:0;white-space:nowrap;}
 .uname{font-family:'Space Mono',monospace;font-size:11px;color:var(--soft);letter-spacing:.5px;white-space:nowrap;}
 .logout{font-family:'Space Mono',monospace;font-size:11px;color:var(--paper);background:transparent;border:1px solid rgba(242,235,217,.4);border-radius:5px;padding:3px 9px;cursor:pointer;}
 .logout:hover{background:rgba(242,235,217,.12);border-color:var(--paper);}
