@@ -2087,6 +2087,11 @@ const CSS = `
 .rec{color:#FF5A4D;font-weight:700;margin-right:8px;animation:blink 1.4s steps(1) infinite;}@keyframes blink{50%{opacity:.25}}
 .client{text-align:right;background:var(--paper2);border-radius:8px;padding:8px 14px;color:var(--ink);flex:1 1 auto;min-width:0;}
 .crow{display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:0 8px;}
+/* los campos CRECEN para repartirse el ancho de la fila (el panel ocupa todo el header) */
+.crow .cselect{flex:1 1 170px;max-width:none;}
+.crow .daterange{flex:1 1 230px;justify-content:flex-end;}
+.crow .daterange .cdate{flex:1 1 110px;min-width:0;}
+.crow .mixchip,.crow .cmpcheck,.crow .cmprange{flex:0 0 auto;}
 .clabel{font-size:9px;letter-spacing:2px;color:var(--soft);font-family:'Space Mono',monospace;}
 .cname{font-family:'Anton',Impact,sans-serif;font-size:18px;letter-spacing:1.5px;line-height:1;margin-top:2px;}
 .cmeta{font-size:10px;color:var(--soft);font-style:italic;margin-top:1px;}
