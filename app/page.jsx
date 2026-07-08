@@ -545,7 +545,34 @@ export default function App() {
             <div><div className="bname">NUSA APP</div><div className="bsub">{account && data.length > 0 && !loading && <span className="rec">● REC</span>}PANEL DE CREATIVOS · MOTOR DE DECISIÓN</div></div>
             {me && <div className="userbox"><span className="uname">▸ {me.u}{me.admin ? " · admin" : ""}</span><button className="logout" onClick={logout}>salir</button></div>}
           </div>
-          <div className="client"><div className="clabel">▦ CLIENTE</div><select className="cselect" value={account} onChange={(e) => setAccount(e.target.value)}><option value="">— elegí un cliente —</option>{accounts.map((a) => <option key={a.id} value={a.id}>{a.name || a.id}</option>)}</select>{account && accounts.length > 1 && <select className="cselect" value="" onChange={(e) => { const v = e.target.value; if (v) setExtrasSave([...extras, v]); }}><option value="">➕ combinar cuenta…</option>{accounts.filter((a) => a.id !== account && !extras.includes(a.id)).map((a) => <option key={a.id} value={a.id}>{a.name || a.id}</option>)}</select>}{extras.map((id) => { const a = accounts.find((x) => x.id === id); return <span className="mixchip" key={id}>{(a && a.name) || id}<button title="sacar de la vista" onClick={() => setExtrasSave(extras.filter((x) => x !== id))}>✕</button></span>; })}{!soloGoogle && <select className="cselect" value={sheetTab} onChange={(e) => setSheetTab(e.target.value)}><option value="">— pestaña sheet —</option>{sheetTabs.map((t) => <option key={t.gid} value={t.title}>{t.title}</option>)}</select>}<select className="cselect" value={preset} onChange={(e) => setPreset(e.target.value)}><option value="today">Hoy</option><option value="yesterday">Ayer</option><option value="last_7d">Últimos 7 días</option><option value="last_14d">Últimos 14 días</option><option value="last_30d">Últimos 30 días</option><option value="last_90d">Últimos 90 días</option><option value="this_month">Este mes</option><option value="last_month">Mes pasado</option><option value="maximum">Máximo</option><option value="custom">Personalizado…</option></select>{preset === "custom" && <span className="daterange"><input type="date" className="cdate" value={cSince} max={cUntil || undefined} onChange={(e) => setCSince(e.target.value)} /><i>→</i><input type="date" className="cdate" value={cUntil} min={cSince || undefined} onChange={(e) => setCUntil(e.target.value)} /></span>}{tnStores.length > 0 &&<select className="cselect" value={tnStore} onChange={(e) => setTnStore(e.target.value)}><option value="">— sin tienda nube —</option>{tnStores.map((s) => <option key={s.name} value={s.name}>🛒 {s.name}</option>)}</select>}{account && <label className="cmpcheck"><input type="checkbox" checked={cmpOn} onChange={(e) => setCmpOn(e.target.checked)} />⇄ COMPARAR</label>}{cmpOn && (<><select className="cselect" value={cmpPreset} onChange={(e) => setCmpPreset(e.target.value)}><option value="prev">vs período anterior equivalente</option><option value="yesterday">vs Ayer</option><option value="last_7d">vs Últimos 7 días</option><option value="last_14d">vs Últimos 14 días</option><option value="last_30d">vs Últimos 30 días</option><option value="last_90d">vs Últimos 90 días</option><option value="this_month">vs Este mes</option><option value="last_month">vs Mes pasado</option><option value="custom">vs Personalizado…</option></select>{cmpPreset === "custom" && <span className="daterange"><input type="date" className="cdate" value={cmpSince} max={cmpUntil || undefined} onChange={(e) => setCmpSince(e.target.value)} /><i>→</i><input type="date" className="cdate" value={cmpUntil} min={cmpSince || undefined} onChange={(e) => setCmpUntil(e.target.value)} /></span>}{cmpRange && <span className="cmprange mono">{cmpRange.since} → {cmpRange.until}{cmpLoading ? " · comparando…" : ""}</span>}</>)}<div className="cmeta">{loading ? "cargando…" : err ? err : account ? ("● data en vivo · " + data.length + " creativos") : "— elegí un cliente —"}</div></div>
+          <div className="client">
+            <div className="clabel">▦ CLIENTE</div>
+            {/* fila 1: la cuenta y su mezcla (vista combinada) */}
+            <div className="crow">
+              <select className="cselect" value={account} onChange={(e) => setAccount(e.target.value)}><option value="">— elegí un cliente —</option>{accounts.map((a) => <option key={a.id} value={a.id}>{a.name || a.id}</option>)}</select>
+              {account && accounts.length > 1 && <select className="cselect" value="" onChange={(e) => { const v = e.target.value; if (v) setExtrasSave([...extras, v]); }}><option value="">➕ combinar cuenta…</option>{accounts.filter((a) => a.id !== account && !extras.includes(a.id)).map((a) => <option key={a.id} value={a.id}>{a.name || a.id}</option>)}</select>}
+              {extras.map((id) => { const a = accounts.find((x) => x.id === id); return <span className="mixchip" key={id}>{(a && a.name) || id}<button title="sacar de la vista" onClick={() => setExtrasSave(extras.filter((x) => x !== id))}>✕</button></span>; })}
+            </div>
+            {/* fila 2: contexto de la data (planilla, período, tienda) */}
+            <div className="crow">
+              {!soloGoogle && <select className="cselect" value={sheetTab} onChange={(e) => setSheetTab(e.target.value)}><option value="">— pestaña sheet —</option>{sheetTabs.map((t) => <option key={t.gid} value={t.title}>{t.title}</option>)}</select>}
+              <select className="cselect" value={preset} onChange={(e) => setPreset(e.target.value)}><option value="today">Hoy</option><option value="yesterday">Ayer</option><option value="last_7d">Últimos 7 días</option><option value="last_14d">Últimos 14 días</option><option value="last_30d">Últimos 30 días</option><option value="last_90d">Últimos 90 días</option><option value="this_month">Este mes</option><option value="last_month">Mes pasado</option><option value="maximum">Máximo</option><option value="custom">Personalizado…</option></select>
+              {preset === "custom" && <span className="daterange"><input type="date" className="cdate" value={cSince} max={cUntil || undefined} onChange={(e) => setCSince(e.target.value)} /><i>→</i><input type="date" className="cdate" value={cUntil} min={cSince || undefined} onChange={(e) => setCUntil(e.target.value)} /></span>}
+              {tnStores.length > 0 && <select className="cselect" value={tnStore} onChange={(e) => setTnStore(e.target.value)}><option value="">— sin tienda nube —</option>{tnStores.map((s) => <option key={s.name} value={s.name}>🛒 {s.name}</option>)}</select>}
+            </div>
+            {/* fila 3: comparación opcional (solo con cuenta elegida; el selector aparece al tildar) */}
+            {account && (
+              <div className="crow">
+                <label className="cmpcheck"><input type="checkbox" checked={cmpOn} onChange={(e) => setCmpOn(e.target.checked)} />⇄ COMPARAR</label>
+                {cmpOn && (<>
+                  <select className="cselect" value={cmpPreset} onChange={(e) => setCmpPreset(e.target.value)}><option value="prev">vs período anterior equivalente</option><option value="yesterday">vs Ayer</option><option value="last_7d">vs Últimos 7 días</option><option value="last_14d">vs Últimos 14 días</option><option value="last_30d">vs Últimos 30 días</option><option value="last_90d">vs Últimos 90 días</option><option value="this_month">vs Este mes</option><option value="last_month">vs Mes pasado</option><option value="custom">vs Personalizado…</option></select>
+                  {cmpPreset === "custom" && <span className="daterange"><input type="date" className="cdate" value={cmpSince} max={cmpUntil || undefined} onChange={(e) => setCmpSince(e.target.value)} /><i>→</i><input type="date" className="cdate" value={cmpUntil} min={cmpSince || undefined} onChange={(e) => setCmpUntil(e.target.value)} /></span>}
+                  {cmpRange && <span className="cmprange mono">{cmpRange.since} → {cmpRange.until}{cmpLoading ? " · comparando…" : ""}</span>}
+                </>)}
+              </div>
+            )}
+            <div className="cmeta">{loading ? "cargando…" : err ? err : account ? ("● data en vivo · " + data.length + " creativos") : "— elegí un cliente —"}</div>
+          </div>
         </div>
         <div className="stripe"><i/><i/><i/><i/><i/><i/></div>
         <div className="phasebar"><span>FASE 01 — HIGH GRADE</span><span>HQ ▮▮▮</span></div>
@@ -2026,6 +2053,7 @@ const CSS = `
 .bsub{color:#D8CDB6;font-size:11px;letter-spacing:1.5px;margin-top:5px;}
 .rec{color:#FF5A4D;font-weight:700;margin-right:8px;animation:blink 1.4s steps(1) infinite;}@keyframes blink{50%{opacity:.25}}
 .client{text-align:right;background:var(--paper2);border-radius:8px;padding:8px 14px;color:var(--ink);}
+.crow{display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:0 8px;}
 .clabel{font-size:9px;letter-spacing:2px;color:var(--soft);font-family:'Space Mono',monospace;}
 .cname{font-family:'Anton',Impact,sans-serif;font-size:18px;letter-spacing:1.5px;line-height:1;margin-top:2px;}
 .cmeta{font-size:10px;color:var(--soft);font-style:italic;margin-top:1px;}
@@ -2271,6 +2299,7 @@ td{padding:11px 12px;vertical-align:middle;}.num{text-align:right;}.name{font-we
   .brand{align-items:center;}
   .bname{font-size:26px;letter-spacing:2px;}
   .client{text-align:left;}
+  .crow{justify-content:flex-start;}
   .cselect{max-width:100%;}
   .daterange{flex-wrap:wrap;}
   .tnstats{grid-template-columns:1fr;}
