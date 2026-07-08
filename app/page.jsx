@@ -1,6 +1,7 @@
 "use client";
 import { useState, useMemo, useEffect, useRef } from "react";
 import { HOOKS } from "@/lib/hooks";
+import { presetToRange } from "@/lib/dates"; // date-math puro, sirve client-side (módulo COMPARAR)
 
 // ─────────────────────────────────────────────────────────────
 // VEREDICTO — Fase 1 · estética retro-VHS 80s
@@ -394,6 +395,45 @@ export default function App() {
     return () => { cancelled = true; };
   }, [accountsQS, preset, sheetTab, customRange]);
 
+  // ── Módulo COMPARAR (solo Dashboard): un segundo rango de fechas y los mismos KPIs con delta ──
+  const [cmpOn, setCmpOn] = useState(false);
+  const [cmpPreset, setCmpPreset] = useState("prev"); // "prev" = período anterior equivalente
+  const [cmpSince, setCmpSince] = useState("");
+  const [cmpUntil, setCmpUntil] = useState("");
+  const [dataCmp, setDataCmp] = useState([]);
+  const [cmpLoading, setCmpLoading] = useState(false);
+  // "prev" espeja el rango actual: misma cantidad de días, ventana inmediatamente anterior.
+  const cmpRange = useMemo(() => {
+    if (!cmpOn) return null;
+    if (cmpPreset === "custom") return cmpSince && cmpUntil ? { since: cmpSince, until: cmpUntil } : null;
+    if (cmpPreset !== "prev") return presetToRange(cmpPreset);
+    const cur = preset === "custom" ? (cSince && cUntil ? { since: cSince, until: cUntil } : null) : presetToRange(preset);
+    if (!cur) return null;
+    const s = new Date(cur.since + "T00:00:00Z"), u = new Date(cur.until + "T00:00:00Z");
+    const days = Math.round((u - s) / 86400000) + 1;
+    const pu = new Date(s); pu.setUTCDate(pu.getUTCDate() - 1);
+    const ps = new Date(pu); ps.setUTCDate(ps.getUTCDate() - (days - 1));
+    return { since: ps.toISOString().slice(0, 10), until: pu.toISOString().slice(0, 10) };
+  }, [cmpOn, cmpPreset, cmpSince, cmpUntil, preset, cSince, cUntil]);
+  // Mismo fetch multi-cuenta que la data principal, con el rango de comparación. Sin Sheet: los
+  // KPIs no lo necesitan.
+  useEffect(() => {
+    if (!account || !cmpOn || !cmpRange) { setDataCmp([]); return; }
+    let cancelled = false;
+    setCmpLoading(true);
+    const ids = [account, ...extras];
+    Promise.all(ids.map((id) =>
+      fetch("/api/ads?account=" + id + "&preset=custom&since=" + cmpRange.since + "&until=" + cmpRange.until)
+        .then((r) => r.json()).then((j) => ({ id, ...j })).catch(() => ({ id }))
+    )).then((res) => {
+      if (cancelled) return;
+      const rows = [];
+      for (const j of res) { const plat = platOf(j.id); for (const r of j.rows || []) rows.push({ ...r, plat, _acc: j.id }); }
+      setDataCmp(rows);
+    }).finally(() => { if (!cancelled) setCmpLoading(false); });
+    return () => { cancelled = true; };
+  }, [accountsQS, cmpOn, cmpRange ? cmpRange.since + cmpRange.until : ""]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Umbral EFECTIVO: un umbral vacío (null) deja de ser condición. roasMin→0 (sin mínimo),
   // cpaMax→∞ (sin tope), pisoSpend→0 (sin piso). Así filtrás solo por los que cargaste.
   const ueff = useMemo(() => ({
@@ -449,6 +489,19 @@ export default function App() {
     const topAds = [...withV].filter((r) => r.spend >= ueff.pisoSpend).sort((a, b) => modo === "mensajes" ? (a.costoConv || 9e12) - (b.costoConv || 9e12) : b.roas - a.roas).slice(0, 6);
     return { counts, spendTotal, spendByPlat, revenue, ventasTotal, convTotal, costoConvProm: convTotal ? spendTotal / convTotal : 0, roasSimple: withV.length ? simpleSum / withV.length : 0, roasConfiable: wSpend ? wRoas / wSpend : 0, cpaProm: ventasTotal ? spendTotal / ventasTotal : 0, accountRoas: spendTotal ? revenue / spendTotal : 0, topAds };
   }, [withV, ueff.pisoSpend, modo]);
+
+  // KPIs del período de COMPARACIÓN: misma conversión de moneda por cuenta y filtro por modo.
+  // Sin veredictos (los KPIs del Dash no los necesitan). null mientras carga → el Dash lo indica.
+  const statsCmp = useMemo(() => {
+    if (!cmpOn || !cmpRange || cmpLoading) return null;
+    let spendTotal = 0, revenue = 0, ventasTotal = 0, convTotal = 0;
+    for (const r of dataCmp) {
+      if ((r.tipo || "ventas") !== modo) continue;
+      const f = fxOf(r._acc);
+      spendTotal += r.spend * f; revenue += r.spend * f * r.roas; ventasTotal += r.ventas; convTotal += (r.conversaciones || 0);
+    }
+    return { spendTotal, revenue, ventasTotal, convTotal, accountRoas: spendTotal ? revenue / spendTotal : 0, cpaProm: ventasTotal ? spendTotal / ventasTotal : 0, costoConvProm: convTotal ? spendTotal / convTotal : 0 };
+  }, [dataCmp, cmpOn, cmpRange, cmpLoading, modo, fx, accCur, accounts]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const acciones = useMemo(() => {
     const escalar = [], apagar = [], validar = [], esperar = [];
@@ -601,7 +654,7 @@ export default function App() {
 
           {effView === "an" && (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Analisis withV={withV} stats={stats} audiencias={audConv} tnSummary={tnSummary} u={ueff} accountName={(accounts.find((a) => a.id === account) || {}).name || ""} periodo={preset === "custom" && cSince && cUntil ? cSince + " → " + cUntil : preset} analysis={analysis} setAnalysis={setAnalysis} modo={modo} account={account} extras={extras} />)}
           {effView === "plan" && (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Plan account={account} store={tnStore} goal={goal} plan={plan} setPlan={setPlan} modo={modo} accCur={accCur} extras={extras} extrasCur={extras.map(curOf)} count={tnCount} />)}
-          {effView === "dash" && (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Dash stats={stats} u={ueff} goal={goal} setGoal={setGoal} factTienda={tnSummary ? tnSummary.facturacion : null} tnStore={tnStore} modo={modo} />)}
+          {effView === "dash" && (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Dash stats={stats} u={ueff} goal={goal} setGoal={setGoal} factTienda={tnSummary ? tnSummary.facturacion : null} tnStore={tnStore} modo={modo} cmp={{ on: cmpOn, setOn: setCmpOn, preset: cmpPreset, setPreset: setCmpPreset, since: cmpSince, setSince: setCmpSince, until: cmpUntil, setUntil: setCmpUntil, range: cmpRange, loading: cmpLoading, stats: statsCmp }} />)}
           {effView === "hoy" && (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Hoy acc={acciones} u={ueff} done={done} toggle={toggle} total={totalTasks} doneCount={doneCount} mantener={stats.counts.Mantener} modo={modo} />)}
           {effView === "grabar" && (soloGoogle ? <SinGoogle que="Qué grabar" /> : !withVCreative.length ? <EmptyState account={account} loading={loading} err={err} /> : <QueGrabar withV={withVCreative} u={ueff} modo={modo} role={role} accountName={(accounts.find((a) => a.id === account) || {}).name || ""} />)}
           {effView === "top" && (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Top withV={withV} u={ueff} audData={audConv} modo={modo} />)}
@@ -1491,9 +1544,13 @@ function Plan({ account, store, goal, plan, setPlan, modo = "ventas", accCur = "
 }
 
 // ─────────── Vista: DASHBOARD (Parte 3) ───────────
-function Dash({ stats, u = {}, goal, setGoal, factTienda, tnStore, modo = "ventas" }) {
+function Dash({ stats, u = {}, goal, setGoal, factTienda, tnStore, modo = "ventas", cmp = null }) {
   const msg = modo === "mensajes";
   const [openCard, setOpenCard] = useState(null); // card de Top Ads desplegada (detalle por conjunto)
+  // COMPARAR: c = KPIs del período comparado (null si está apagado o cargando). dl arma el prop
+  // de delta de cada Kpi: invert=true cuando BAJAR es bueno (CPA, costo/conv); null = neutro.
+  const c = cmp && cmp.on && !cmp.loading ? cmp.stats : null;
+  const dl = (cur, prev, fmt, invert) => (c ? { cur, prev, fmt, invert } : null);
   // El objetivo lo marca la facturación de Tienda Nube si hay tienda elegida; si no, la revenue de Meta.
   const facturado = factTienda != null ? factTienda : stats.revenue;
   const fuenteTienda = factTienda != null;
@@ -1515,11 +1572,26 @@ function Dash({ stats, u = {}, goal, setGoal, factTienda, tnStore, modo = "venta
         )}
       </section>
       )}
+      {cmp && (
+        <section className="cmpbar">
+          <button className={"cmpbtn" + (cmp.on ? " on" : "")} onClick={() => cmp.setOn(!cmp.on)}>⇄ COMPARAR</button>
+          {cmp.on && (<>
+            <span className="cmplbl">contra</span>
+            <select className="cselect" value={cmp.preset} onChange={(e) => cmp.setPreset(e.target.value)}>
+              <option value="prev">Período anterior equivalente</option>
+              <option value="yesterday">Ayer</option><option value="last_7d">Últimos 7 días</option><option value="last_14d">Últimos 14 días</option><option value="last_30d">Últimos 30 días</option><option value="last_90d">Últimos 90 días</option><option value="this_month">Este mes</option><option value="last_month">Mes pasado</option><option value="custom">Personalizado…</option>
+            </select>
+            {cmp.preset === "custom" && <span className="daterange"><input type="date" className="cdate" value={cmp.since} max={cmp.until || undefined} onChange={(e) => cmp.setSince(e.target.value)} /><i>→</i><input type="date" className="cdate" value={cmp.until} min={cmp.since || undefined} onChange={(e) => cmp.setUntil(e.target.value)} /></span>}
+            {cmp.range && <span className="cmprange mono">{cmp.range.since} → {cmp.range.until}</span>}
+            {cmp.loading && <span className="cmploading">comparando…</span>}
+          </>)}
+        </section>
+      )}
       <section className="kpis dashk">
         {msg ? (<>
-          <Kpi lab="CONVERSACIONES" val={nf.format(stats.convTotal)} mod="grn" /><Kpi lab="COSTO / CONV" val={money(stats.costoConvProm)} /><Kpi lab="INVERSIÓN" val={short(stats.spendTotal)} sub={platSplit(stats.spendByPlat)} /><Kpi lab="CREATIVOS" val={nf.format(stats.counts.Escalar + stats.counts.Mantener + stats.counts.Pausar + stats.counts["Observación"])} />
+          <Kpi lab="CONVERSACIONES" val={nf.format(stats.convTotal)} mod="grn" cmp={dl(stats.convTotal, c && c.convTotal, (x) => nf.format(Math.round(x)), false)} /><Kpi lab="COSTO / CONV" val={money(stats.costoConvProm)} cmp={dl(stats.costoConvProm, c && c.costoConvProm, money, true)} /><Kpi lab="INVERSIÓN" val={short(stats.spendTotal)} sub={platSplit(stats.spendByPlat)} cmp={dl(stats.spendTotal, c && c.spendTotal, short, null)} /><Kpi lab="CREATIVOS" val={nf.format(stats.counts.Escalar + stats.counts.Mantener + stats.counts.Pausar + stats.counts["Observación"])} />
         </>) : (<>
-          <Kpi lab="FACTURACIÓN" val={short(stats.revenue)} /><Kpi lab="INVERSIÓN" val={short(stats.spendTotal)} sub={platSplit(stats.spendByPlat)} /><Kpi lab="ROAS CUENTA" val={stats.accountRoas.toFixed(1) + "x"} mod="grn" /><Kpi lab="CPA PROMEDIO" val={money(stats.cpaProm)} /><Kpi lab="VENTAS" val={nf.format(stats.ventasTotal)} />
+          <Kpi lab="FACTURACIÓN" val={short(stats.revenue)} cmp={dl(stats.revenue, c && c.revenue, short, false)} /><Kpi lab="INVERSIÓN" val={short(stats.spendTotal)} sub={platSplit(stats.spendByPlat)} cmp={dl(stats.spendTotal, c && c.spendTotal, short, null)} /><Kpi lab="ROAS CUENTA" val={stats.accountRoas.toFixed(1) + "x"} mod="grn" cmp={dl(stats.accountRoas, c && c.accountRoas, (x) => x.toFixed(1) + "x", false)} /><Kpi lab="CPA PROMEDIO" val={money(stats.cpaProm)} cmp={dl(stats.cpaProm, c && c.cpaProm, money, true)} /><Kpi lab="VENTAS" val={nf.format(stats.ventasTotal)} cmp={dl(stats.ventasTotal, c && c.ventasTotal, (x) => nf.format(Math.round(x)), false)} />
         </>)}
       </section>
       <section className="sect">
@@ -1543,7 +1615,26 @@ function Dash({ stats, u = {}, goal, setGoal, factTienda, tnStore, modo = "venta
     </>
   );
 }
-function Kpi({ lab, val, mod, sub }) { return <div className={"kpi" + (mod === "grn" ? " good" : "")}><div className="klab">{lab}</div><div className={"kval" + (mod === "grn" ? " grn" : "")}>{val}</div>{sub ? <div className="ksub">{sub}</div> : null}</div>; }
+function Kpi({ lab, val, mod, sub, cmp }) {
+  // Línea de COMPARACIÓN: delta % contra el período comparado. invert=true → bajar es bueno
+  // (CPA, costo/conv); invert=null → neutro (la inversión no es buena ni mala por sí sola).
+  let dline = null;
+  if (cmp) {
+    const { cur, prev, fmt, invert } = cmp;
+    if (prev == null || !isFinite(prev)) dline = <div className="ksub">sin data comparable</div>;
+    else {
+      const d = prev !== 0 ? (cur - prev) / Math.abs(prev) : null;
+      const cls = d == null ? "dneu" : invert == null ? "dneu" : (invert ? d < 0 : d > 0) ? "dup" : "ddown";
+      dline = (
+        <div className="ksub">
+          {d != null && <span className={cls}>{(d >= 0 ? "▲ +" : "▼ −") + (Math.abs(d) * 100).toFixed(1).replace(".", ",") + "%"}</span>}
+          {d != null ? " " : ""}vs {fmt(prev)}
+        </div>
+      );
+    }
+  }
+  return <div className={"kpi" + (mod === "grn" ? " good" : "")}><div className="klab">{lab}</div><div className={"kval" + (mod === "grn" ? " grn" : "")}>{val}</div>{sub ? <div className="ksub">{sub}</div> : null}{dline}</div>;
+}
 
 // Badge de plataforma para la vista combinada (M = Meta, G = Google, TT = TikTok).
 function PlatTag({ p }) {
@@ -2242,6 +2333,15 @@ td{padding:11px 12px;vertical-align:middle;}.num{text-align:right;}.name{font-we
 .outmeta.over{color:#C5362B;font-weight:700;}
 .thinnote{margin-top:14px;font-family:'Space Mono',monospace;font-size:11px;line-height:1.5;color:var(--soft);font-style:italic;border-top:1px dashed var(--line);padding-top:11px;}
 .cselect{font-family:'Space Mono',monospace;font-size:13px;border:2px solid var(--ink);border-radius:6px;padding:5px 9px;background:var(--paper);color:var(--ink);max-width:230px;margin:4px 0;cursor:pointer;}
+.cmpbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:2px 0 12px;}
+.cmpbtn{font-family:'Archivo',sans-serif;font-weight:800;font-size:12px;letter-spacing:.06em;border:2px solid var(--ink);border-radius:8px;padding:7px 14px;background:var(--paper);color:var(--ink);cursor:pointer;box-shadow:2.5px 2.5px 0 var(--ink);}
+.cmpbtn.on{background:var(--ink);color:var(--paper);box-shadow:none;transform:translate(2px,2px);}
+.cmplbl{font-family:'Space Mono',monospace;font-size:12px;color:var(--soft);}
+.cmprange{font-size:11.5px;color:var(--soft);}
+.cmploading{font-family:'Space Mono',monospace;font-size:11.5px;color:var(--soft);animation:pulse 1.2s infinite;}
+.dup{color:#2E8B6B;font-weight:700;}
+.ddown{color:#C5362B;font-weight:700;}
+.dneu{color:#857A6A;font-weight:700;}
 .mixchip{display:inline-flex;align-items:center;gap:6px;font-family:'Space Mono',monospace;font-size:12px;border:2px solid var(--ink);border-radius:6px;padding:4px 8px;background:var(--ink);color:var(--paper);margin:4px 0;}
 .mixchip button{border:0;background:none;color:inherit;cursor:pointer;font-size:11px;padding:0;line-height:1;opacity:.7;}
 .mixchip button:hover{opacity:1;}
