@@ -98,6 +98,17 @@ respuestas concisas.
   `spendDailyOf(...)` (branchean a Meta/TikTok/Google), `parseAccounts(searchParams)` (lee
   `accounts=a,b` + `curs=USD,ARS` — params PARALELOS porque los ids llevan ":"; cae a
   `account`+`accCur` si no vienen). Lo consumen summary/daily de Tienda Nube y el Plan.
+- `lib/ga4.js` — cliente de la **GA4 Data API** (runReport, REST). PILOTO: `gaEnabled()`/`gaDemo()`,
+  `propertyFor(account, store)` (mapea propiedad por `GA4_PROPERTIES`), `getResumen` (sesiones/
+  usuarios/embudo carrito→checkout→compra/CR/ticket), `getCanales` (venta por canal
+  `sessionDefaultChannelGroup` — descompone la brecha MER vs ROAS pixel: orgánico vs pago) y
+  `getDaily`. **`GA4_DEMO=1` = modo demo** (datos de muestra marcados `demo:true`, para ver el
+  módulo sin conectar nada). Reusa el OAuth client de Google Ads pero el refresh token necesita
+  TAMBIÉN el scope `analytics.readonly` (el actual solo tiene `adwords` → regenerarlo con ambos;
+  puede ir en `GOOGLE_OAUTH_REFRESH_TOKEN` para no pisar el de Ads). OJO: métricas escritas contra
+  la doc SIN probar contra una propiedad real — verificar al conectar la primera. Lo consume
+  `/api/ga4` (degrada con `{off:true}`) → banda `Ga4Band` en el front + `trafico_sitio_ga4` en el
+  snapshot del cerebro.
 - `lib/store.js` — storage server-side en **Upstash Redis** (REST, sin dependencias): `storeEnabled()`,
   `kvGet(key)`, `kvSet(key, value)`. Para historiales/conversaciones compartidos. Sin env vars degrada
   (el front sigue en localStorage). Lo consume `/api/history` (GET/POST, scopeado por sesión, claves
@@ -241,6 +252,9 @@ pushear a `main` sin romper prod.
 - `GOOGLE_ADS_DEVELOPER_TOKEN`, `GOOGLE_ADS_CLIENT_ID`, `GOOGLE_ADS_CLIENT_SECRET`,
   `GOOGLE_ADS_REFRESH_TOKEN`, `GOOGLE_ADS_MCC_ID` (+ `GOOGLE_ADS_API_VERSION` opcional, default
   v24) — Google Ads. Sin esto (o si la API falla) el dropdown no muestra cuentas de Google.
+- `GA4_PROPERTIES` (JSON `[{name, property_id, account?, store?}]`), `GOOGLE_OAUTH_REFRESH_TOKEN`
+  (refresh token con scopes adwords + analytics.readonly; si falta usa GOOGLE_ADS_REFRESH_TOKEN)
+  y `GA4_DEMO=1` (modo demo con datos de muestra) — Google Analytics 4 (piloto).
 - `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN` — historiales/conversaciones server-side
   (los inyecta sola la integración Upstash del Marketplace de Vercel; opcional, sin esto queda
   localStorage). Alias legacy soportados: `KV_REST_API_URL`/`KV_REST_API_TOKEN`.
@@ -270,7 +284,13 @@ pushear a `main` sin romper prod.
   existente, con el ID de cada cuenta) o (b) pedir **Basic access** en API Center y correr
   `node scripts/link-google-accounts.mjs <ids...>` (invita desde la MCC y acepta desde cada
   cuenta; ya probado hasta el punto del bloqueo).
-- **Snapshots históricos + GA4**: para que el cerebro razone sobre tendencia y causas full-funnel.
+- **GA4 (piloto listo, falta conectar)**: el código YA está (`lib/ga4.js` + `/api/ga4` + banda +
+  cerebro). Para activarlo con datos reales: (1) regenerar el refresh token de Google pidiendo
+  los scopes `adwords` + `analytics.readonly` (mismo client id/secret; guardarlo en
+  `GOOGLE_OAUTH_REFRESH_TOKEN`), (2) cargar `GA4_PROPERTIES` (JSON `[{name, property_id,
+  account?, store?}]`) y (3) verificar los nombres de métricas contra la primera propiedad real.
+  Mientras tanto `GA4_DEMO=1` muestra el módulo con datos de muestra.
+- **Snapshots históricos**: para que el cerebro razone sobre tendencia.
 - **Refresh del token de Meta**: regenerarlo como **"Sin vencimiento"** en Meta Business → Usuarios
   del sistema (evita el bajón de los ~60 días).
 - Sumar más tiendas/usuarios a medida que entren clientes. Eventual: hashear passwords.
