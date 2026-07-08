@@ -267,6 +267,7 @@ export default function App() {
 
   const [accounts, setAccounts] = useState([]);
   const [account, setAccount] = useState("");
+  const [extras, setExtras] = useState([]); // cuentas EXTRA sumadas a la vista (combinada, ej. Meta + Google de la misma marca)
   const [curForce, setCurForce] = useState(""); // override manual de la moneda de la cuenta ("" = auto desde Meta)
   const [fx, setFx] = useState(null); // cotización del dólar oficial (promedio compra/venta) para convertir a pesos
   const [preset, setPreset] = useState("last_30d");
@@ -282,6 +283,20 @@ export default function App() {
   // (factor = pesos por USD). En pesos (o sin cotización) el factor es 1 y no se toca nada.
   const fxRate = accCur === "USD" && fx && fx.rate ? fx.rate : 1;
   const convirtiendo = fxRate !== 1;
+  // Vista COMBINADA: la cuenta elegida + las extras, todas juntas en el panel (filas mergeadas,
+  // inversión sumada, MER multi-canal). Cada cuenta usa SU moneda (el override manual solo aplica
+  // a la principal). La selección queda recordada por cuenta principal en este browser.
+  useEffect(() => {
+    try { setExtras(JSON.parse(localStorage.getItem("nusa_extras_" + account) || "[]").filter((id) => id && id !== account)); }
+    catch { setExtras([]); }
+  }, [account]);
+  const setExtrasSave = (v) => { setExtras(v); try { localStorage.setItem("nusa_extras_" + account, JSON.stringify(v)); } catch {} };
+  const allIds = account ? [account, ...extras] : [];
+  const curOf = (id) => (id === account ? accCur : String((accounts.find((a) => a.id === id) || {}).currency || "ARS").toUpperCase());
+  const platOf = (id) => (String(id || "").startsWith("g:") ? "google" : String(id || "").startsWith("tt:") ? "tiktok" : "meta");
+  const accountsQS = allIds.join(",");
+  const cursQS = allIds.map(curOf).join(",");
+  const mixOn = extras.length > 0;
   const [sheetTabs, setSheetTabs] = useState([]);
   const [sheetTab, setSheetTab] = useState("");
   const [tnStores, setTnStores] = useState([]);
@@ -310,9 +325,9 @@ export default function App() {
   const [me, setMe] = useState(null);
   useEffect(() => { fetch("/api/accounts").then((r) => r.json()).then((j) => { setAccounts(j.accounts || []); setMe(j.me || null); setMetaErr(j.error && !(j.accounts || []).length ? j.error : ""); }).catch(() => setMetaErr("No se pudo conectar con Meta")); }, []);
   const logout = async () => { try { await fetch("/api/logout", { method: "POST" }); } finally { window.location.href = "/login"; } };
-  // la lectura del analista queda obsoleta si cambia el cliente/período/tienda → la limpiamos
-  useEffect(() => { setAnalysis(null); setHookMatch(null); }, [account, preset, tnStore, cSince, cUntil, accCur]);
-  useEffect(() => { setPlan(null); }, [account, tnStore, goal, accCur, tnCount]); // el plan depende de la meta, el mes, la moneda y el criterio de venta
+  // la lectura del analista queda obsoleta si cambia el cliente/período/tienda/mezcla → la limpiamos
+  useEffect(() => { setAnalysis(null); setHookMatch(null); }, [accountsQS, preset, tnStore, cSince, cUntil, accCur]);
+  useEffect(() => { setPlan(null); }, [accountsQS, tnStore, goal, accCur, tnCount]); // el plan depende de la meta, el mes, la moneda y el criterio de venta
   useEffect(() => { fetch("/api/fx").then((r) => r.json()).then((j) => setFx(j && j.rate ? j : null)).catch(() => setFx(null)); }, []);
   useEffect(() => { fetch("/api/sheets/tabs").then((r) => r.json()).then((j) => setSheetTabs(j.tabs || [])).catch(() => {}); }, []);
   useEffect(() => { fetch("/api/tiendanube/stores").then((r) => r.json()).then((j) => setTnStores(j.stores || [])).catch(() => {}); }, []);
@@ -320,13 +335,13 @@ export default function App() {
     if (!tnStore) { setTnSummary(null); return; }
     let cancelled = false;
     setTnLoading(true);
-    fetch("/api/tiendanube/summary?store=" + encodeURIComponent(tnStore) + "&preset=" + preset + "&count=" + tnCount + (account ? "&account=" + account + "&accCur=" + accCur : "") + customRange)
+    fetch("/api/tiendanube/summary?store=" + encodeURIComponent(tnStore) + "&preset=" + preset + "&count=" + tnCount + (account ? "&accounts=" + encodeURIComponent(accountsQS) + "&curs=" + cursQS : "") + customRange)
       .then((r) => r.json())
       .then((j) => { if (!cancelled) setTnSummary(j.error ? null : j); })
       .catch(() => { if (!cancelled) setTnSummary(null); })
       .finally(() => { if (!cancelled) setTnLoading(false); });
     return () => { cancelled = true; };
-  }, [tnStore, account, preset, customRange, accCur, tnCount]);
+  }, [tnStore, accountsQS, cursQS, preset, customRange, tnCount]);
   // Detalle diario de la banda (CAC + gráfico día por día): va APARTE del summary porque el barrido
   // de órdenes con el customer embebido es lento — la banda pinta al toque y esto completa después.
   const [tnDetail, setTnDetail] = useState(null);
@@ -337,13 +352,13 @@ export default function App() {
     if (preset === "custom" && !(cSince && cUntil)) return;
     let cancelled = false;
     setTnDetailLoading(true); setTnDetail(null);
-    fetch("/api/tiendanube/daily?store=" + encodeURIComponent(tnStore) + "&preset=" + preset + "&count=" + tnCount + (account ? "&account=" + account + "&accCur=" + accCur : "") + customRange)
+    fetch("/api/tiendanube/daily?store=" + encodeURIComponent(tnStore) + "&preset=" + preset + "&count=" + tnCount + (account ? "&accounts=" + encodeURIComponent(accountsQS) + "&curs=" + cursQS : "") + customRange)
       .then((r) => r.json())
       .then((j) => { if (!cancelled) setTnDetail(j); })
       .catch(() => { if (!cancelled) setTnDetail(null); })
       .finally(() => { if (!cancelled) setTnDetailLoading(false); });
     return () => { cancelled = true; };
-  }, [tnStore, account, preset, customRange, accCur, tnCount]);
+  }, [tnStore, accountsQS, cursQS, preset, customRange, tnCount]);
   // Margen bruto % del cliente (producto − costo, ANTES de la pauta) para el margen de contribución.
   // Lo carga el usuario una vez y queda por tienda en este browser.
   const [margen, setMargen] = useState("");
@@ -354,19 +369,30 @@ export default function App() {
     if (preset === "custom" && !(cSince && cUntil)) return; // esperá a que cargue las dos fechas
     let cancelled = false;
     setLoading(true); setErr("");
-    fetch("/api/ads?account=" + account + "&preset=" + preset + (sheetTab ? "&tab=" + encodeURIComponent(sheetTab) : "") + customRange)
-      .then((r) => r.json())
-      .then((j) => {
-        if (cancelled) return;
-        if (j.error) throw new Error(j.error);
-        setData(j.rows || []);
-        setAudiencias(j.audiencias || []);
-        if (!j.rows || !j.rows.length) setErr("sin datos en el rango");
-      })
-      .catch((e) => { if (!cancelled) setErr(e.message); })
-      .finally(() => { if (!cancelled) setLoading(false); });
+    // Vista combinada: un fetch por cuenta en paralelo y merge client-side. Cada fila queda
+    // tagueada con su plataforma (plat) y su cuenta (_acc, para la conversión de moneda por
+    // cuenta). Si una cuenta falla, las otras siguen: el error se muestra como aviso.
+    const ids = [account, ...extras];
+    Promise.all(ids.map((id) =>
+      fetch("/api/ads?account=" + id + "&preset=" + preset + (sheetTab && platOf(id) !== "google" ? "&tab=" + encodeURIComponent(sheetTab) : "") + customRange)
+        .then((r) => r.json())
+        .then((j) => ({ id, ...j }))
+        .catch((e) => ({ id, error: e.message }))
+    )).then((res) => {
+      if (cancelled) return;
+      const rows = [], auds = [], errs = [];
+      for (const j of res) {
+        const plat = platOf(j.id);
+        if (j.error) { errs.push(((accounts.find((a) => a.id === j.id) || {}).name || j.id) + ": " + j.error); continue; }
+        // en mezcla el id se prefija con la cuenta: dos cuentas pueden tener el mismo fingerprint
+        for (const r of j.rows || []) rows.push({ ...r, plat, _acc: j.id, id: ids.length > 1 ? j.id + "‖" + r.id : r.id });
+        for (const g of j.audiencias || []) auds.push({ ...g, plat, _acc: j.id });
+      }
+      setData(rows); setAudiencias(auds);
+      setErr(errs.length ? (rows.length ? "⚠ " : "") + errs.join(" · ") : (!rows.length ? "sin datos en el rango" : ""));
+    }).finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [account, preset, sheetTab, customRange]);
+  }, [accountsQS, preset, sheetTab, customRange]);
 
   // Umbral EFECTIVO: un umbral vacío (null) deja de ser condición. roasMin→0 (sin mínimo),
   // cpaMax→∞ (sin tope), pisoSpend→0 (sin piso). Así filtrás solo por los que cargaste.
@@ -377,20 +403,26 @@ export default function App() {
     costoMax: u.costoMax == null ? Infinity : u.costoMax,
     freqMax: u.freqMax == null ? null : u.freqMax, // null = sin flag de fatiga
   }), [u]);
-  // Conversión a pesos: multiplicamos los montos de Meta (spend, cpa, costo/conv) por el dólar.
-  // ROAS (ratio), ventas y conversaciones (conteos) no se tocan. Todo lo de abajo (stats, top,
-  // dash, panel, cerebro) hereda pesos automáticamente sin más cambios.
-  const dataConv = useMemo(() => fxRate === 1 ? data : data.map((r) => ({
-    ...r,
-    spend: r.spend * fxRate,
-    cpa: r.cpa ? r.cpa * fxRate : r.cpa,
-    costoConv: r.costoConv ? r.costoConv * fxRate : r.costoConv,
-    breakdown: (r.breakdown || []).map((b) => ({ ...b, spend: b.spend * fxRate })),
-  })), [data, fxRate]);
-  // Las audiencias (ranking por targeting real) también traen plata de Meta → mismo factor.
-  const audConv = useMemo(() => fxRate === 1 ? audiencias : audiencias.map((g) => ({
-    ...g, spend: g.spend * fxRate, revenue: g.revenue * fxRate,
-  })), [audiencias, fxRate]);
+  // Conversión a pesos: multiplicamos los montos (spend, cpa, costo/conv) por el dólar. El factor
+  // es POR CUENTA (r._acc): en la vista combinada cada cuenta puede estar en otra moneda. ROAS
+  // (ratio), ventas y conversaciones (conteos) no se tocan. Todo lo de abajo (stats, top, dash,
+  // panel, cerebro) hereda pesos automáticamente sin más cambios.
+  const fxOf = (id) => (curOf(id || account) === "USD" && fx && fx.rate ? fx.rate : 1);
+  const dataConv = useMemo(() => data.map((r) => {
+    const f = fxOf(r._acc);
+    return f === 1 ? r : {
+      ...r,
+      spend: r.spend * f,
+      cpa: r.cpa ? r.cpa * f : r.cpa,
+      costoConv: r.costoConv ? r.costoConv * f : r.costoConv,
+      breakdown: (r.breakdown || []).map((b) => ({ ...b, spend: b.spend * f })),
+    };
+  }), [data, fx, accCur, accounts]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Las audiencias (ranking por targeting real) también traen plata de la plataforma → mismo factor.
+  const audConv = useMemo(() => audiencias.map((g) => {
+    const f = fxOf(g._acc);
+    return f === 1 ? g : { ...g, spend: g.spend * f, revenue: g.revenue * f };
+  }), [audiencias, fx, accCur, accounts]); // eslint-disable-line react-hooks/exhaustive-deps
   // Filtramos por modo: en Ventas excluimos campañas de mensajes (nunca dan buen ROAS) y viceversa.
   const dataModo = useMemo(() => dataConv.filter((r) => (r.tipo || "ventas") === modo), [dataConv, modo]);
   const withV = useMemo(() => dataModo.map((r) => ({ ...r, v: veredicto(r, ueff, modo) })), [dataModo, ueff, modo]);
@@ -407,12 +439,15 @@ export default function App() {
   const stats = useMemo(() => {
     const counts = { Escalar: 0, Mantener: 0, Pausar: 0, "Observación": 0 };
     let spendTotal = 0, simpleSum = 0, wSpend = 0, wRoas = 0, revenue = 0, ventasTotal = 0, convTotal = 0;
+    const spendByPlat = {}; // desglose por plataforma para la vista combinada (Meta + Google)
     withV.forEach((r) => {
       counts[r.v]++; spendTotal += r.spend; simpleSum += r.roas; revenue += r.spend * r.roas; ventasTotal += r.ventas; convTotal += (r.conversaciones || 0);
+      const p = r.plat || "meta";
+      spendByPlat[p] = (spendByPlat[p] || 0) + r.spend;
       if (r.spend >= ueff.pisoSpend) { wSpend += r.spend; wRoas += r.spend * r.roas; }
     });
     const topAds = [...withV].filter((r) => r.spend >= ueff.pisoSpend).sort((a, b) => modo === "mensajes" ? (a.costoConv || 9e12) - (b.costoConv || 9e12) : b.roas - a.roas).slice(0, 6);
-    return { counts, spendTotal, revenue, ventasTotal, convTotal, costoConvProm: convTotal ? spendTotal / convTotal : 0, roasSimple: withV.length ? simpleSum / withV.length : 0, roasConfiable: wSpend ? wRoas / wSpend : 0, cpaProm: ventasTotal ? spendTotal / ventasTotal : 0, accountRoas: spendTotal ? revenue / spendTotal : 0, topAds };
+    return { counts, spendTotal, spendByPlat, revenue, ventasTotal, convTotal, costoConvProm: convTotal ? spendTotal / convTotal : 0, roasSimple: withV.length ? simpleSum / withV.length : 0, roasConfiable: wSpend ? wRoas / wSpend : 0, cpaProm: ventasTotal ? spendTotal / ventasTotal : 0, accountRoas: spendTotal ? revenue / spendTotal : 0, topAds };
   }, [withV, ueff.pisoSpend, modo]);
 
   const acciones = useMemo(() => {
@@ -439,9 +474,12 @@ export default function App() {
 
   const locked = role === "equipo";
   const effView = role === "equipo" && view === "dash" ? "hoy" : view;
-  // Cuenta de Google Ads: los veredictos/panel/Top andan igual que Meta, pero las capas que
-  // dependen de la nomenclatura o de tools de Meta (Sheet, cerebro, Plan, Generar, chat) todavía no.
+  // Google Ads: los datos andan igual que Meta, pero las pestañas CREATIVAS (nomenclatura/hooks)
+  // no aplican a sus anuncios. soloGoogle = TODA la vista es Google → esas pestañas se gatean;
+  // en mezcla (Meta + Google) trabajan solo sobre las filas no-Google (withVCreative).
   const isG = String(account || "").startsWith("g:");
+  const soloGoogle = allIds.length > 0 && allIds.every((id) => platOf(id) === "google");
+  const withVCreative = useMemo(() => withV.filter((r) => r.plat !== "google"), [withV]);
 
   return (
     <div className="root">
@@ -454,7 +492,7 @@ export default function App() {
             <div><div className="bname">NUSA APP</div><div className="bsub">{account && data.length > 0 && !loading && <span className="rec">● REC</span>}PANEL DE CREATIVOS · MOTOR DE DECISIÓN</div></div>
             {me && <div className="userbox"><span className="uname">▸ {me.u}{me.admin ? " · admin" : ""}</span><button className="logout" onClick={logout}>salir</button></div>}
           </div>
-          <div className="client"><div className="clabel">▦ CLIENTE</div><select className="cselect" value={account} onChange={(e) => setAccount(e.target.value)}><option value="">— elegí un cliente —</option>{accounts.map((a) => <option key={a.id} value={a.id}>{a.name || a.id}</option>)}</select>{!isG && <select className="cselect" value={sheetTab} onChange={(e) => setSheetTab(e.target.value)}><option value="">— pestaña sheet —</option>{sheetTabs.map((t) => <option key={t.gid} value={t.title}>{t.title}</option>)}</select>}<select className="cselect" value={preset} onChange={(e) => setPreset(e.target.value)}><option value="today">Hoy</option><option value="yesterday">Ayer</option><option value="last_7d">Últimos 7 días</option><option value="last_14d">Últimos 14 días</option><option value="last_30d">Últimos 30 días</option><option value="last_90d">Últimos 90 días</option><option value="this_month">Este mes</option><option value="last_month">Mes pasado</option><option value="maximum">Máximo</option><option value="custom">Personalizado…</option></select>{preset === "custom" && <span className="daterange"><input type="date" className="cdate" value={cSince} max={cUntil || undefined} onChange={(e) => setCSince(e.target.value)} /><i>→</i><input type="date" className="cdate" value={cUntil} min={cSince || undefined} onChange={(e) => setCUntil(e.target.value)} /></span>}{tnStores.length > 0 &&<select className="cselect" value={tnStore} onChange={(e) => setTnStore(e.target.value)}><option value="">— sin tienda nube —</option>{tnStores.map((s) => <option key={s.name} value={s.name}>🛒 {s.name}</option>)}</select>}<div className="cmeta">{loading ? "cargando…" : err ? err : account ? ("● data en vivo · " + data.length + " creativos") : "— elegí un cliente —"}</div></div>
+          <div className="client"><div className="clabel">▦ CLIENTE</div><select className="cselect" value={account} onChange={(e) => setAccount(e.target.value)}><option value="">— elegí un cliente —</option>{accounts.map((a) => <option key={a.id} value={a.id}>{a.name || a.id}</option>)}</select>{account && accounts.length > 1 && <select className="cselect" value="" onChange={(e) => { const v = e.target.value; if (v) setExtrasSave([...extras, v]); }}><option value="">➕ combinar cuenta…</option>{accounts.filter((a) => a.id !== account && !extras.includes(a.id)).map((a) => <option key={a.id} value={a.id}>{a.name || a.id}</option>)}</select>}{extras.map((id) => { const a = accounts.find((x) => x.id === id); return <span className="mixchip" key={id}>{(a && a.name) || id}<button title="sacar de la vista" onClick={() => setExtrasSave(extras.filter((x) => x !== id))}>✕</button></span>; })}{!soloGoogle && <select className="cselect" value={sheetTab} onChange={(e) => setSheetTab(e.target.value)}><option value="">— pestaña sheet —</option>{sheetTabs.map((t) => <option key={t.gid} value={t.title}>{t.title}</option>)}</select>}<select className="cselect" value={preset} onChange={(e) => setPreset(e.target.value)}><option value="today">Hoy</option><option value="yesterday">Ayer</option><option value="last_7d">Últimos 7 días</option><option value="last_14d">Últimos 14 días</option><option value="last_30d">Últimos 30 días</option><option value="last_90d">Últimos 90 días</option><option value="this_month">Este mes</option><option value="last_month">Mes pasado</option><option value="maximum">Máximo</option><option value="custom">Personalizado…</option></select>{preset === "custom" && <span className="daterange"><input type="date" className="cdate" value={cSince} max={cUntil || undefined} onChange={(e) => setCSince(e.target.value)} /><i>→</i><input type="date" className="cdate" value={cUntil} min={cSince || undefined} onChange={(e) => setCUntil(e.target.value)} /></span>}{tnStores.length > 0 &&<select className="cselect" value={tnStore} onChange={(e) => setTnStore(e.target.value)}><option value="">— sin tienda nube —</option>{tnStores.map((s) => <option key={s.name} value={s.name}>🛒 {s.name}</option>)}</select>}<div className="cmeta">{loading ? "cargando…" : err ? err : account ? ("● data en vivo · " + data.length + " creativos") : "— elegí un cliente —"}</div></div>
         </div>
         <div className="stripe"><i/><i/><i/><i/><i/><i/></div>
         <div className="phasebar"><span>FASE 01 — HIGH GRADE</span><span>HQ ▮▮▮</span></div>
@@ -479,7 +517,7 @@ export default function App() {
             <>
               <div className="tnstats">
                 <div className="tnstat"><div className="tnlab">FACTURACIÓN TIENDA</div><div className="tnval">{money(tnSummary.facturacion)}</div><div className="tnsub">{tnSummary.orders} órdenes {tnSummary.criterio === "no_canceladas" ? "(pagadas + pendientes)" : "pagadas"} · ticket {money(tnSummary.ticket)}</div></div>
-                <div className="tnstat"><div className="tnlab">INVERSIÓN {String(account || "").startsWith("tt:") ? "TIKTOK" : "META"}</div><div className="tnval">{account ? money(tnSummary.fx && !tnSummary.fx.error ? tnSummary.inversionConv : tnSummary.inversion) : "—"}</div><div className="tnsub">{!account ? "elegí el cliente de Meta" : tnSummary.fx && !tnSummary.fx.error ? ("USD " + money(tnSummary.inversion) + " · " + tnSummary.fx.fuente + " $" + nf.format(Math.round(tnSummary.fx.rate))) : tnSummary.fx && tnSummary.fx.error ? ("⚠ no pude cotizar el dólar — MER sin convertir") : ("ROAS pixel " + (tnSummary.roasMeta || 0).toFixed(1) + "x")}</div></div>
+                <div className="tnstat"><div className="tnlab">INVERSIÓN {mixOn ? "ADS" : String(account || "").startsWith("g:") ? "GOOGLE" : String(account || "").startsWith("tt:") ? "TIKTOK" : "META"}</div><div className="tnval">{account ? money(tnSummary.fx && !tnSummary.fx.error ? tnSummary.inversionConv : tnSummary.inversion) : "—"}</div><div className="tnsub">{!account ? "elegí el cliente de Meta" : tnSummary.porPlataforma ? tnSummary.porPlataforma.map((p) => (p.plataforma === "Google" ? "G " : p.plataforma === "TikTok" ? "TT " : "M ") + short(p.inversion)).join(" · ") : tnSummary.fx && !tnSummary.fx.error ? ("USD " + money(tnSummary.inversion) + " · " + tnSummary.fx.fuente + " $" + nf.format(Math.round(tnSummary.fx.rate))) : tnSummary.fx && tnSummary.fx.error ? ("⚠ no pude cotizar el dólar — MER sin convertir") : ("ROAS pixel " + (tnSummary.roasMeta || 0).toFixed(1) + "x")}</div></div>
                 <div className="tnstat tnmer"><div className="tnlab">MER (FACT / INV)</div><div className="tnval">{tnSummary.mer != null ? tnSummary.mer.toFixed(2) + "x" : "—"}</div><div className="tnsub">{tnSummary.criterio === "no_canceladas" ? ("pagadas: " + money(tnSummary.facturacionPagada) + " (" + tnSummary.ordersPagadas + ") · pendientes: " + money(tnSummary.facturacionPendiente) + " (" + tnSummary.ordersPendientes + ")") : tnSummary.ordersPendientes ? ("+ " + money(tnSummary.facturacionPendiente) + " pendientes (" + tnSummary.ordersPendientes + " órd.) sin contar") : "facturación / inversión"}</div></div>
                 <div className="tnstat" title="Inversión en pauta ÷ clientes NUEVOS de la tienda en el período (primera compra). No es el CPA del pixel: acá cuentan personas nuevas reales, no compras atribuidas.">
                   <div className="tnlab">CAC (CLIENTE NUEVO)</div>
@@ -561,17 +599,17 @@ export default function App() {
             </section>
           )}
 
-          {effView === "an" && (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Analisis withV={withV} stats={stats} audiencias={audConv} tnSummary={tnSummary} u={ueff} accountName={(accounts.find((a) => a.id === account) || {}).name || ""} periodo={preset === "custom" && cSince && cUntil ? cSince + " → " + cUntil : preset} analysis={analysis} setAnalysis={setAnalysis} modo={modo} account={account} />)}
-          {effView === "plan" && (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Plan account={account} store={tnStore} goal={goal} plan={plan} setPlan={setPlan} modo={modo} accCur={accCur} count={tnCount} />)}
+          {effView === "an" && (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Analisis withV={withV} stats={stats} audiencias={audConv} tnSummary={tnSummary} u={ueff} accountName={(accounts.find((a) => a.id === account) || {}).name || ""} periodo={preset === "custom" && cSince && cUntil ? cSince + " → " + cUntil : preset} analysis={analysis} setAnalysis={setAnalysis} modo={modo} account={account} extras={extras} />)}
+          {effView === "plan" && (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Plan account={account} store={tnStore} goal={goal} plan={plan} setPlan={setPlan} modo={modo} accCur={accCur} extras={extras} extrasCur={extras.map(curOf)} count={tnCount} />)}
           {effView === "dash" && (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Dash stats={stats} u={ueff} goal={goal} setGoal={setGoal} factTienda={tnSummary ? tnSummary.facturacion : null} tnStore={tnStore} modo={modo} />)}
           {effView === "hoy" && (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Hoy acc={acciones} u={ueff} done={done} toggle={toggle} total={totalTasks} doneCount={doneCount} mantener={stats.counts.Mantener} modo={modo} />)}
-          {effView === "grabar" && (isG ? <SinGoogle que="Qué grabar" /> : !withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <QueGrabar withV={withV} u={ueff} modo={modo} role={role} accountName={(accounts.find((a) => a.id === account) || {}).name || ""} />)}
+          {effView === "grabar" && (soloGoogle ? <SinGoogle que="Qué grabar" /> : !withVCreative.length ? <EmptyState account={account} loading={loading} err={err} /> : <QueGrabar withV={withVCreative} u={ueff} modo={modo} role={role} accountName={(accounts.find((a) => a.id === account) || {}).name || ""} />)}
           {effView === "top" && (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Top withV={withV} u={ueff} audData={audConv} modo={modo} />)}
-          {effView === "embudo" && (isG ? <SinGoogle que="El embudo" /> : !withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Embudo withV={withV} u={ueff} modo={modo} accountName={(accounts.find((a) => a.id === account) || {}).name || ""} />)}
+          {effView === "embudo" && (soloGoogle ? <SinGoogle que="El embudo" /> : !withVCreative.length ? <EmptyState account={account} loading={loading} err={err} /> : <Embudo withV={withVCreative} u={ueff} modo={modo} accountName={(accounts.find((a) => a.id === account) || {}).name || ""} />)}
           {effView === "panel" && (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Panel rows={rows} u={ueff} stats={stats} sort={sort} setSortKey={setSortKey} modo={modo} />)}
-          {effView === "bib" && <Biblioteca rows={withV} hookMatch={hookMatch} setHookMatch={setHookMatch} />}
-          {effView === "gen" && (isG ? <SinGoogle que="El generador" /> : <Generar rows={withV} accountName={(accounts.find((a) => a.id === account) || {}).name || ""} />)}
-          {effView === "chat" && (!account ? <EmptyState account={account} loading={loading} err={err} /> : <Chat account={account} accountName={(accounts.find((a) => a.id === account) || {}).name || ""} store={tnStore} tab={sheetTab} accCur={accCur} criterio={tnCount} />)}
+          {effView === "bib" && <Biblioteca rows={withVCreative} hookMatch={hookMatch} setHookMatch={setHookMatch} />}
+          {effView === "gen" && (soloGoogle ? <SinGoogle que="El generador" /> : <Generar rows={withVCreative} accountName={(accounts.find((a) => a.id === account) || {}).name || ""} />)}
+          {effView === "chat" && (!account ? <EmptyState account={account} loading={loading} err={err} /> : <Chat account={account} accountName={(accounts.find((a) => a.id === account) || {}).name || ""} store={tnStore} tab={sheetTab} accCur={accCur} extras={extras} extrasCur={extras.map(curOf)} criterio={tnCount} />)}
           {effView === "usuarios" && <Usuarios accounts={accounts} sheetTabs={sheetTabs} tnStores={tnStores} />}
         </>
       )}
@@ -1190,7 +1228,7 @@ const CHAT_SUGS = [
   "Top 10 productos más vendidos en los últimos 60 días",
   "Escribime un guion con un hook de Ruptura para el próximo video",
 ];
-function Chat({ account, accountName, store, tab, accCur, criterio = "" }) {
+function Chat({ account, accountName, store, tab, accCur, extras = [], extrasCur = [], criterio = "" }) {
   // Conversación por cliente: localStorage + Upstash si está conectado (compartida entre máquinas)
   const [msgs, saveMsgs] = useHistSync("chat", account);
   const [q, setQ] = useState("");
@@ -1207,7 +1245,7 @@ function Chat({ account, accountName, store, tab, accCur, criterio = "" }) {
     try {
       const res = await fetch("/api/chat", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ account, accountName, store, tab, accCur, criterio, messages: next.slice(-12) }),
+        body: JSON.stringify({ account, accountName, store, tab, accCur, extras, extrasCur, criterio, messages: next.slice(-12) }),
       });
       // El server puede no responder JSON: si la consulta se pasa de los 60s, Vercel devuelve su
       // propia página de error en texto. Parseamos a mano para no romper con "Unexpected token".
@@ -1283,19 +1321,23 @@ function AnalisisOut({ out }) {
 }
 
 // ─────────── Vista: ANÁLISIS (el "cerebro" read-only) ───────────
-function Analisis({ withV, stats, audiencias, tnSummary, u, accountName, periodo, analysis, setAnalysis, modo = "ventas", account = "" }) {
+function Analisis({ withV, stats, audiencias, tnSummary, u, accountName, periodo, analysis, setAnalysis, modo = "ventas", account = "", extras = [] }) {
   const out = analysis; // persiste en el padre: no se borra al cambiar de pestaña
   const setOut = setAnalysis;
   const msg = modo === "mensajes";
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
 
+  // Plataforma(s) de la vista: una sola, o "mixta (...)" en la vista combinada (Meta + Google).
+  const platDe = (id) => (String(id || "").startsWith("g:") ? "google" : String(id || "").startsWith("tt:") ? "tiktok" : "meta");
+  const plats = [...new Set([account, ...extras].filter(Boolean).map(platDe))];
+  const plataforma = plats.length > 1 ? "mixta (" + plats.join(" + ") + ")" : (plats[0] || "meta");
+
   // Salud de tracking (pixel de Meta) — fase 2A. Se trae aparte porque no vive en withV. Degrada a
-  // null. En Google/TikTok no hay pixel de Meta → ni fetcheamos.
+  // null. En Google/TikTok no hay pixel de Meta → ni fetcheamos (vale la cuenta PRINCIPAL).
   const [tracking, setTracking] = useState(null);
-  const plataforma = String(account || "").startsWith("g:") ? "google" : String(account || "").startsWith("tt:") ? "tiktok" : "meta";
   useEffect(() => {
-    if (!account || plataforma !== "meta") { setTracking(null); return; }
+    if (!account || platDe(account) !== "meta") { setTracking(null); return; }
     let vivo = true;
     fetch("/api/tracking?account=" + encodeURIComponent(account))
       .then((r) => r.json()).then((d) => { if (vivo) setTracking(d && d.tracking ? d.tracking : null); })
@@ -1333,6 +1375,8 @@ function Analisis({ withV, stats, audiencias, tnSummary, u, accountName, periodo
     return {
       modo, plataforma, cuenta: accountName || "—", periodo,
       inversion: stats.spendTotal,
+      // vista combinada: el desglose por plataforma le da al cerebro la foto multi-canal real
+      ...(plats.length > 1 && stats.spendByPlat ? { inversion_por_plataforma: Object.fromEntries(Object.entries(stats.spendByPlat).map(([p, s]) => [p, Math.round(s)])) } : {}),
       ...(msg
         ? { conversaciones: stats.convTotal, costo_conv_prom: +stats.costoConvProm.toFixed(2) }
         : { ventas: stats.ventasTotal, cpa: Math.round(stats.cpaProm), roas_cuenta: +stats.accountRoas.toFixed(1), tienda: tnSummary ? { facturacion: tnSummary.facturacion, criterio_venta: tnSummary.criterio === "no_canceladas" ? "todas las no canceladas (pagadas + pendientes)" : "solo pagadas", mer: tnSummary.mer, roas_pixel: +(tnSummary.roasMeta || 0).toFixed(1) } : null }),
@@ -1411,7 +1455,7 @@ function PlanOut({ p, snap, msg }) {
 }
 
 // ─────────── Vista: PLAN (cómo llegar al objetivo) ───────────
-function Plan({ account, store, goal, plan, setPlan, modo = "ventas", accCur = "ARS", count = "" }) {
+function Plan({ account, store, goal, plan, setPlan, modo = "ventas", accCur = "ARS", extras = [], extrasCur = [], count = "" }) {
   const msg = modo === "mensajes";
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
@@ -1420,7 +1464,8 @@ function Plan({ account, store, goal, plan, setPlan, modo = "ventas", accCur = "
   const pedir = async () => {
     setLoading(true); setErr("");
     try {
-      const qs = "account=" + account + (store ? "&store=" + encodeURIComponent(store) + "&count=" + count : "") + "&goal=" + goal + "&modo=" + modo + "&accCur=" + accCur;
+      // vista combinada: mandamos todas las cuentas con su moneda (params paralelos, los ids llevan ":")
+      const qs = "accounts=" + encodeURIComponent([account, ...extras].join(",")) + "&curs=" + [accCur, ...extrasCur].join(",") + (store ? "&store=" + encodeURIComponent(store) + "&count=" + count : "") + "&goal=" + goal + "&modo=" + modo;
       const res = await fetch("/api/plan?" + qs, { method: "POST" });
       const d = await res.json();
       if (d.error) throw new Error(d.error);
@@ -1472,9 +1517,9 @@ function Dash({ stats, u = {}, goal, setGoal, factTienda, tnStore, modo = "venta
       )}
       <section className="kpis dashk">
         {msg ? (<>
-          <Kpi lab="CONVERSACIONES" val={nf.format(stats.convTotal)} mod="grn" /><Kpi lab="COSTO / CONV" val={money(stats.costoConvProm)} /><Kpi lab="INVERSIÓN" val={short(stats.spendTotal)} /><Kpi lab="CREATIVOS" val={nf.format(stats.counts.Escalar + stats.counts.Mantener + stats.counts.Pausar + stats.counts["Observación"])} />
+          <Kpi lab="CONVERSACIONES" val={nf.format(stats.convTotal)} mod="grn" /><Kpi lab="COSTO / CONV" val={money(stats.costoConvProm)} /><Kpi lab="INVERSIÓN" val={short(stats.spendTotal)} sub={platSplit(stats.spendByPlat)} /><Kpi lab="CREATIVOS" val={nf.format(stats.counts.Escalar + stats.counts.Mantener + stats.counts.Pausar + stats.counts["Observación"])} />
         </>) : (<>
-          <Kpi lab="FACTURACIÓN" val={short(stats.revenue)} /><Kpi lab="INVERSIÓN" val={short(stats.spendTotal)} /><Kpi lab="ROAS CUENTA" val={stats.accountRoas.toFixed(1) + "x"} mod="grn" /><Kpi lab="CPA PROMEDIO" val={money(stats.cpaProm)} /><Kpi lab="VENTAS" val={nf.format(stats.ventasTotal)} />
+          <Kpi lab="FACTURACIÓN" val={short(stats.revenue)} /><Kpi lab="INVERSIÓN" val={short(stats.spendTotal)} sub={platSplit(stats.spendByPlat)} /><Kpi lab="ROAS CUENTA" val={stats.accountRoas.toFixed(1) + "x"} mod="grn" /><Kpi lab="CPA PROMEDIO" val={money(stats.cpaProm)} /><Kpi lab="VENTAS" val={nf.format(stats.ventasTotal)} />
         </>)}
       </section>
       <section className="sect">
@@ -1483,7 +1528,7 @@ function Dash({ stats, u = {}, goal, setGoal, factTienda, tnStore, modo = "venta
           {stats.topAds.map((r, i) => { const b = BUCKETS[r.v]; const bd = r.breakdown || []; const exp = bd.length > 0; const isOpen = openCard === r.id; return (
             <div className={"topcard" + (exp ? " clickable" : "") + (isOpen ? " open" : "")} key={r.id} style={{ "--bar": b.color }} onClick={exp ? () => setOpenCard(isOpen ? null : r.id) : undefined}>
               <div className="tcardtop"><span className="trank">{String(i + 1).padStart(2, "0")}</span><span className="badge" style={{ background: b.bg, color: b.color }}><span className="sq" style={{ background: b.color }} />{r.v}</span></div>
-              <div className="tname">{r.nombre} <span className="fmt">{r.fmt}</span><TF r={r} /><Paused r={r} /><Calidad v={r.calidad} mix={r.calidadMix} /></div>{msg ? <div className="troas">{money(r.costoConv)}</div> : <div className="troas">{r.roas.toFixed(1)}<small>x</small></div>}<div className="tmeta mono">{msg ? (nf.format(r.conversaciones) + " conv · " + short(r.spend)) : (short(r.spend) + " spend · " + r.ang)}</div>
+              <div className="tname">{Object.keys(stats.spendByPlat || {}).length > 1 && <PlatTag p={r.plat} />}{r.nombre} <span className="fmt">{r.fmt}</span><TF r={r} /><Paused r={r} /><Calidad v={r.calidad} mix={r.calidadMix} /></div>{msg ? <div className="troas">{money(r.costoConv)}</div> : <div className="troas">{r.roas.toFixed(1)}<small>x</small></div>}<div className="tmeta mono">{msg ? (nf.format(r.conversaciones) + " conv · " + short(r.spend)) : (short(r.spend) + " spend · " + r.ang)}</div>
               {exp && <div className="tcardmore"><span className="tcardcaret">{isOpen ? "▾" : "▸"}</span>{isOpen ? "ocultar" : "ver"} {bd.length} conjunto{bd.length !== 1 ? "s" : ""}</div>}
               {isOpen && (
                 <div className="tcardexp" onClick={(e) => e.stopPropagation()}>
@@ -1498,7 +1543,19 @@ function Dash({ stats, u = {}, goal, setGoal, factTienda, tnStore, modo = "venta
     </>
   );
 }
-function Kpi({ lab, val, mod }) { return <div className={"kpi" + (mod === "grn" ? " good" : "")}><div className="klab">{lab}</div><div className={"kval" + (mod === "grn" ? " grn" : "")}>{val}</div></div>; }
+function Kpi({ lab, val, mod, sub }) { return <div className={"kpi" + (mod === "grn" ? " good" : "")}><div className="klab">{lab}</div><div className={"kval" + (mod === "grn" ? " grn" : "")}>{val}</div>{sub ? <div className="ksub">{sub}</div> : null}</div>; }
+
+// Badge de plataforma para la vista combinada (M = Meta, G = Google, TT = TikTok).
+function PlatTag({ p }) {
+  const l = p === "google" ? "G" : p === "tiktok" ? "TT" : "M";
+  return <span className={"plt plt-" + (p || "meta")}>{l}</span>;
+}
+// "M $500k · G $200k" — desglose de inversión por plataforma (solo cuando hay mezcla real).
+function platSplit(spendByPlat) {
+  const e = Object.entries(spendByPlat || {});
+  if (e.length < 2) return null;
+  return e.sort((a, b) => b[1] - a[1]).map(([p, s]) => (p === "google" ? "G" : p === "tiktok" ? "TT" : "M") + " " + short(s)).join(" · ");
+}
 
 // ─────────── Vista: QUÉ HACER HOY (Parte 2) ───────────
 function Hoy({ acc, u, done, toggle, total, doneCount, mantener, modo = "ventas" }) {
@@ -1533,10 +1590,11 @@ function Item({ r, done, toggle, reason, act, c }) {
 // ─────────── Vista: PANEL DE CREATIVOS (Parte 1) ───────────
 function Panel({ rows, u = {}, stats, sort, setSortKey, modo = "ventas" }) {
   const msg = modo === "mensajes";
+  const mix = new Set(rows.map((r) => r.plat || "meta")).size > 1; // vista combinada → badge por fila
   return (
     <>
       <section className="kpis">
-        <div className="kpi"><div className="klab">SPEND TOTAL</div><div className="kval">{short(stats.spendTotal)}</div></div>
+        <div className="kpi"><div className="klab">SPEND TOTAL</div><div className="kval">{short(stats.spendTotal)}</div>{platSplit(stats.spendByPlat) ? <div className="ksub">{platSplit(stats.spendByPlat)}</div> : null}</div>
         {msg ? (<>
           <div className="kpi good"><div className="klab">CONVERSACIONES</div><div className="kval grn">{nf.format(stats.convTotal)}</div><div className="ksub">mensajes iniciados</div></div>
           <div className="kpi"><div className="klab">COSTO / CONV</div><div className="kval">{money(stats.costoConvProm)}</div><div className="ksub">spend ÷ conversaciones</div></div>
@@ -1555,7 +1613,7 @@ function Panel({ rows, u = {}, stats, sort, setSortKey, modo = "ventas" }) {
           <tbody>
             {rows.map((r) => { const b = BUCKETS[r.v]; return (
               <tr key={r.id} style={{ "--bar": b.color }}>
-                <td className="name">{r.nombre} <span className="fmt">{r.fmt}</span><TF r={r} /><Paused r={r} /><RolTag r={r} /><Calidad v={r.calidad} mix={r.calidadMix} /></td>
+                <td className="name">{mix && <PlatTag p={r.plat} />}{r.nombre} <span className="fmt">{r.fmt}</span><TF r={r} /><Paused r={r} /><RolTag r={r} /><Calidad v={r.calidad} mix={r.calidadMix} /></td>
                 <td className="ang">{r.ang}{r.sec !== "—" ? <span className="sec"> / {r.sec}</span> : null}<span className="split">{r.split}</span></td>
                 <td className="aud">{r.aud}</td><td className="mono num">{money(r.spend)}</td>{msg ? <><td className="mono num strong">{nf.format(r.conversaciones)}</td><td className="mono num">{money(r.costoConv)}</td></> : <><td className="mono num strong">{r.roas.toFixed(1)}x</td><td className="mono num">{money(r.cpa)}</td></>}
                 <td><span className="badge" style={{ background: b.bg, color: b.color }}><span className="sq" style={{ background: b.color }} />{r.v}</span></td>
@@ -2184,6 +2242,13 @@ td{padding:11px 12px;vertical-align:middle;}.num{text-align:right;}.name{font-we
 .outmeta.over{color:#C5362B;font-weight:700;}
 .thinnote{margin-top:14px;font-family:'Space Mono',monospace;font-size:11px;line-height:1.5;color:var(--soft);font-style:italic;border-top:1px dashed var(--line);padding-top:11px;}
 .cselect{font-family:'Space Mono',monospace;font-size:13px;border:2px solid var(--ink);border-radius:6px;padding:5px 9px;background:var(--paper);color:var(--ink);max-width:230px;margin:4px 0;cursor:pointer;}
+.mixchip{display:inline-flex;align-items:center;gap:6px;font-family:'Space Mono',monospace;font-size:12px;border:2px solid var(--ink);border-radius:6px;padding:4px 8px;background:var(--ink);color:var(--paper);margin:4px 0;}
+.mixchip button{border:0;background:none;color:inherit;cursor:pointer;font-size:11px;padding:0;line-height:1;opacity:.7;}
+.mixchip button:hover{opacity:1;}
+.plt{display:inline-block;font-family:'Space Mono',monospace;font-size:9px;font-weight:700;border:1.5px solid currentColor;border-radius:4px;padding:0 4px;margin-right:6px;vertical-align:1px;}
+.plt-meta{color:#4E97D1;}
+.plt-google{color:#F4C24A;}
+.plt-tiktok{color:#A97FD1;}
 .an{margin-top:4px;}
 .anhead{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap;margin-bottom:16px;}
 .antitle{font-family:'Anton',Impact,sans-serif;font-size:22px;letter-spacing:1.5px;color:var(--ink);}

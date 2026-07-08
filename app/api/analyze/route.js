@@ -11,6 +11,7 @@ PLATAFORMA (campo "plataforma" del resumen; si no viene, es Meta):
 - meta: cuenta de Meta Ads, aplica todo lo de abajo tal cual (pixel, audiencias Hot/Tibio/LAL, adsets).
 - google: cuenta de Google Ads. La "audiencia" acá es el CANAL de la campaña (Búsqueda/PMax/Shopping/Display/Video) — no existe Hot/Tibio/LAL. Donde abajo dice "pixel" leé "conversiones de Google". Las filas PMax son asset groups (no anuncios) y el budget vive siempre a nivel campaña. Los hooks/ángulos/formatos de la nomenclatura no aplican (los nombres no la llevan) — no los menciones como faltantes.
 - tiktok: cuenta de TikTok Ads; donde dice "pixel" leé "atribución de TikTok".
+- mixta (ej. "mixta (meta + google)"): vista COMBINADA — las filas mezclan plataformas y "inversion_por_plataforma" trae el desglose. Acá el MER es más honesto (la inversión suma varios canales pagos). Compará plataformas cuando los números lo ameriten (dónde rinde más la plata) y aclarà de qué plataforma es cada anuncio que cites si el nombre no lo dice. Las reglas de audiencias Hot/Tibio/LAL aplican solo a las filas de Meta; los canales (Búsqueda/PMax/...) a las de Google.
 
 MODO (campo "modo" del resumen):
 - Si modo="ventas": medís por ROAS, MER, CPA y facturación (como siempre).
