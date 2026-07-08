@@ -77,6 +77,27 @@ respuestas concisas.
   prefijo. Sin env vars degrada (solo Meta). TikTok no tiene modo mensajes (todo `tipo:"ventas"`).
   OJO: métricas escritas contra la doc SIN probar contra la API real (falta el token) — la primera
   conexión puede necesitar ajuste fino de nombres (`complete_payment_roas`, `complete_payment`).
+- `lib/google.js` — cliente de la **Google Ads API** (REST + GAQL vía `searchStream`, bajo la MCC).
+  Auth: refresh token OAuth → access token cacheado ~50 min en memoria. `gEnabled()`,
+  `getAccounts()` (cuentas cliente ENABLED no-manager, ids prefijados **`g:`**, mismo dropdown que
+  Meta/TikTok), `getAds(customerId, range)` (misma forma de fila que Meta; `range` = keyword GAQL o
+  `{since,until}` → BETWEEN; **incluye PMax**: cada asset group con spend entra como fila propia,
+  ids `ag:<id>`, nombre "PMax · campaña · asset group"), `getAdStatuses` (cadena ad + ad group +
+  campaña → ACTIVE / ADSET_PAUSED / CAMPAIGN_PAUSED; también asset groups), **`getAccountSpend`**
+  (spend/conversiones a nivel customer, con `porDia` — mismo contrato que TikTok),
+  **`getChannelAudiences`** (adset_id → canal de la campaña: Búsqueda/PMax/Shopping/Display/Video —
+  hace de "audiencia" porque Google no tiene Hot/Tibio/LAL) y **`getAdsetBudgets`** (mismo contrato
+  que Meta/TikTok; en Google el budget vive SIEMPRE en la campaña → todas las unidades son "CBO"),
+  `isGoogle(id)`/`gId(id)`. Los nombres de Google (RSA/PMax) NO llevan nomenclatura → cada anuncio
+  es su propia fila (fingerprint = nombre completo; `/api/ads` y el chat pisan `nombre:"nd"` con el
+  nombre real) y SIN cruce con Sheet. Cerebro/Plan/chat FUNCIONAN con Google (prompts
+  platform-aware; `/api/tracking` devuelve null — el pixel es de Meta); `SinGoogle` solo gatea las
+  pestañas creativas (Generar/Embudo/Qué grabar), que dependen de nomenclatura/hooks.
+- `lib/multi.js` — helpers de la **vista combinada** (varias cuentas de ads a la vez, ej. Meta +
+  Google de la misma marca): `platformOf(id)` (por prefijo), `spendOf(id, since, until)` y
+  `spendDailyOf(...)` (branchean a Meta/TikTok/Google), `parseAccounts(searchParams)` (lee
+  `accounts=a,b` + `curs=USD,ARS` — params PARALELOS porque los ids llevan ":"; cae a
+  `account`+`accCur` si no vienen). Lo consumen summary/daily de Tienda Nube y el Plan.
 - `lib/store.js` — storage server-side en **Upstash Redis** (REST, sin dependencias): `storeEnabled()`,
   `kvGet(key)`, `kvSet(key, value)`. Para historiales/conversaciones compartidos. Sin env vars degrada
   (el front sigue en localStorage). Lo consume `/api/history` (GET/POST, scopeado por sesión, claves
@@ -124,6 +145,20 @@ pushear a `main` sin romper prod.
   #A97FD1), crosshair + tooltip y tabla plegada. Las visitas son LPV del pixel (fallback link clicks,
   campos nuevos de `getAccountSpendDaily`); TikTok degrada sin visitas. El objetivo del mes del
   Dashboard también toma la facturación de la tienda.
+- **Vista COMBINADA (Meta + Google juntas)**: al lado del selector de cliente hay un select
+  **"➕ combinar cuenta…"** que suma cuentas extra a la vista (chips con ✕ para sacarlas; quedan
+  recordadas por cuenta principal en localStorage `nusa_extras_<account>`). El front fetchea
+  `/api/ads` POR CUENTA en paralelo y mergea client-side: cada fila queda tagueada con `plat`
+  (meta|google|tiktok → badge M/G/TT en Panel y Top cards cuando hay mezcla) y `_acc` (la cuenta,
+  para convertir moneda POR CUENTA — una vista puede mezclar Meta en USD con Google en ARS). La
+  inversión se muestra con desglose por plataforma (KPIs del Dash/Panel y banda de Tienda Nube), y
+  el **MER pasa a ser multi-canal de verdad** (facturación ÷ suma de TODAS las plataformas
+  visibles). summary/daily/plan aceptan `accounts`+`curs`; el chat recibe `extras`+`extrasCur` en
+  el body y sus tools devuelven los datos POR PLATAFORMA + total; el cerebro recibe
+  `plataforma:"mixta (...)"` + `inversion_por_plataforma`. Las unidades del Plan van prefijadas
+  `[Meta]`/`[Google]` y puede recomendar mover plata ENTRE plataformas. Las pestañas creativas
+  (Generar/Embudo/Qué grabar/Biblioteca) trabajan solo sobre las filas no-Google (`withVCreative`);
+  se gatean con `SinGoogle` únicamente si TODA la vista es Google (`soloGoogle`).
 - **Moneda de la cuenta** (toggle "MONEDA CUENTA", `accCur`): se detecta solo el `currency` de la cuenta
   de Meta (override manual Pesos/USD). Si está en **USD**, TODA la plata de Meta se convierte a **pesos**
   al dólar oficial (`lib/fx.js`, promedio compra/venta) para que el panel entero piense y se cargue en
@@ -192,6 +227,9 @@ pushear a `main` sin romper prod.
 - `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL` (`claude-sonnet-4-6`) — generador, cerebro, match-hooks y chat.
 - `TIKTOK_ACCESS_TOKEN`, `TIKTOK_APP_ID`, `TIKTOK_SECRET` (+ `TIKTOK_ADVERTISERS` JSON opcional para
   limitar cuentas) — TikTok Ads. Sin esto, el dropdown muestra solo Meta.
+- `GOOGLE_ADS_DEVELOPER_TOKEN`, `GOOGLE_ADS_CLIENT_ID`, `GOOGLE_ADS_CLIENT_SECRET`,
+  `GOOGLE_ADS_REFRESH_TOKEN`, `GOOGLE_ADS_MCC_ID` (+ `GOOGLE_ADS_API_VERSION` opcional, default
+  v24) — Google Ads. Sin esto (o si la API falla) el dropdown no muestra cuentas de Google.
 - `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN` — historiales/conversaciones server-side
   (los inyecta sola la integración Upstash del Marketplace de Vercel; opcional, sin esto queda
   localStorage). Alias legacy soportados: `KV_REST_API_URL`/`KV_REST_API_TOKEN`.
@@ -211,7 +249,16 @@ pushear a `main` sin romper prod.
   crear la app de developer en business-api.tiktok.com (scopes read de Ads/Reporting), esperar la
   aprobación, autorizar con el Business Center y cargar las env vars. Al conectar el primer token,
   VERIFICAR los nombres de métricas del reporte (no se pudieron probar sin token).
-- **Google Ads**: mismo patrón que TikTok; requiere developer token de Google Ads API (aprobación lenta).
+- **Google Ads**: v2 YA integrada (panel/veredictos + PMax + canal como audiencia + cerebro/Plan/
+  chat + vista combinada, ver `lib/google.js`). Pendiente: keywords/términos de búsqueda como
+  dimensión propia, y mapear el embudo (hoy los canales de Google no entran a `audEmbudoPos`).
+- **Vincular las cuentas de Google sueltas a la MCC**: el usuario OAuth accede a ~15 cuentas pero
+  solo las que cuelgan de la MCC aparecen en el panel. La vinculación por API está BLOQUEADA
+  porque el developer token tiene acceso **Explorer (read-only)** — las mutaciones piden Basic.
+  Opciones: (a) vincular a mano desde Google Ads (MCC Agencia Powr → Cuentas → Vincular cuenta
+  existente, con el ID de cada cuenta) o (b) pedir **Basic access** en API Center y correr
+  `node scripts/link-google-accounts.mjs <ids...>` (invita desde la MCC y acepta desde cada
+  cuenta; ya probado hasta el punto del bloqueo).
 - **Snapshots históricos + GA4**: para que el cerebro razone sobre tendencia y causas full-funnel.
 - **Refresh del token de Meta**: regenerarlo como **"Sin vencimiento"** en Meta Business → Usuarios
   del sistema (evita el bajón de los ~60 días).
