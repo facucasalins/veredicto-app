@@ -159,7 +159,16 @@ pushear a `main` sin romper prod.
   `[Meta]`/`[Google]` y puede recomendar mover plata ENTRE plataformas. Las pestañas creativas
   (Generar/Embudo/Qué grabar/Biblioteca) trabajan solo sobre las filas no-Google (`withVCreative`);
   se gatean con `SinGoogle` únicamente si TODA la vista es Google (`soloGoogle`).
-- **Moneda de la cuenta** (toggle "MONEDA CUENTA", `accCur`): se detecta solo el `currency` de la cuenta
+- **COMPARAR (opcional, solo Dashboard)**: checkbox "⇄ COMPARAR" en la banda de selectores del
+  header (junto a cuenta/planilla/tienda). Apagado por default → el Dashboard no muestra NADA de
+  comparación. Al tildarlo aparece ahí mismo el selector del segundo rango (default **"período
+  anterior equivalente"**: misma cantidad de días, ventana inmediatamente anterior — calculado
+  client-side con `presetToRange` importado de `lib/dates.js`, que es puro; también presets y
+  fechas custom) y los KPIs del Dashboard suman el delta % contra ese período (verde = mejora,
+  rojo = empeora; **invertido** para CPA/costo por conv donde bajar es bueno; inversión
+  neutra/gris). Respeta la vista combinada (compara la SUMA de las cuentas visibles, con
+  conversión de moneda por cuenta) y el modo mensajes. El fetch de comparación va aparte
+  (`dataCmp`/`statsCmp` en page.jsx, sin Sheet ni veredictos — los KPIs no los necesitan).
   de Meta (override manual Pesos/USD). Si está en **USD**, TODA la plata de Meta se convierte a **pesos**
   al dólar oficial (`lib/fx.js`, promedio compra/venta) para que el panel entero piense y se cargue en
   pesos: spend, CPA, costo/conv, KPIs del Dashboard, Top Performers (incluye **audiencias** y el
