@@ -360,6 +360,21 @@ export default function App() {
       .finally(() => { if (!cancelled) setTnDetailLoading(false); });
     return () => { cancelled = true; };
   }, [tnStore, accountsQS, cursQS, preset, customRange, tnCount]);
+  // GA4 (piloto): tráfico y embudo del SITIO — sesiones de todos los canales, sesión→carrito→
+  // compra, y venta por canal. La ruta devuelve { off:true } si GA4 no está configurado → null y
+  // no se muestra nada (misma degradación que el resto de las features).
+  const [ga4, setGa4] = useState(null);
+  useEffect(() => {
+    if (!account) { setGa4(null); return; }
+    if (preset === "custom" && !(cSince && cUntil)) return;
+    let cancelled = false;
+    setGa4(null);
+    fetch("/api/ga4?account=" + account + (tnStore ? "&store=" + encodeURIComponent(tnStore) : "") + "&preset=" + preset + customRange)
+      .then((r) => r.json())
+      .then((j) => { if (!cancelled) setGa4(j && !j.off && !j.error ? j : null); })
+      .catch(() => { if (!cancelled) setGa4(null); });
+    return () => { cancelled = true; };
+  }, [account, tnStore, preset, customRange]); // eslint-disable-line react-hooks/exhaustive-deps
   // Margen bruto % del cliente (producto − costo, ANTES de la pauta) para el margen de contribución.
   // Lo carga el usuario una vez y queda por tienda en este browser.
   const [margen, setMargen] = useState("");
@@ -555,8 +570,11 @@ export default function App() {
         <div className="topinner">
           <div className="brand">
             <div className="mark">◆</div>
-            <div><div className="bname">NUSA APP</div><div className="bsub">{account && data.length > 0 && !loading && <span className="rec">● REC</span>}PANEL DE CREATIVOS · MOTOR DE DECISIÓN</div></div>
-            {me && <div className="userbox"><span className="uname">▸ {me.u}{me.admin ? " · admin" : ""}</span><button className="logout" onClick={logout}>salir</button></div>}
+            <div>
+              <div className="bname">NUSA APP</div>
+              <div className="bsub">{account && data.length > 0 && !loading && <span className="rec">● REC</span>}PANEL DE CREATIVOS<br />MOTOR DE DECISIÓN</div>
+              {me && <div className="userbox"><span className="uname">▸ {me.u}{me.admin ? " · admin" : ""}</span><button className="logout" onClick={logout}>salir</button></div>}
+            </div>
           </div>
           <div className="client">
             <div className="clabel">▦ CLIENTE</div>
@@ -653,6 +671,8 @@ export default function App() {
         </section>
       )}
 
+      {ga4 && <Ga4Band ga4={ga4} />}
+
       <div className="rolebar">
         <span className="rlabel">▶ VISTA</span>
         <div className="rolebtns">
@@ -703,7 +723,7 @@ export default function App() {
             </section>
           )}
 
-          {effView === "an" && (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Analisis withV={withV} stats={stats} audiencias={audConv} tnSummary={tnSummary} u={ueff} accountName={(accounts.find((a) => a.id === account) || {}).name || ""} periodo={preset === "custom" && cSince && cUntil ? cSince + " → " + cUntil : preset} analysis={analysis} setAnalysis={setAnalysis} modo={modo} account={account} extras={extras} />)}
+          {effView === "an" && (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Analisis withV={withV} stats={stats} audiencias={audConv} tnSummary={tnSummary} ga4={ga4} u={ueff} accountName={(accounts.find((a) => a.id === account) || {}).name || ""} periodo={preset === "custom" && cSince && cUntil ? cSince + " → " + cUntil : preset} analysis={analysis} setAnalysis={setAnalysis} modo={modo} account={account} extras={extras} />)}
           {effView === "plan" && (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Plan account={account} store={tnStore} goal={goal} plan={plan} setPlan={setPlan} modo={modo} accCur={accCur} extras={extras} extrasCur={extras.map(curOf)} count={tnCount} />)}
           {effView === "dash" && (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Dash stats={stats} u={ueff} goal={goal} setGoal={setGoal} factTienda={tnSummary ? tnSummary.facturacion : null} tnStore={tnStore} modo={modo} cmp={cmpOn ? { stats: statsCmp, loading: cmpLoading, range: cmpRange } : null} />)}
           {effView === "hoy" && (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Hoy acc={acciones} u={ueff} done={done} toggle={toggle} total={totalTasks} doneCount={doneCount} mantener={stats.counts.Mantener} modo={modo} />)}
@@ -1425,7 +1445,7 @@ function AnalisisOut({ out }) {
 }
 
 // ─────────── Vista: ANÁLISIS (el "cerebro" read-only) ───────────
-function Analisis({ withV, stats, audiencias, tnSummary, u, accountName, periodo, analysis, setAnalysis, modo = "ventas", account = "", extras = [] }) {
+function Analisis({ withV, stats, audiencias, tnSummary, ga4 = null, u, accountName, periodo, analysis, setAnalysis, modo = "ventas", account = "", extras = [] }) {
   const out = analysis; // persiste en el padre: no se borra al cambiar de pestaña
   const setOut = setAnalysis;
   const msg = modo === "mensajes";
@@ -1492,8 +1512,19 @@ function Analisis({ withV, stats, audiencias, tnSummary, u, accountName, periodo
       receta_ganadora: b ? { angulo: b.sheet?.angulo || b.ang, categoria: b.ang, hook: b.sheet?.tipo_gancho || b.hook, audiencia: b.aud, formato: b.fmt, ...(msg ? { costo_conv: b.costoConv, conversaciones: b.conversaciones } : { roas: b.roas, ventas: b.ventas }), spend: b.spend, activa: b.activa !== false } : null,
       salud_estructural,
       ...(tracking ? { salud_tracking: tracking } : {}),
+      // GA4 (piloto): el embudo del SITIO y la venta por canal — separa problema de pauta de
+      // problema de sitio y descompone la brecha MER vs ROAS pixel (orgánico vs pago).
+      ...(ga4 && ga4.resumen && !msg ? {
+        trafico_sitio_ga4: {
+          ...(ga4.demo ? { DEMO: "datos de muestra, no reales" } : {}),
+          sesiones: ga4.resumen.sesiones, conversion_sitio_pct: ga4.resumen.cr,
+          carritos: ga4.resumen.carritos, checkouts: ga4.resumen.checkouts, compras: ga4.resumen.compras,
+          ticket: ga4.resumen.ticket,
+          venta_por_canal: (ga4.canales || []).slice(0, 6).map((c) => ({ canal: c.canal, sesiones: c.sesiones, compras: c.compras, cr_pct: c.cr })),
+        },
+      } : {}),
     };
-  }, [withV, stats, audiencias, tnSummary, u, accountName, periodo, msg, modo, tracking, plataforma]);
+  }, [withV, stats, audiencias, tnSummary, ga4, u, accountName, periodo, msg, modo, tracking, plataforma]);
 
   // Historial por cliente: localStorage + Upstash si está conectado (compartido entre máquinas)
   const [hist, saveHist] = useHistSync("hist_an", account);
@@ -1674,6 +1705,52 @@ function Kpi({ lab, val, mod, sub, cmp }) {
     }
   }
   return <div className={"kpi" + (mod === "grn" ? " good" : "")}><div className="klab">{lab}</div><div className={"kval" + (mod === "grn" ? " grn" : "")}>{val}</div>{sub ? <div className="ksub">{sub}</div> : null}{dline}</div>;
+}
+
+// Banda de GA4 (piloto): el embudo del SITIO que ninguna plataforma de ads ve — sesiones de
+// todos los canales, sesión→carrito→compra y de qué canal viene la venta. Con esto la brecha
+// MER vs ROAS pixel se puede descomponer (orgánico vs pago) en vez de quedar como incógnita.
+function Ga4Band({ ga4 }) {
+  const r = ga4.resumen || {};
+  const canales = ga4.canales || [];
+  const totalSes = canales.reduce((s, c) => s + c.sesiones, 0);
+  const maxCompras = Math.max(1, ...canales.map((c) => c.compras));
+  return (
+    <section className="tnband ga4band">
+      <div className="tnband-head">
+        <span className="tntag">📈 GOOGLE ANALYTICS · {ga4.propiedad}{ga4.demo ? <span className="ga4demo">MODO DEMO — datos de muestra</span> : null}</span>
+        <span className="tnrange">{ga4.since} → {ga4.until}</span>
+      </div>
+      <div className="tnstats">
+        <div className="tnstat" title="Sesiones del sitio de TODOS los canales (orgánico, directo, email, pago) — lo que el pixel de una sola plataforma no ve.">
+          <div className="tnlab">SESIONES DEL SITIO</div>
+          <div className="tnval">{nf.format(r.sesiones || 0)}</div>
+          <div className="tnsub">{nf.format(r.usuarios || 0)} usuarios · todos los canales</div>
+        </div>
+        <div className="tnstat" title="El embudo COMPLETO del sitio: cuántas sesiones agregan al carrito, llegan al checkout y compran.">
+          <div className="tnlab">EMBUDO DEL SITIO</div>
+          <div className="tnval">{nf.format(r.carritos || 0)} <small>→</small> {nf.format(r.checkouts || 0)} <small>→</small> {nf.format(r.compras || 0)}</div>
+          <div className="tnsub">carrito ({r.tasa_carrito || 0}% de sesiones) → checkout → compra</div>
+        </div>
+        <div className="tnstat tnmer" title="Compras / sesiones. La palanca que las plataformas de ads no muestran: si baja, el problema es el SITIO, no la pauta.">
+          <div className="tnlab">CONVERSIÓN DEL SITIO</div>
+          <div className="tnval">{r.cr || 0}%</div>
+          <div className="tnsub">ticket GA4 {money(r.ticket || 0)}</div>
+        </div>
+        <div className="tnstat ga4canales" title="De qué canal vienen las compras según GA4. Esto descompone la brecha MER vs ROAS pixel: cuánto es orgánico/directo/email y cuánto pago.">
+          <div className="tnlab">DE DÓNDE VIENE LA VENTA</div>
+          {canales.slice(0, 6).map((c) => (
+            <div className="ga4canal" key={c.canal}>
+              <span className="ga4cname">{c.canal}</span>
+              <span className="ga4cbar"><i style={{ width: Math.round((c.compras / maxCompras) * 100) + "%" }} /></span>
+              <span className="ga4cmeta mono">{nf.format(c.compras)} compras · {totalSes ? Math.round((c.sesiones / totalSes) * 100) : 0}% ses.</span>
+            </div>
+          ))}
+        </div>
+      </div>
+      <div className="tnnote">GA4 completa lo que ni Meta ni Google Ads ven: el tráfico y la venta de TODOS los canales, y el embudo del propio sitio. El cerebro recibe estos números para separar problema de PAUTA (no llega tráfico) de problema de SITIO (llega pero no convierte) y para descomponer la brecha MER vs ROAS pixel.</div>
+    </section>
+  );
 }
 
 // Delta % de la banda de Tienda Nube (módulo COMPARAR): misma lógica que los KPIs del Dash.
@@ -2079,14 +2156,19 @@ const CSS = `
 .mono{font-family:'Space Mono',ui-monospace,monospace;font-variant-numeric:tabular-nums;}.soft{color:var(--soft);}
 
 .top{background:var(--ink);border:2px solid var(--ink);border-radius:12px;overflow:hidden;box-shadow:5px 5px 0 #1e181233;margin-bottom:18px;}
-.topinner{display:flex;justify-content:space-between;align-items:center;padding:16px 20px;color:var(--paper);}
-.brand{display:flex;gap:15px;align-items:center;flex-wrap:wrap;}
+.topinner{display:flex;justify-content:space-between;align-items:center;gap:24px;padding:16px 20px;color:var(--paper);}
+.brand{display:flex;gap:15px;align-items:center;flex-wrap:wrap;flex:0 0 auto;}
 .mark{width:42px;height:42px;flex:0 0 42px;display:grid;place-items:center;border:2px solid var(--paper);color:var(--paper);border-radius:8px;font-size:18px;}
 .bname{font-family:'Anton',Impact,sans-serif;font-size:34px;letter-spacing:3px;line-height:.9;background:linear-gradient(90deg,var(--c1),var(--c2),var(--c3),var(--c4),var(--c5),var(--c6));-webkit-background-clip:text;background-clip:text;color:transparent;}
 .bsub{color:#D8CDB6;font-size:11px;letter-spacing:1.5px;margin-top:5px;}
 .rec{color:#FF5A4D;font-weight:700;margin-right:8px;animation:blink 1.4s steps(1) infinite;}@keyframes blink{50%{opacity:.25}}
-.client{text-align:right;background:var(--paper2);border-radius:8px;padding:8px 14px;color:var(--ink);}
+.client{text-align:right;background:var(--paper2);border-radius:8px;padding:8px 14px;color:var(--ink);flex:1 1 auto;min-width:0;}
 .crow{display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:0 8px;}
+/* los campos CRECEN para repartirse el ancho de la fila (el panel ocupa todo el header) */
+.crow .cselect{flex:1 1 170px;max-width:none;}
+.crow .daterange{flex:1 1 230px;justify-content:flex-end;}
+.crow .daterange .cdate{flex:1 1 110px;min-width:0;}
+.crow .mixchip,.crow .cmpcheck,.crow .cmprange{flex:0 0 auto;}
 .clabel{font-size:9px;letter-spacing:2px;color:var(--soft);font-family:'Space Mono',monospace;}
 .cname{font-family:'Anton',Impact,sans-serif;font-size:18px;letter-spacing:1.5px;line-height:1;margin-top:2px;}
 .cmeta{font-size:10px;color:var(--soft);font-style:italic;margin-top:1px;}
@@ -2276,7 +2358,7 @@ td{padding:11px 12px;vertical-align:middle;}.num{text-align:right;}.name{font-we
 .qualtag{font-size:9px;border:1px solid currentColor;border-radius:3px;padding:1px 5px;margin-left:6px;font-family:'Space Mono',monospace;letter-spacing:.5px;white-space:nowrap;font-weight:700;cursor:help;}
 .metaerr{background:#FBE8E6;color:#8A1C12;border-top:2px solid #C0392B;padding:9px 22px;font-size:12.5px;line-height:1.45;font-family:'Space Mono',monospace;}
 .metaerr-sample{color:#B05A50;}
-.userbox{display:flex;align-items:center;gap:8px;margin-left:10px;flex-shrink:0;white-space:nowrap;}
+.userbox{display:flex;align-items:center;gap:8px;margin-top:7px;flex-shrink:0;white-space:nowrap;}
 .uname{font-family:'Space Mono',monospace;font-size:11px;color:var(--soft);letter-spacing:.5px;white-space:nowrap;}
 .logout{font-family:'Space Mono',monospace;font-size:11px;color:var(--paper);background:transparent;border:1px solid rgba(242,235,217,.4);border-radius:5px;padding:3px 9px;cursor:pointer;}
 .logout:hover{background:rgba(242,235,217,.12);border-color:var(--paper);}
@@ -2392,6 +2474,14 @@ td{padding:11px 12px;vertical-align:middle;}.num{text-align:right;}.name{font-we
 .ddown{color:#C5362B;font-weight:700;}
 .dneu{color:#857A6A;font-weight:700;}
 .tndelta{margin-top:4px;}
+.ga4band{border-top-color:#A97FD1;}
+.ga4demo{margin-left:10px;background:#F4C24A;color:#1A1A17;font-size:9px;font-weight:700;letter-spacing:1px;padding:2px 7px;border-radius:4px;vertical-align:1px;}
+.ga4canales{min-width:280px;}
+.ga4canal{display:flex;align-items:center;gap:8px;margin-top:5px;}
+.ga4cname{font-family:'Space Mono',monospace;font-size:10.5px;color:#D8CDB6;flex:0 0 96px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:left;}
+.ga4cbar{flex:1;height:7px;background:rgba(242,235,217,.12);border-radius:4px;overflow:hidden;}
+.ga4cbar i{display:block;height:100%;background:#A97FD1;border-radius:4px;}
+.ga4cmeta{font-size:10px;color:#9A907C;white-space:nowrap;}
 .tnband .dup{color:#4CC392;}
 .tnband .ddown{color:#E06052;}
 .tnband .dneu{color:#9A907C;}
