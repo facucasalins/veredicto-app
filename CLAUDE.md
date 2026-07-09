@@ -261,6 +261,11 @@ pushear a `main` sin romper prod.
 
 **Gotcha Vercel:** cambiar una env var NO redeploya solo → Deployments → último → ⋯ → Redeploy.
 
+**Versión visible:** el header muestra "V 1.N ▮▮▮" (donde estaba "HQ") — N = número del último PR
+mergeado, derivado en build de `VERCEL_GIT_COMMIT_MESSAGE` en `next.config.js` (automático, no se
+bumpea a mano). Local/branch muestra el SHA corto o "dev". Sirve para confirmar de un vistazo que
+prod corre el último merge.
+
 ## Cómo trabajar
 
 - **NO correr `npm run build` con el dev server (`npm run dev`) corriendo**: pisan el mismo `.next`

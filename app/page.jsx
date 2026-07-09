@@ -606,7 +606,7 @@ export default function App() {
           </div>
         </div>
         <div className="stripe"><i/><i/><i/><i/><i/><i/></div>
-        <div className="phasebar"><span>FASE 01 — HIGH GRADE</span><span>HQ ▮▮▮</span></div>
+        <div className="phasebar"><span>FASE 01 — HIGH GRADE</span><span title="versión deployada (1.N = último PR mergeado)">V {process.env.NEXT_PUBLIC_APP_VERSION} ▮▮▮</span></div>
         {metaErr && (
           <div className="metaerr">
             <strong>⚠ Token de Meta caído.</strong> {/expired|expir|session/i.test(metaErr) ? "El token venció — regeneralo en Meta Business (System User) como “Sin vencimiento” y actualizá META_SYSTEM_TOKEN en Vercel." : metaErr} <span className="metaerr-sample">Mientras tanto se muestra data de muestra.</span>
