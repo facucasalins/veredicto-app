@@ -375,6 +375,19 @@ export default function App() {
       .catch(() => { if (!cancelled) setGa4(null); });
     return () => { cancelled = true; };
   }, [account, tnStore, preset, customRange]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Centro de ALERTAS (solo admin): lo último que dejó el cron diario + "chequear ahora".
+  const [alertas, setAlertas] = useState(null); // { t, alertas: [...] } | null
+  const [alertasOpen, setAlertasOpen] = useState(false);
+  const [alertasLoading, setAlertasLoading] = useState(false);
+  useEffect(() => {
+    if (me !== null && !me?.admin) return; // clientes: sin centro de alertas
+    fetch("/api/alertas").then((r) => r.json()).then((j) => { if (j && Array.isArray(j.alertas)) setAlertas(j); }).catch(() => {});
+  }, [me]);
+  const chequearAhora = async () => {
+    setAlertasLoading(true);
+    try { const r = await fetch("/api/alertas", { method: "POST" }); const j = await r.json(); if (j && Array.isArray(j.alertas)) { setAlertas(j); setAlertasOpen(true); } } catch {}
+    finally { setAlertasLoading(false); }
+  };
   // TENDENCIA (4 semanas): la película — inversión/facturación/MER/CR semana a semana, siempre
   // sobre los últimos 28 días (independiente del período elegido arriba). La consume el Dashboard
   // (strip) y el cerebro (tendencia_semanal). Degrada por fuente igual que el resto.
@@ -649,7 +662,7 @@ export default function App() {
                   return <>
                 <div className="tnstat"><div className="tnlab">FACTURACIÓN TIENDA</div><div className="tnval">{money(tnSummary.facturacion)}</div><div className="tnsub">{tnSummary.orders} órdenes {tnSummary.criterio === "no_canceladas" ? "(pagadas + pendientes)" : "pagadas"} · ticket {money(tnSummary.ticket)}</div>{cS && <TnDelta cur={tnSummary.facturacion} prev={cS.facturacion} />}</div>
                 <div className="tnstat"><div className="tnlab">INVERSIÓN {mixOn ? "ADS" : String(account || "").startsWith("g:") ? "GOOGLE" : String(account || "").startsWith("tt:") ? "TIKTOK" : "META"}</div><div className="tnval">{account ? money(tnSummary.fx && !tnSummary.fx.error ? tnSummary.inversionConv : tnSummary.inversion) : "—"}</div><div className="tnsub">{!account ? "elegí el cliente de Meta" : tnSummary.porPlataforma ? tnSummary.porPlataforma.map((p) => (p.plataforma === "Google" ? "G " : p.plataforma === "TikTok" ? "TT " : "M ") + short(p.inversion)).join(" · ") : tnSummary.fx && !tnSummary.fx.error ? ("USD " + money(tnSummary.inversion) + " · " + tnSummary.fx.fuente + " $" + nf.format(Math.round(tnSummary.fx.rate))) : tnSummary.fx && tnSummary.fx.error ? ("⚠ no pude cotizar el dólar — MER sin convertir") : ("ROAS pixel " + (tnSummary.roasMeta || 0).toFixed(1) + "x")}</div>{account && cS && <TnDelta cur={invOf(tnSummary)} prev={invOf(cS)} invert={null} />}</div>
-                <div className="tnstat tnmer"><div className="tnlab">MER (FACT / INV)</div><div className="tnval">{tnSummary.mer != null ? tnSummary.mer.toFixed(2) + "x" : "—"}</div><div className="tnsub">{tnSummary.criterio === "no_canceladas" ? ("pagadas: " + money(tnSummary.facturacionPagada) + " (" + tnSummary.ordersPagadas + ") · pendientes: " + money(tnSummary.facturacionPendiente) + " (" + tnSummary.ordersPendientes + ")") : tnSummary.ordersPendientes ? ("+ " + money(tnSummary.facturacionPendiente) + " pendientes (" + tnSummary.ordersPendientes + " órd.) sin contar") : "facturación / inversión"}</div>{ga4 && tnSummary.mer != null && (() => { const sh = shareComprasPagas(ga4.canales); return sh != null ? <div className="tnsub tnmerpauta" title="MER × % de compras que GA4 atribuye a canales pagos (Paid Social/Search + Cross-network). El retorno de la PAUTA sola, sin el empuje de orgánico/directo/email. Atribución last-click de GA4: orientativo.">pauta sola ≈ <b>{(tnSummary.mer * sh).toFixed(1)}x</b> · {Math.round(sh * 100)}% de compras pagas (GA4)</div> : null; })()}{cS && tnSummary.mer != null && <TnDelta cur={tnSummary.mer} prev={cS.mer} fmt={(x) => x.toFixed(2) + "x"} />}</div>
+                <div className="tnstat tnmer" title="MER TOTAL = facturación de la tienda ÷ inversión en ads (la empujan TODOS los canales). MER PAUTA = total × % de compras que GA4 atribuye a canales pagos — el retorno de la plata invertida sola, sin el empuje de orgánico/directo/email (last-click, orientativo)."><div className="tnlab">MER TOTAL · PAUTA</div><div className="tnval">{tnSummary.mer != null ? tnSummary.mer.toFixed(2) + "x" : "—"}{(() => { const sh = ga4 && tnSummary.mer != null ? shareComprasPagas(ga4.canales) : null; return sh != null ? <span className="tnvalpauta"> · {(tnSummary.mer * sh).toFixed(1)}x <small>pauta</small></span> : null; })()}</div><div className="tnsub">{tnSummary.criterio === "no_canceladas" ? ("pagadas: " + money(tnSummary.facturacionPagada) + " (" + tnSummary.ordersPagadas + ") · pendientes: " + money(tnSummary.facturacionPendiente) + " (" + tnSummary.ordersPendientes + ")") : tnSummary.ordersPendientes ? ("+ " + money(tnSummary.facturacionPendiente) + " pendientes (" + tnSummary.ordersPendientes + " órd.) sin contar") : "facturación / inversión"}</div>{ga4 && tnSummary.mer != null && (() => { const sh = shareComprasPagas(ga4.canales); return sh != null ? <div className="tnsub tnmerpauta">{Math.round(sh * 100)}% de las compras vienen de canales pagos (GA4)</div> : null; })()}{cS && tnSummary.mer != null && <TnDelta cur={tnSummary.mer} prev={cS.mer} fmt={(x) => x.toFixed(2) + "x"} />}</div>
                 <div className="tnstat" title="Inversión en pauta ÷ clientes NUEVOS de la tienda en el período (primera compra). No es el CPA del pixel: acá cuentan personas nuevas reales, no compras atribuidas.">
                   <div className="tnlab">CAC (CLIENTE NUEVO)</div>
                   <div className="tnval">{tnDetail && tnDetail.cac != null ? money(tnDetail.cac) : tnDetailLoading ? "…" : "—"}</div>
@@ -681,6 +694,30 @@ export default function App() {
                 ? <TnDaily dias={tnDetail.dias} />
                 : <div className="tnsub" style={{ marginTop: 8 }}>{tnDetailLoading ? "cargando la serie diaria…" : tnDetail && tnDetail.error ? tnDetail.error : "sin datos del período"}</div>)}
             </>
+          )}
+        </section>
+      )}
+
+      {/* Centro de alertas (solo admin): el cron diario deja acá lo que se rompió o degradó */}
+      {(me === null || me?.admin) && alertas && (
+        <section className={"alertband" + (alertas.alertas.length ? " has" : "")}>
+          <div className="alerthead">
+            <button className="alerttoggle" onClick={() => setAlertasOpen(!alertasOpen)}>
+              {alertas.alertas.length ? `⚠ ${alertas.alertas.length} ALERTA${alertas.alertas.length !== 1 ? "S" : ""}` : "✓ SIN ALERTAS"}
+              <span className="alertwhen">{alertas.t ? " · chequeo " + new Date(alertas.t).toLocaleString("es-AR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : " · todavía sin chequeos"}</span>
+              {alertas.alertas.length ? <span className="alertcaret">{alertasOpen ? "▴" : "▾"}</span> : null}
+            </button>
+            <button className="alertrun" onClick={chequearAhora} disabled={alertasLoading}>{alertasLoading ? "chequeando…" : "↻ chequear ahora"}</button>
+          </div>
+          {alertasOpen && alertas.alertas.length > 0 && (
+            <ul className="alertlist">
+              {alertas.alertas.map((a, i) => (
+                <li key={i} className={a.nivel}>
+                  <b>{a.nivel === "critico" ? "🔴" : "🟡"} {a.titulo}</b> — {a.cuenta}
+                  <div className="alertdet">{a.detalle}</div>
+                </li>
+              ))}
+            </ul>
           )}
         </section>
       )}
@@ -2553,7 +2590,21 @@ td{padding:11px 12px;vertical-align:middle;}.num{text-align:right;}.name{font-we
 .dneu{color:#857A6A;font-weight:700;}
 .tndelta{margin-top:4px;}
 .tnmerpauta{color:#4CC392;margin-top:4px;}
-.tnmerpauta b{font-size:12px;}
+.tnvalpauta{color:#4CC392;font-size:20px;}
+.tnvalpauta small{font-size:11px;letter-spacing:1px;}
+.alertband{background:var(--paper2);border:2px solid var(--ink);border-radius:10px;padding:8px 14px;margin:12px 0 0;}
+.alertband.has{border-color:#C5362B;}
+.alerthead{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;}
+.alerttoggle{font-family:'Archivo',sans-serif;font-weight:800;font-size:13px;letter-spacing:.05em;background:none;border:0;color:var(--ink);cursor:pointer;padding:0;}
+.alertband.has .alerttoggle{color:#C5362B;}
+.alertwhen{font-family:'Space Mono',monospace;font-size:11px;font-weight:400;color:var(--soft);letter-spacing:0;}
+.alertcaret{margin-left:8px;}
+.alertrun{font-family:'Space Mono',monospace;font-size:11px;border:1.5px solid var(--ink);border-radius:6px;background:var(--paper);color:var(--ink);padding:4px 10px;cursor:pointer;}
+.alertrun:disabled{opacity:.5;cursor:default;}
+.alertlist{list-style:none;margin:10px 0 2px;padding:0;display:grid;gap:8px;}
+.alertlist li{border-left:3px solid #C2861F;padding:2px 0 2px 10px;font-size:13px;}
+.alertlist li.critico{border-left-color:#C5362B;}
+.alertdet{color:var(--soft);font-size:12px;margin-top:2px;}
 .ga4band{border-top-color:#A97FD1;}
 .ga4demo{margin-left:10px;background:#F4C24A;color:#1A1A17;font-size:9px;font-weight:700;letter-spacing:1px;padding:2px 7px;border-radius:4px;vertical-align:1px;}
 .ga4canales{min-width:280px;}

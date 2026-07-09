@@ -4,6 +4,17 @@ Registro de cambios por versión. **V 1.N = número del PR mergeado** — es el 
 app muestra en el header ("V 1.N ▮▮▮"), así se confirma de un vistazo qué versión corre en prod.
 Regla de la casa: cada PR suma su entrada acá ANTES de mergearse.
 
+## V 1.24 — Alertas proactivas + MER doble en una card
+- **ALERTAS PROACTIVAS**: cron diario de Vercel (11:00 UTC / 8am AR) que chequea todos los
+  clientes y avisa cuando algo se rompe o degrada: cuenta de Meta con problema (pago pendiente/
+  inhabilitada), inversión de ayer en $0 en cuenta que venía invirtiendo, ROAS 7d cayendo >30%
+  vs los 7 anteriores, CR del sitio (GA4) cayendo >30%. Centro de alertas in-app (banner rojo,
+  solo admin, con "chequear ahora") + email opcional vía Resend (`RESEND_API_KEY` +
+  `ALERTAS_EMAIL`; canal enchufable — WhatsApp se puede sumar sobre la misma interfaz).
+  Requiere `CRON_SECRET` en Vercel para el cron.
+- **MER TOTAL · PAUTA en la misma card**: los dos números juntos y grandes ("14.03x · 7.0x
+  pauta") con el % de compras pagas como sub-línea.
+
 ## V 1.23 — Motor de decisión: GA4 en el chat, MER de la pauta y Tendencia 4 semanas
 - **Chat con GA4** (`ga4_trafico`): PREGUNTAR ahora cruza Analytics — sesiones por canal, embudo
   del sitio, conversión, venta orgánica vs paga (con serie diaria opcional). Solo aparece si la

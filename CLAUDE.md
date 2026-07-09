@@ -255,6 +255,10 @@ pushear a `main` sin romper prod.
 - `GA4_PROPERTIES` (JSON `[{name, property_id, account?, store?}]`), `GOOGLE_OAUTH_REFRESH_TOKEN`
   (refresh token con scopes adwords + analytics.readonly; si falta usa GOOGLE_ADS_REFRESH_TOKEN)
   y `GA4_DEMO=1` (modo demo con datos de muestra) — Google Analytics 4 (piloto).
+- `CRON_SECRET` (protege el cron diario de alertas), `RESEND_API_KEY` + `ALERTAS_EMAIL`
+  (destinos separados por coma) + `ALERTAS_FROM` (opcional) — alertas proactivas
+  (`lib/alertas.js` + `/api/alertas` + cron en `vercel.json` 11:00 UTC). Sin Resend quedan solo
+  in-app; sin Upstash no se persisten (solo "chequear ahora" en vivo).
 - `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN` — historiales/conversaciones server-side
   (los inyecta sola la integración Upstash del Marketplace de Vercel; opcional, sin esto queda
   localStorage). Alias legacy soportados: `KV_REST_API_URL`/`KV_REST_API_TOKEN`.
