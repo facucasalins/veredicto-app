@@ -375,6 +375,20 @@ export default function App() {
       .catch(() => { if (!cancelled) setGa4(null); });
     return () => { cancelled = true; };
   }, [account, tnStore, preset, customRange]); // eslint-disable-line react-hooks/exhaustive-deps
+  // TENDENCIA (4 semanas): la película — inversión/facturación/MER/CR semana a semana, siempre
+  // sobre los últimos 28 días (independiente del período elegido arriba). La consume el Dashboard
+  // (strip) y el cerebro (tendencia_semanal). Degrada por fuente igual que el resto.
+  const [tendencia, setTendencia] = useState(null);
+  useEffect(() => {
+    if (!account) { setTendencia(null); return; }
+    let cancelled = false;
+    setTendencia(null);
+    fetch("/api/tendencia?accounts=" + encodeURIComponent(accountsQS) + "&curs=" + cursQS + (tnStore ? "&store=" + encodeURIComponent(tnStore) + "&count=" + tnCount : ""))
+      .then((r) => r.json())
+      .then((j) => { if (!cancelled) setTendencia(j && !j.error ? j : null); })
+      .catch(() => { if (!cancelled) setTendencia(null); });
+    return () => { cancelled = true; };
+  }, [accountsQS, cursQS, tnStore, tnCount]);
   // Margen bruto % del cliente (producto − costo, ANTES de la pauta) para el margen de contribución.
   // Lo carga el usuario una vez y queda por tienda en este browser.
   const [margen, setMargen] = useState("");
@@ -635,7 +649,7 @@ export default function App() {
                   return <>
                 <div className="tnstat"><div className="tnlab">FACTURACIÓN TIENDA</div><div className="tnval">{money(tnSummary.facturacion)}</div><div className="tnsub">{tnSummary.orders} órdenes {tnSummary.criterio === "no_canceladas" ? "(pagadas + pendientes)" : "pagadas"} · ticket {money(tnSummary.ticket)}</div>{cS && <TnDelta cur={tnSummary.facturacion} prev={cS.facturacion} />}</div>
                 <div className="tnstat"><div className="tnlab">INVERSIÓN {mixOn ? "ADS" : String(account || "").startsWith("g:") ? "GOOGLE" : String(account || "").startsWith("tt:") ? "TIKTOK" : "META"}</div><div className="tnval">{account ? money(tnSummary.fx && !tnSummary.fx.error ? tnSummary.inversionConv : tnSummary.inversion) : "—"}</div><div className="tnsub">{!account ? "elegí el cliente de Meta" : tnSummary.porPlataforma ? tnSummary.porPlataforma.map((p) => (p.plataforma === "Google" ? "G " : p.plataforma === "TikTok" ? "TT " : "M ") + short(p.inversion)).join(" · ") : tnSummary.fx && !tnSummary.fx.error ? ("USD " + money(tnSummary.inversion) + " · " + tnSummary.fx.fuente + " $" + nf.format(Math.round(tnSummary.fx.rate))) : tnSummary.fx && tnSummary.fx.error ? ("⚠ no pude cotizar el dólar — MER sin convertir") : ("ROAS pixel " + (tnSummary.roasMeta || 0).toFixed(1) + "x")}</div>{account && cS && <TnDelta cur={invOf(tnSummary)} prev={invOf(cS)} invert={null} />}</div>
-                <div className="tnstat tnmer"><div className="tnlab">MER (FACT / INV)</div><div className="tnval">{tnSummary.mer != null ? tnSummary.mer.toFixed(2) + "x" : "—"}</div><div className="tnsub">{tnSummary.criterio === "no_canceladas" ? ("pagadas: " + money(tnSummary.facturacionPagada) + " (" + tnSummary.ordersPagadas + ") · pendientes: " + money(tnSummary.facturacionPendiente) + " (" + tnSummary.ordersPendientes + ")") : tnSummary.ordersPendientes ? ("+ " + money(tnSummary.facturacionPendiente) + " pendientes (" + tnSummary.ordersPendientes + " órd.) sin contar") : "facturación / inversión"}</div>{cS && tnSummary.mer != null && <TnDelta cur={tnSummary.mer} prev={cS.mer} fmt={(x) => x.toFixed(2) + "x"} />}</div>
+                <div className="tnstat tnmer"><div className="tnlab">MER (FACT / INV)</div><div className="tnval">{tnSummary.mer != null ? tnSummary.mer.toFixed(2) + "x" : "—"}</div><div className="tnsub">{tnSummary.criterio === "no_canceladas" ? ("pagadas: " + money(tnSummary.facturacionPagada) + " (" + tnSummary.ordersPagadas + ") · pendientes: " + money(tnSummary.facturacionPendiente) + " (" + tnSummary.ordersPendientes + ")") : tnSummary.ordersPendientes ? ("+ " + money(tnSummary.facturacionPendiente) + " pendientes (" + tnSummary.ordersPendientes + " órd.) sin contar") : "facturación / inversión"}</div>{ga4 && tnSummary.mer != null && (() => { const sh = shareComprasPagas(ga4.canales); return sh != null ? <div className="tnsub tnmerpauta" title="MER × % de compras que GA4 atribuye a canales pagos (Paid Social/Search + Cross-network). El retorno de la PAUTA sola, sin el empuje de orgánico/directo/email. Atribución last-click de GA4: orientativo.">pauta sola ≈ <b>{(tnSummary.mer * sh).toFixed(1)}x</b> · {Math.round(sh * 100)}% de compras pagas (GA4)</div> : null; })()}{cS && tnSummary.mer != null && <TnDelta cur={tnSummary.mer} prev={cS.mer} fmt={(x) => x.toFixed(2) + "x"} />}</div>
                 <div className="tnstat" title="Inversión en pauta ÷ clientes NUEVOS de la tienda en el período (primera compra). No es el CPA del pixel: acá cuentan personas nuevas reales, no compras atribuidas.">
                   <div className="tnlab">CAC (CLIENTE NUEVO)</div>
                   <div className="tnval">{tnDetail && tnDetail.cac != null ? money(tnDetail.cac) : tnDetailLoading ? "…" : "—"}</div>
@@ -723,9 +737,9 @@ export default function App() {
             </section>
           )}
 
-          {effView === "an" && (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Analisis withV={withV} stats={stats} audiencias={audConv} tnSummary={tnSummary} ga4={ga4} u={ueff} accountName={(accounts.find((a) => a.id === account) || {}).name || ""} periodo={preset === "custom" && cSince && cUntil ? cSince + " → " + cUntil : preset} analysis={analysis} setAnalysis={setAnalysis} modo={modo} account={account} extras={extras} />)}
+          {effView === "an" && (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Analisis withV={withV} stats={stats} audiencias={audConv} tnSummary={tnSummary} ga4={ga4} tendencia={tendencia} u={ueff} accountName={(accounts.find((a) => a.id === account) || {}).name || ""} periodo={preset === "custom" && cSince && cUntil ? cSince + " → " + cUntil : preset} analysis={analysis} setAnalysis={setAnalysis} modo={modo} account={account} extras={extras} />)}
           {effView === "plan" && (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Plan account={account} store={tnStore} goal={goal} plan={plan} setPlan={setPlan} modo={modo} accCur={accCur} extras={extras} extrasCur={extras.map(curOf)} count={tnCount} />)}
-          {effView === "dash" && (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Dash stats={stats} u={ueff} goal={goal} setGoal={setGoal} factTienda={tnSummary ? tnSummary.facturacion : null} tnStore={tnStore} modo={modo} cmp={cmpOn ? { stats: statsCmp, loading: cmpLoading, range: cmpRange } : null} />)}
+          {effView === "dash" && (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Dash stats={stats} u={ueff} goal={goal} setGoal={setGoal} factTienda={tnSummary ? tnSummary.facturacion : null} tnStore={tnStore} modo={modo} cmp={cmpOn ? { stats: statsCmp, loading: cmpLoading, range: cmpRange } : null} tendencia={tendencia} />)}
           {effView === "hoy" && (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Hoy acc={acciones} u={ueff} done={done} toggle={toggle} total={totalTasks} doneCount={doneCount} mantener={stats.counts.Mantener} modo={modo} />)}
           {effView === "grabar" && (soloGoogle ? <SinGoogle que="Qué grabar" /> : !withVCreative.length ? <EmptyState account={account} loading={loading} err={err} /> : <QueGrabar withV={withVCreative} u={ueff} modo={modo} role={role} accountName={(accounts.find((a) => a.id === account) || {}).name || ""} />)}
           {effView === "top" && (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Top withV={withV} u={ueff} audData={audConv} modo={modo} />)}
@@ -1445,7 +1459,7 @@ function AnalisisOut({ out }) {
 }
 
 // ─────────── Vista: ANÁLISIS (el "cerebro" read-only) ───────────
-function Analisis({ withV, stats, audiencias, tnSummary, ga4 = null, u, accountName, periodo, analysis, setAnalysis, modo = "ventas", account = "", extras = [] }) {
+function Analisis({ withV, stats, audiencias, tnSummary, ga4 = null, tendencia = null, u, accountName, periodo, analysis, setAnalysis, modo = "ventas", account = "", extras = [] }) {
   const out = analysis; // persiste en el padre: no se borra al cambiar de pestaña
   const setOut = setAnalysis;
   const msg = modo === "mensajes";
@@ -1512,6 +1526,13 @@ function Analisis({ withV, stats, audiencias, tnSummary, ga4 = null, u, accountN
       receta_ganadora: b ? { angulo: b.sheet?.angulo || b.ang, categoria: b.ang, hook: b.sheet?.tipo_gancho || b.hook, audiencia: b.aud, formato: b.fmt, ...(msg ? { costo_conv: b.costoConv, conversaciones: b.conversaciones } : { roas: b.roas, ventas: b.ventas }), spend: b.spend, activa: b.activa !== false } : null,
       salud_estructural,
       ...(tracking ? { salud_tracking: tracking } : {}),
+      // TENDENCIA: 4 bloques de 7 días (el último EN CURSO) — la dirección pesa más que la foto
+      ...(tendencia && Array.isArray(tendencia.semanas) && !msg ? {
+        tendencia_semanal: {
+          nota: "4 bloques de 7 días; el último está EN CURSO (parcial, no compararlo 1:1)",
+          semanas: tendencia.semanas.map((s) => ({ desde: s.desde, hasta: s.hasta, inversion: s.inversion, ventas_pixel: s.ventas_pixel, ...(s.facturacion != null ? { facturacion: Math.round(s.facturacion), mer: s.mer } : {}), ...(s.sesiones != null ? { sesiones: s.sesiones, cr_sitio_pct: s.cr } : {}) })),
+        },
+      } : {}),
       // GA4 (piloto): el embudo del SITIO y la venta por canal — separa problema de pauta de
       // problema de sitio y descompone la brecha MER vs ROAS pixel (orgánico vs pago).
       ...(ga4 && ga4.resumen && !msg ? {
@@ -1521,10 +1542,12 @@ function Analisis({ withV, stats, audiencias, tnSummary, ga4 = null, u, accountN
           carritos: ga4.resumen.carritos, checkouts: ga4.resumen.checkouts, compras: ga4.resumen.compras,
           ticket: ga4.resumen.ticket,
           venta_por_canal: (ga4.canales || []).slice(0, 6).map((c) => ({ canal: c.canal, sesiones: c.sesiones, compras: c.compras, cr_pct: c.cr })),
+          // MER × share de compras pagas (GA4) = retorno estimado de la PAUTA sola (last-click, orientativo)
+          ...(tnSummary && tnSummary.mer != null ? (() => { const sh = shareComprasPagas(ga4.canales); return sh != null ? { share_compras_pagas_pct: Math.round(sh * 100), mer_pauta_estimado: +(tnSummary.mer * sh).toFixed(1) } : {}; })() : {}),
         },
       } : {}),
     };
-  }, [withV, stats, audiencias, tnSummary, ga4, u, accountName, periodo, msg, modo, tracking, plataforma]);
+  }, [withV, stats, audiencias, tnSummary, ga4, tendencia, u, accountName, periodo, msg, modo, tracking, plataforma]);
 
   // Historial por cliente: localStorage + Upstash si está conectado (compartido entre máquinas)
   const [hist, saveHist] = useHistSync("hist_an", account);
@@ -1626,7 +1649,7 @@ function Plan({ account, store, goal, plan, setPlan, modo = "ventas", accCur = "
 }
 
 // ─────────── Vista: DASHBOARD (Parte 3) ───────────
-function Dash({ stats, u = {}, goal, setGoal, factTienda, tnStore, modo = "ventas", cmp = null }) {
+function Dash({ stats, u = {}, goal, setGoal, factTienda, tnStore, modo = "ventas", cmp = null, tendencia = null }) {
   const msg = modo === "mensajes";
   const [openCard, setOpenCard] = useState(null); // card de Top Ads desplegada (detalle por conjunto)
   // COMPARAR (checkbox del header): c = KPIs del período comparado (null si está apagado o
@@ -1665,6 +1688,7 @@ function Dash({ stats, u = {}, goal, setGoal, factTienda, tnStore, modo = "venta
           <Kpi lab="FACTURACIÓN" val={short(stats.revenue)} cmp={dl(stats.revenue, c && c.revenue, short, false)} /><Kpi lab="INVERSIÓN" val={short(stats.spendTotal)} sub={platSplit(stats.spendByPlat)} cmp={dl(stats.spendTotal, c && c.spendTotal, short, null)} /><Kpi lab="ROAS CUENTA" val={stats.accountRoas.toFixed(1) + "x"} mod="grn" cmp={dl(stats.accountRoas, c && c.accountRoas, (x) => x.toFixed(1) + "x", false)} /><Kpi lab="CPA PROMEDIO" val={money(stats.cpaProm)} cmp={dl(stats.cpaProm, c && c.cpaProm, money, true)} /><Kpi lab="VENTAS" val={nf.format(stats.ventasTotal)} cmp={dl(stats.ventasTotal, c && c.ventasTotal, (x) => nf.format(Math.round(x)), false)} />
         </>)}
       </section>
+      {!msg && <TendenciaStrip t={tendencia} />}
       <section className="sect">
         <div className="secthead"><span className="sverb" style={{ background: "#1E1812", color: "#F4C24A" }}><span className="sq" style={{ background: "#F4C24A" }} />TOP</span><span className="stitle">TOP ADS DEL MES</span><span className="scount">{msg ? "por costo/conv · spend ≥ piso" : "por ROAS · spend ≥ piso"}</span></div>
         <div className="topgrid">
@@ -1686,6 +1710,49 @@ function Dash({ stats, u = {}, goal, setGoal, factTienda, tnStore, modo = "venta
     </>
   );
 }
+// TENDENCIA 4 SEMANAS (Dashboard): la película semana a semana. Cada celda se colorea contra la
+// semana ANTERIOR (verde mejora / rojo cae, umbral 5% para no pintar ruido); la última semana
+// está EN CURSO así que su caída aparente es normal. La inversión no se colorea (es neutra).
+function TendenciaStrip({ t }) {
+  if (!t || !Array.isArray(t.semanas) || !t.semanas.some((s) => s.inversion > 0)) return null;
+  const sem = t.semanas;
+  const fmtRango = (s) => s.desde.slice(5).replace("-", "/") + " → " + s.hasta.slice(5).replace("-", "/");
+  const cell = (cur, prev, fmt, colorear = true, invert = false) => {
+    if (cur == null) return <td className="mono num">—</td>;
+    let cls = "";
+    if (colorear && prev != null && prev !== 0) {
+      const d = (cur - prev) / Math.abs(prev);
+      if (Math.abs(d) >= 0.05) cls = (invert ? d < 0 : d > 0) ? " dup" : " ddown";
+    }
+    return <td className={"mono num" + cls}>{fmt(cur)}</td>;
+  };
+  const tieneFact = sem.some((s) => s.facturacion != null);
+  const tieneGa4 = sem.some((s) => s.sesiones != null);
+  return (
+    <section className="sect">
+      <div className="secthead"><span className="sverb" style={{ background: "#DCE9E1", color: "#2E8B6B" }}><span className="sq" style={{ background: "#2E8B6B" }} />TREND</span><span className="stitle">TENDENCIA 4 SEMANAS</span><span className="scount">semana a semana, últimos 28 días · verde mejora / rojo cae vs semana anterior</span></div>
+      <div className="tablewrap">
+        <table>
+          <thead><tr><Th label="Semana" align="left" /><Th label="Inversión" /><Th label="Ventas (pixel)" />{tieneFact && <><Th label="Facturación" /><Th label="MER" /></>}{tieneGa4 && <><Th label="Sesiones" /><Th label="CR sitio" /></>}</tr></thead>
+          <tbody>
+            {sem.map((s, i) => (
+              <tr key={s.desde}>
+                <td className="name">{fmtRango(s)}{i === sem.length - 1 ? <span className="fmt">en curso</span> : null}</td>
+                {cell(s.inversion, null, short, false)}
+                {cell(s.ventas_pixel, i ? sem[i - 1].ventas_pixel : null, (x) => nf.format(Math.round(x)))}
+                {tieneFact && cell(s.facturacion, i ? sem[i - 1].facturacion : null, short)}
+                {tieneFact && cell(s.mer, i ? sem[i - 1].mer : null, (x) => x.toFixed(2) + "x")}
+                {tieneGa4 && cell(s.sesiones, i ? sem[i - 1].sesiones : null, (x) => nf.format(Math.round(x)))}
+                {tieneGa4 && cell(s.cr, i ? sem[i - 1].cr : null, (x) => x + "%")}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
 function Kpi({ lab, val, mod, sub, cmp }) {
   // Línea de COMPARACIÓN: delta % contra el período comparado. invert=true → bajar es bueno
   // (CPA, costo/conv); invert=null → neutro (la inversión no es buena ni mala por sí sola).
@@ -1751,6 +1818,17 @@ function Ga4Band({ ga4 }) {
       <div className="tnnote">GA4 completa lo que ni Meta ni Google Ads ven: el tráfico y la venta de TODOS los canales, y el embudo del propio sitio. El cerebro recibe estos números para separar problema de PAUTA (no llega tráfico) de problema de SITIO (llega pero no convierte) y para descomponer la brecha MER vs ROAS pixel.</div>
     </section>
   );
+}
+
+// Share de compras PAGAS según GA4 (canales Paid * + Cross-network, que son las campañas pagas
+// de Google). Con esto el MER blended se descompone: MER × share = "MER de la pauta sola" — el
+// retorno más honesto de la plata invertida (con la limitación de que GA4 atribuye last-click).
+function shareComprasPagas(canales) {
+  const cs = canales || [];
+  const tot = cs.reduce((s, c) => s + (c.compras || 0), 0);
+  if (!tot) return null;
+  const pago = cs.filter((c) => /^paid|cross-network/i.test(c.canal)).reduce((s, c) => s + (c.compras || 0), 0);
+  return pago / tot;
 }
 
 // Delta % de la banda de Tienda Nube (módulo COMPARAR): misma lógica que los KPIs del Dash.
@@ -2474,6 +2552,8 @@ td{padding:11px 12px;vertical-align:middle;}.num{text-align:right;}.name{font-we
 .ddown{color:#C5362B;font-weight:700;}
 .dneu{color:#857A6A;font-weight:700;}
 .tndelta{margin-top:4px;}
+.tnmerpauta{color:#4CC392;margin-top:4px;}
+.tnmerpauta b{font-size:12px;}
 .ga4band{border-top-color:#A97FD1;}
 .ga4demo{margin-left:10px;background:#F4C24A;color:#1A1A17;font-size:9px;font-weight:700;letter-spacing:1px;padding:2px 7px;border-radius:4px;vertical-align:1px;}
 .ga4canales{min-width:280px;}

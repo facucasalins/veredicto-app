@@ -268,6 +268,9 @@ prod corre el último merge.
 
 ## Cómo trabajar
 
+- **CHANGELOG.md**: cada PR suma su entrada ("V 1.N — título" con bullets) ANTES de mergearse.
+  N = número del PR; es el mismo que la app muestra en el header.
+
 - **NO correr `npm run build` con el dev server (`npm run dev`) corriendo**: pisan el mismo `.next`
   y el browser rompe con "Cannot find module './XXX.js'". Si pasa: `pkill -f "next dev"; rm -rf .next;
   npm run dev`. Para verificar build, bajá el dev primero.
