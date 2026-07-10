@@ -8,8 +8,10 @@ Regla de la casa: cada PR suma su entrada acá ANTES de mergearse.
 - **ALERTAS PROACTIVAS**: cron diario de Vercel (11:00 UTC / 8am AR) que chequea todos los
   clientes y avisa cuando algo se rompe o degrada: cuenta de Meta con problema (pago pendiente/
   inhabilitada), inversión de ayer en $0 en cuenta que venía invirtiendo, ROAS 7d cayendo >30%
-  vs los 7 anteriores, CR del sitio (GA4) cayendo >30%. Centro de alertas in-app (banner rojo,
-  solo admin, con "chequear ahora") + email opcional vía Resend (`RESEND_API_KEY` +
+  vs los 7 anteriores, CR del sitio (GA4) cayendo >30%. Centro de alertas in-app (banner al pie
+  de la página, solo admin, con "chequear ahora"; muestra SOLO las alertas de la cuenta
+  seleccionada — las globales tipo token caído se ven siempre) + email opcional vía Resend
+  (`RESEND_API_KEY` +
   `ALERTAS_EMAIL`; canal enchufable — WhatsApp se puede sumar sobre la misma interfaz).
   Requiere `CRON_SECRET` en Vercel para el cron.
 - **MER TOTAL · PAUTA en la misma card**: los dos números juntos y grandes ("14.03x · 7.0x

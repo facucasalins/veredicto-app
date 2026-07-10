@@ -588,6 +588,11 @@ export default function App() {
   const isG = String(account || "").startsWith("g:");
   const soloGoogle = allIds.length > 0 && allIds.every((id) => platOf(id) === "google");
   const withVCreative = useMemo(() => withV.filter((r) => r.plat !== "google"), [withV]);
+  // Alertas de ESTA vista: matchean por cuenta de ads (id ∈ cuentas visibles) o por tienda/propiedad
+  // (store); las globales (sin id ni store, ej. token de Meta caído) se ven en cualquier cuenta.
+  const alertasCuenta = alertas && account
+    ? alertas.alertas.filter((a) => (!a.id && !a.store) || (a.id && allIds.includes(a.id)) || (a.store && a.store === tnStore))
+    : [];
 
   return (
     <div className="root">
@@ -698,30 +703,6 @@ export default function App() {
         </section>
       )}
 
-      {/* Centro de alertas (solo admin): el cron diario deja acá lo que se rompió o degradó */}
-      {(me === null || me?.admin) && alertas && (
-        <section className={"alertband" + (alertas.alertas.length ? " has" : "")}>
-          <div className="alerthead">
-            <button className="alerttoggle" onClick={() => setAlertasOpen(!alertasOpen)}>
-              {alertas.alertas.length ? `⚠ ${alertas.alertas.length} ALERTA${alertas.alertas.length !== 1 ? "S" : ""}` : "✓ SIN ALERTAS"}
-              <span className="alertwhen">{alertas.t ? " · chequeo " + new Date(alertas.t).toLocaleString("es-AR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : " · todavía sin chequeos"}</span>
-              {alertas.alertas.length ? <span className="alertcaret">{alertasOpen ? "▴" : "▾"}</span> : null}
-            </button>
-            <button className="alertrun" onClick={chequearAhora} disabled={alertasLoading}>{alertasLoading ? "chequeando…" : "↻ chequear ahora"}</button>
-          </div>
-          {alertasOpen && alertas.alertas.length > 0 && (
-            <ul className="alertlist">
-              {alertas.alertas.map((a, i) => (
-                <li key={i} className={a.nivel}>
-                  <b>{a.nivel === "critico" ? "🔴" : "🟡"} {a.titulo}</b> — {a.cuenta}
-                  <div className="alertdet">{a.detalle}</div>
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
-      )}
-
       {ga4 && <Ga4Band ga4={ga4} />}
 
       <div className="rolebar">
@@ -787,6 +768,30 @@ export default function App() {
           {effView === "chat" && (!account ? <EmptyState account={account} loading={loading} err={err} /> : <Chat account={account} accountName={(accounts.find((a) => a.id === account) || {}).name || ""} store={tnStore} tab={sheetTab} accCur={accCur} extras={extras} extrasCur={extras.map(curOf)} criterio={tnCount} />)}
           {effView === "usuarios" && <Usuarios accounts={accounts} sheetTabs={sheetTabs} tnStores={tnStores} />}
         </>
+      )}
+
+      {/* Centro de alertas (solo admin, abajo de todo): lo del cron diario, filtrado a la cuenta elegida */}
+      {(me === null || me?.admin) && alertas && account && (
+        <section className={"alertband" + (alertasCuenta.length ? " has" : "")}>
+          <div className="alerthead">
+            <button className="alerttoggle" onClick={() => setAlertasOpen(!alertasOpen)}>
+              {alertasCuenta.length ? `⚠ ${alertasCuenta.length} ALERTA${alertasCuenta.length !== 1 ? "S" : ""} EN ESTA CUENTA` : "✓ SIN ALERTAS EN ESTA CUENTA"}
+              <span className="alertwhen">{alertas.t ? " · chequeo " + new Date(alertas.t).toLocaleString("es-AR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : " · todavía sin chequeos"}</span>
+              {alertasCuenta.length ? <span className="alertcaret">{alertasOpen ? "▴" : "▾"}</span> : null}
+            </button>
+            <button className="alertrun" onClick={chequearAhora} disabled={alertasLoading}>{alertasLoading ? "chequeando…" : "↻ chequear ahora"}</button>
+          </div>
+          {alertasOpen && alertasCuenta.length > 0 && (
+            <ul className="alertlist">
+              {alertasCuenta.map((a, i) => (
+                <li key={i} className={a.nivel}>
+                  <b>{a.nivel === "critico" ? "🔴" : "🟡"} {a.titulo}</b> — {a.cuenta}
+                  <div className="alertdet">{a.detalle}</div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
       )}
     </div>
   );
@@ -2592,7 +2597,7 @@ td{padding:11px 12px;vertical-align:middle;}.num{text-align:right;}.name{font-we
 .tnmerpauta{color:#4CC392;margin-top:4px;}
 .tnvalpauta{color:#4CC392;font-size:20px;}
 .tnvalpauta small{font-size:11px;letter-spacing:1px;}
-.alertband{background:var(--paper2);border:2px solid var(--ink);border-radius:10px;padding:8px 14px;margin:12px 0 0;}
+.alertband{background:var(--paper2);border:2px solid var(--ink);border-radius:10px;padding:8px 14px;margin:22px 0 4px;}
 .alertband.has{border-color:#C5362B;}
 .alerthead{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;}
 .alerttoggle{font-family:'Archivo',sans-serif;font-weight:800;font-size:13px;letter-spacing:.05em;background:none;border:0;color:var(--ink);cursor:pointer;padding:0;}

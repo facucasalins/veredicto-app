@@ -257,8 +257,11 @@ pushear a `main` sin romper prod.
   y `GA4_DEMO=1` (modo demo con datos de muestra) — Google Analytics 4 (piloto).
 - `CRON_SECRET` (protege el cron diario de alertas), `RESEND_API_KEY` + `ALERTAS_EMAIL`
   (destinos separados por coma) + `ALERTAS_FROM` (opcional) — alertas proactivas
-  (`lib/alertas.js` + `/api/alertas` + cron en `vercel.json` 11:00 UTC). Sin Resend quedan solo
-  in-app; sin Upstash no se persisten (solo "chequear ahora" en vivo).
+  (`lib/alertas.js` + `/api/alertas` + cron en `vercel.json` 11:00 UTC). In-app: banner al PIE
+  de la página (solo admin), filtrado a la cuenta seleccionada — cada alerta lleva `id` (cuenta
+  de ads) y/o `store`; sin ambos es global (ej. token caído) y se ve en cualquier cuenta. El
+  MAIL sigue siendo el digest de TODOS los clientes. Sin Resend quedan solo in-app; sin Upstash
+  no se persisten (solo "chequear ahora" en vivo).
 - `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN` — historiales/conversaciones server-side
   (los inyecta sola la integración Upstash del Marketplace de Vercel; opcional, sin esto queda
   localStorage). Alias legacy soportados: `KV_REST_API_URL`/`KV_REST_API_TOKEN`.
