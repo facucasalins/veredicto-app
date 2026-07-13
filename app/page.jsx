@@ -1480,6 +1480,9 @@ function AnalisisOut({ out }) {
     <div className="anout">
       <div className="antop">{out.titular}</div>
       <div className="andiag">{out.diagnostico}</div>
+      {out.seguimiento && (
+        <div className="anblock"><div className="anbh">SEGUIMIENTO — QUÉ PASÓ DESDE LA LECTURA ANTERIOR</div><div className="anitem">⏱ {out.seguimiento}</div></div>
+      )}
       {Array.isArray(out.acciones) && out.acciones.length > 0 && (
         <div className="anblock"><div className="anbh">ACCIONES</div>
           {out.acciones.map((a, i) => (
@@ -1597,11 +1600,27 @@ function Analisis({ withV, stats, audiencias, tnSummary, ga4 = null, tendencia =
   const pedir = async () => {
     setLoading(true); setErr(""); setOut(null);
     try {
-      const res = await fetch("/api/analyze", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ snapshot }) });
+      // Foto compacta de las métricas de HOY: viaja junto con la lectura al historial para que la
+      // PRÓXIMA lectura pueda comparar "qué dije entonces y con qué números" vs cómo siguió la cuenta.
+      const foto = msg
+        ? { periodo, inversion: Math.round(snapshot.inversion || 0), conversaciones: snapshot.conversaciones, costo_conv: snapshot.costo_conv_prom }
+        : {
+            periodo, inversion: Math.round(snapshot.inversion || 0), ventas: snapshot.ventas, roas_pixel: snapshot.roas_cuenta, cpa: snapshot.cpa,
+            ...(snapshot.tienda ? { facturacion: Math.round(snapshot.tienda.facturacion || 0), mer: snapshot.tienda.mer } : {}),
+            ...(snapshot.trafico_sitio_ga4 && !snapshot.trafico_sitio_ga4.DEMO ? { cr_sitio_pct: snapshot.trafico_sitio_ga4.conversion_sitio_pct } : {}),
+          };
+      // Lecturas anteriores de ESTA cuenta y este modo (las que ya guardaron foto): el analista se
+      // autoevalúa — qué recomendó, qué pasó — en vez de arrancar de cero cada vez.
+      const previas = hist
+        .filter((h) => h.foto && h.out && (h.modo || "ventas") === modo)
+        .slice(0, 3)
+        .map((h) => ({ fecha: new Date(h.t).toISOString().slice(0, 10), dias_atras: Math.max(0, Math.round((Date.now() - h.t) / 86400000)), titular: h.out.titular, foto: h.foto, acciones_recomendadas: (h.out.acciones || []).map((a) => a.accion).slice(0, 5) }));
+      const snap = previas.length ? { ...snapshot, lecturas_anteriores: { nota: "tus lecturas previas de esta cuenta (la más nueva primero); los períodos pueden diferir del actual", lecturas: previas } } : snapshot;
+      const res = await fetch("/api/analyze", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ snapshot: snap }) });
       const data = await res.json();
       if (data.error) throw new Error(data.error);
       setOut(data.analysis);
-      saveHist([{ t: Date.now(), label: (accountName || "—") + " · " + periodo + " · " + modo, out: data.analysis }, ...hist].slice(0, 15));
+      saveHist([{ t: Date.now(), label: (accountName || "—") + " · " + periodo + " · " + modo, out: data.analysis, foto, modo }, ...hist].slice(0, 15));
     } catch (e) { setErr("No se pudo analizar: " + e.message); } finally { setLoading(false); }
   };
 

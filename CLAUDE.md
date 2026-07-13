@@ -229,7 +229,13 @@ pushear a `main` sin romper prod.
   diagnóstico + acciones priorizadas. On-demand (botón "Pedir lectura"), grounded, ~2-3¢ por lectura.
   El prompt es **multi-canal-aware** (igual que el Plan): el MER incluye Google/TikTok/orgánico, así
   que tiene prohibido acreditarle a Meta toda la brecha MER vs ROAS pixel o proyectar con el MER —
-  para juzgar Meta mandan el ROAS del pixel y las ventas atribuidas.
+  para juzgar Meta mandan el ROAS del pixel y las ventas atribuidas. **Memoria de lecturas**: cada
+  lectura se guarda en el historial con una `foto` compacta de métricas (inversión, ROAS pixel,
+  MER, facturación, CR sitio) + `modo`; la próxima lectura de esa cuenta manda las últimas 3 como
+  `lecturas_anteriores` y el prompt devuelve el campo extra `seguimiento` (autoevaluación: qué
+  recomendó, antes → ahora, acertó o no). Lo renderiza `AnalisisOut` como bloque SEGUIMIENTO.
+  Las tasas comparan mejor que los totales porque los períodos pueden diferir (la foto lleva su
+  `periodo`).
 - **Generador (`/api/copy`)**: hooks / guion / copy / ángulos desde la receta ganadora, con modo
   **Iterar** (escalar lo que funciona) o **Explorar** (salir de la caja). Sonnet 4.6.
 - **Biblioteca**: pestaña **★ Tus Ganadores** (hooks reales del cliente top por ROAS, data pura) y
@@ -311,7 +317,6 @@ prod corre el último merge.
   revenue GA4 $107,3M vs $113,7M pagadas TN (−5,6%) → totales muy confiables. CAVEAT morashop.ar:
   46% de las compras caen en canal "Unassigned" (purchase sin sesión atribuida) → ahí el MIX por
   canal es débil hasta arreglar el tagging; los totales sirven igual.
-- **Snapshots históricos**: para que el cerebro razone sobre tendencia.
 - **Refresh del token de Meta**: regenerarlo como **"Sin vencimiento"** en Meta Business → Usuarios
   del sistema (evita el bajón de los ~60 días).
 - Sumar más tiendas/usuarios a medida que entren clientes. Eventual: hashear passwords.

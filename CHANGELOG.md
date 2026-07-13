@@ -5,6 +5,11 @@ app muestra en el header ("V 1.N ▮▮▮"), así se confirma de un vistazo qu�
 Regla de la casa: cada PR suma su entrada acá ANTES de mergearse.
 
 ## V 1.23 — Motor de decisión: GA4 en el chat, MER pauta, Tendencia 4 semanas y ALERTAS
+- **El cerebro se acuerda de sus lecturas y se autoevalúa**: cada lectura guarda una "foto" de las
+  métricas del momento (inversión, ROAS pixel, MER, facturación, CR del sitio) junto con lo que
+  recomendó; la próxima lectura de esa cuenta recibe las últimas 3 y devuelve un bloque
+  **SEGUIMIENTO** — qué recomendó la vez pasada, cómo se movieron los números desde entonces
+  (antes → ahora) y si acertó o se equivocó, para corregir el rumbo antes de recomendar de nuevo.
 - **ALERTAS PROACTIVAS**: cron diario de Vercel (11:00 UTC / 8am AR) que chequea todos los
   clientes y avisa cuando algo se rompe o degrada: cuenta de Meta con problema (pago pendiente/
   inhabilitada), inversión de ayer en $0 en cuenta que venía invirtiendo, ROAS 7d cayendo >30%
