@@ -229,7 +229,13 @@ pushear a `main` sin romper prod.
   diagnóstico + acciones priorizadas. On-demand (botón "Pedir lectura"), grounded, ~2-3¢ por lectura.
   El prompt es **multi-canal-aware** (igual que el Plan): el MER incluye Google/TikTok/orgánico, así
   que tiene prohibido acreditarle a Meta toda la brecha MER vs ROAS pixel o proyectar con el MER —
-  para juzgar Meta mandan el ROAS del pixel y las ventas atribuidas.
+  para juzgar Meta mandan el ROAS del pixel y las ventas atribuidas. **Memoria de lecturas**: cada
+  lectura se guarda en el historial con una `foto` compacta de métricas (inversión, ROAS pixel,
+  MER, facturación, CR sitio) + `modo`; la próxima lectura de esa cuenta manda las últimas 3 como
+  `lecturas_anteriores` y el prompt devuelve el campo extra `seguimiento` (autoevaluación: qué
+  recomendó, antes → ahora, acertó o no). Lo renderiza `AnalisisOut` como bloque SEGUIMIENTO.
+  Las tasas comparan mejor que los totales porque los períodos pueden diferir (la foto lleva su
+  `periodo`).
 - **Generador (`/api/copy`)**: hooks / guion / copy / ángulos desde la receta ganadora, con modo
   **Iterar** (escalar lo que funciona) o **Explorar** (salir de la caja). Sonnet 4.6.
 - **Biblioteca**: pestaña **★ Tus Ganadores** (hooks reales del cliente top por ROAS, data pura) y
@@ -255,6 +261,13 @@ pushear a `main` sin romper prod.
 - `GA4_PROPERTIES` (JSON `[{name, property_id, account?, store?}]`), `GOOGLE_OAUTH_REFRESH_TOKEN`
   (refresh token con scopes adwords + analytics.readonly; si falta usa GOOGLE_ADS_REFRESH_TOKEN)
   y `GA4_DEMO=1` (modo demo con datos de muestra) — Google Analytics 4 (piloto).
+- `CRON_SECRET` (protege el cron diario de alertas), `RESEND_API_KEY` + `ALERTAS_EMAIL`
+  (destinos separados por coma) + `ALERTAS_FROM` (opcional) — alertas proactivas
+  (`lib/alertas.js` + `/api/alertas` + cron en `vercel.json` 11:00 UTC). In-app: banner al PIE
+  de la página (solo admin), filtrado a la cuenta seleccionada — cada alerta lleva `id` (cuenta
+  de ads) y/o `store`; sin ambos es global (ej. token caído) y se ve en cualquier cuenta. El
+  MAIL sigue siendo el digest de TODOS los clientes. Sin Resend quedan solo in-app; sin Upstash
+  no se persisten (solo "chequear ahora" en vivo).
 - `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN` — historiales/conversaciones server-side
   (los inyecta sola la integración Upstash del Marketplace de Vercel; opcional, sin esto queda
   localStorage). Alias legacy soportados: `KV_REST_API_URL`/`KV_REST_API_TOKEN`.
@@ -267,6 +280,9 @@ bumpea a mano). Local/branch muestra el SHA corto o "dev". Sirve para confirmar 
 prod corre el último merge.
 
 ## Cómo trabajar
+
+- **CHANGELOG.md**: cada PR suma su entrada ("V 1.N — título" con bullets) ANTES de mergearse.
+  N = número del PR; es el mismo que la app muestra en el header.
 
 - **NO correr `npm run build` con el dev server (`npm run dev`) corriendo**: pisan el mismo `.next`
   y el browser rompe con "Cannot find module './XXX.js'". Si pasa: `pkill -f "next dev"; rm -rf .next;
@@ -301,7 +317,6 @@ prod corre el último merge.
   revenue GA4 $107,3M vs $113,7M pagadas TN (−5,6%) → totales muy confiables. CAVEAT morashop.ar:
   46% de las compras caen en canal "Unassigned" (purchase sin sesión atribuida) → ahí el MIX por
   canal es débil hasta arreglar el tagging; los totales sirven igual.
-- **Snapshots históricos**: para que el cerebro razone sobre tendencia.
 - **Refresh del token de Meta**: regenerarlo como **"Sin vencimiento"** en Meta Business → Usuarios
   del sistema (evita el bajón de los ~60 días).
 - Sumar más tiendas/usuarios a medida que entren clientes. Eventual: hashear passwords.
