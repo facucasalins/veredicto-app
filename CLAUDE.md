@@ -160,7 +160,9 @@ pushear a `main` sin romper prod.
   **"➕ combinar cuenta…"** que suma cuentas extra a la vista (chips con ✕ para sacarlas; quedan
   recordadas por cuenta principal en localStorage `nusa_extras_<account>`). El front fetchea
   `/api/ads` POR CUENTA en paralelo y mergea client-side: cada fila queda tagueada con `plat`
-  (meta|google|tiktok → badge M/G/TT en Panel y Top cards cuando hay mezcla) y `_acc` (la cuenta,
+  (meta|google|tiktok → badge M/G/TT en Panel y Top cards cuando hay mezcla; el TOP ADS DEL MES
+  suma botones TODAS/META/GOOGLE/TIKTOK a la derecha del header que re-cortan el top 6 sobre el
+  ranking completo `stats.topPool` — sin eso, filtrar los 6 ya elegidos dejaría 1 card) y `_acc` (la cuenta,
   para convertir moneda POR CUENTA — una vista puede mezclar Meta en USD con Google en ARS). La
   inversión se muestra con desglose por plataforma (KPIs del Dash/Panel y banda de Tienda Nube), y
   el **MER pasa a ser multi-canal de verdad** (facturación ÷ suma de TODAS las plataformas
