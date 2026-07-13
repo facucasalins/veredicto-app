@@ -4,6 +4,16 @@ Registro de cambios por versión. **V 1.N = número del PR mergeado** — es el 
 app muestra en el header ("V 1.N ▮▮▮"), así se confirma de un vistazo qué versión corre en prod.
 Regla de la casa: cada PR suma su entrada acá ANTES de mergearse.
 
+## V 1.24 — La banda de Google Analytics también compara + filtro de plataforma en Top Ads
+- Con el checkbox ⇄ COMPARAR activo, la banda de GA4 muestra deltas vs el período comparado en
+  sesiones, compras del embudo, conversión del sitio y % de compras pagas (verde = mejora,
+  rojo = empeora; el % pagas es neutro), más el rango comparado en el encabezado.
+- **Filtro de plataforma en TOP ADS DEL MES** (solo vista combinada): botones TODAS / META /
+  GOOGLE / TIKTOK arriba a la derecha de la sección. En una vista Meta+Google el ranking por
+  ROAS suele quedar dominado por una plataforma; el filtro re-corta el top 6 sobre el ranking
+  completo, así "META" muestra los 6 mejores de Meta (no 1 sobreviviente). En cuentas de una
+  sola plataforma no aparece nada.
+
 ## V 1.23 — Motor de decisión: GA4 en el chat, MER pauta, Tendencia 4 semanas y ALERTAS
 - **El cerebro se acuerda de sus lecturas y se autoevalúa**: cada lectura guarda una "foto" de las
   métricas del momento (inversión, ROAS pixel, MER, facturación, CR del sitio) junto con lo que

@@ -160,7 +160,9 @@ pushear a `main` sin romper prod.
   **"➕ combinar cuenta…"** que suma cuentas extra a la vista (chips con ✕ para sacarlas; quedan
   recordadas por cuenta principal en localStorage `nusa_extras_<account>`). El front fetchea
   `/api/ads` POR CUENTA en paralelo y mergea client-side: cada fila queda tagueada con `plat`
-  (meta|google|tiktok → badge M/G/TT en Panel y Top cards cuando hay mezcla) y `_acc` (la cuenta,
+  (meta|google|tiktok → badge M/G/TT en Panel y Top cards cuando hay mezcla; el TOP ADS DEL MES
+  suma botones TODAS/META/GOOGLE/TIKTOK a la derecha del header que re-cortan el top 6 sobre el
+  ranking completo `stats.topPool` — sin eso, filtrar los 6 ya elegidos dejaría 1 card) y `_acc` (la cuenta,
   para convertir moneda POR CUENTA — una vista puede mezclar Meta en USD con Google en ARS). La
   inversión se muestra con desglose por plataforma (KPIs del Dash/Panel y banda de Tienda Nube), y
   el **MER pasa a ser multi-canal de verdad** (facturación ÷ suma de TODAS las plataformas
@@ -175,9 +177,11 @@ pushear a `main` sin romper prod.
   aparece ahí mismo el selector del segundo rango (default **"período anterior equivalente"**:
   misma cantidad de días, ventana inmediatamente anterior — calculado client-side con
   `presetToRange` importado de `lib/dates.js`, que es puro; también presets y fechas custom) y se
-  comparan DOS lugares: los **KPIs del Dashboard** (delta % por KPI) y la **banda de Tienda Nube**
+  comparan TRES lugares: los **KPIs del Dashboard** (delta % por KPI), la **banda de Tienda Nube**
   (facturación, inversión, MER, CAC y margen de contribución — `tnSummaryCmp`/`tnDetailCmp`, dos
-  fetches extra de summary/daily con el rango comparado). Colores: verde = mejora, rojo = empeora;
+  fetches extra de summary/daily con el rango comparado) y la **banda de GOOGLE ANALYTICS**
+  (sesiones, compras, CR del sitio y % compras pagas — `ga4Cmp`, un fetch extra de `/api/ga4`
+  con since/until del rango comparado). Colores: verde = mejora, rojo = empeora;
   **invertido** para CPA/costo por conv/CAC donde bajar es bueno; inversión neutra/gris. Respeta
   la vista combinada (compara la SUMA de las cuentas visibles, con conversión de moneda por
   cuenta) y el modo mensajes. El fetch de ads de comparación va aparte (`dataCmp`/`statsCmp` en
