@@ -5,6 +5,10 @@ app muestra en el header ("V 1.N ▮▮▮"), así se confirma de un vistazo qu�
 Regla de la casa: cada PR suma su entrada acá ANTES de mergearse.
 
 ## V 1.23 — Motor de decisión: GA4 en el chat, MER pauta, Tendencia 4 semanas y ALERTAS
+- **La banda de GOOGLE ANALYTICS también compara**: con el checkbox ⇄ COMPARAR activo muestra
+  deltas vs el período comparado en sesiones, compras del embudo, conversión del sitio y % de
+  compras pagas (verde = mejora, rojo = empeora; el % pagas es neutro), más el rango comparado
+  en el encabezado.
 - **El cerebro se acuerda de sus lecturas y se autoevalúa**: cada lectura guarda una "foto" de las
   métricas del momento (inversión, ROAS pixel, MER, facturación, CR del sitio) junto con lo que
   recomendó; la próxima lectura de esa cuenta recibe las últimas 3 y devuelve un bloque

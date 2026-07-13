@@ -489,6 +489,19 @@ export default function App() {
     return () => { cancelled = true; };
   }, [tnStore, accountsQS, cursQS, tnCount, cmpOn, cmpRange ? cmpRange.since + cmpRange.until : ""]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // GA4 del período COMPARADO (checkbox ⇄): mismos números para el segundo rango → deltas en la banda.
+  const [ga4Cmp, setGa4Cmp] = useState(null);
+  useEffect(() => {
+    if (!cmpOn || !cmpRange) { setGa4Cmp(null); return; }
+    let cancelled = false;
+    setGa4Cmp(null);
+    fetch("/api/ga4?account=" + account + (tnStore ? "&store=" + encodeURIComponent(tnStore) : "") + "&since=" + cmpRange.since + "&until=" + cmpRange.until)
+      .then((r) => r.json())
+      .then((j) => { if (!cancelled) setGa4Cmp(j && !j.off && !j.error ? j : null); })
+      .catch(() => { if (!cancelled) setGa4Cmp(null); });
+    return () => { cancelled = true; };
+  }, [account, tnStore, cmpOn, cmpRange ? cmpRange.since + cmpRange.until : ""]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Umbral EFECTIVO: un umbral vacío (null) deja de ser condición. roasMin→0 (sin mínimo),
   // cpaMax→∞ (sin tope), pisoSpend→0 (sin piso). Así filtrás solo por los que cargaste.
   const ueff = useMemo(() => ({
@@ -703,7 +716,7 @@ export default function App() {
         </section>
       )}
 
-      {ga4 && <Ga4Band ga4={ga4} />}
+      {ga4 && <Ga4Band ga4={ga4} cmp={cmpOn ? ga4Cmp : null} />}
 
       <div className="rolebar">
         <span className="rlabel">▶ VISTA</span>
@@ -1838,32 +1851,36 @@ function Kpi({ lab, val, mod, sub, cmp }) {
 // Banda de GA4 (piloto): el embudo del SITIO que ninguna plataforma de ads ve — sesiones de
 // todos los canales, sesión→carrito→compra y de qué canal viene la venta. Con esto la brecha
 // MER vs ROAS pixel se puede descomponer (orgánico vs pago) en vez de quedar como incógnita.
-function Ga4Band({ ga4 }) {
+function Ga4Band({ ga4, cmp = null }) {
   const r = ga4.resumen || {};
   const canales = ga4.canales || [];
   const totalSes = canales.reduce((s, c) => s + c.sesiones, 0);
   const maxCompras = Math.max(1, ...canales.map((c) => c.compras));
+  const p = cmp && cmp.resumen ? cmp.resumen : null; // período comparado (checkbox ⇄)
   return (
     <section className="tnband ga4band">
       <div className="tnband-head">
         <span className="tntag">📈 GOOGLE ANALYTICS · {ga4.propiedad}{ga4.demo ? <span className="ga4demo">MODO DEMO — datos de muestra</span> : null}</span>
-        <span className="tnrange">{ga4.since} → {ga4.until}</span>
+        <span className="tnrange">{ga4.since} → {ga4.until}{cmp ? " · vs " + cmp.since + " → " + cmp.until : ""}</span>
       </div>
       <div className="tnstats">
         <div className="tnstat" title="Sesiones del sitio de TODOS los canales (orgánico, directo, email, pago) — lo que el pixel de una sola plataforma no ve.">
           <div className="tnlab">SESIONES DEL SITIO</div>
           <div className="tnval">{nf.format(r.sesiones || 0)}</div>
           <div className="tnsub">{nf.format(r.usuarios || 0)} usuarios · todos los canales</div>
+          {p && <TnDelta cur={r.sesiones || 0} prev={p.sesiones} fmt={nf.format} />}
         </div>
         <div className="tnstat" title="El embudo COMPLETO del sitio: cuántas sesiones agregan al carrito, llegan al checkout y compran.">
           <div className="tnlab">EMBUDO DEL SITIO</div>
           <div className="tnval">{nf.format(r.carritos || 0)} <small>→</small> {nf.format(r.checkouts || 0)} <small>→</small> {nf.format(r.compras || 0)}</div>
           <div className="tnsub">carrito ({r.tasa_carrito || 0}% de sesiones) → checkout → compra</div>
+          {p && <TnDelta cur={r.compras || 0} prev={p.compras} fmt={(x) => nf.format(x) + " compras"} />}
         </div>
         <div className="tnstat tnmer" title="Compras / sesiones. La palanca que las plataformas de ads no muestran: si baja, el problema es el SITIO, no la pauta.">
           <div className="tnlab">CONVERSIÓN DEL SITIO</div>
           <div className="tnval">{r.cr || 0}%</div>
           <div className="tnsub">ticket GA4 {money(r.ticket || 0)}</div>
+          {p && <TnDelta cur={r.cr || 0} prev={p.cr} fmt={(x) => (+x).toFixed(2) + "%"} />}
         </div>
         <div className="tnstat ga4canales" title="De qué canal vienen las compras según GA4. Esto descompone la brecha MER vs ROAS pixel: cuánto es orgánico/directo/email y cuánto pago.">
           <div className="tnlab">DE DÓNDE VIENE LA VENTA</div>
@@ -1874,6 +1891,7 @@ function Ga4Band({ ga4 }) {
               <span className="ga4cmeta mono">{nf.format(c.compras)} compras · {totalSes ? Math.round((c.sesiones / totalSes) * 100) : 0}% ses.</span>
             </div>
           ))}
+          {cmp && (() => { const shC = shareComprasPagas(canales), shP = shareComprasPagas(cmp.canales); return shC != null && shP != null ? <TnDelta cur={shC * 100} prev={shP * 100} fmt={(x) => Math.round(x) + "% pagas"} invert={null} /> : null; })()}
         </div>
       </div>
       <div className="tnnote">GA4 completa lo que ni Meta ni Google Ads ven: el tráfico y la venta de TODOS los canales, y el embudo del propio sitio. El cerebro recibe estos números para separar problema de PAUTA (no llega tráfico) de problema de SITIO (llega pero no convierte) y para descomponer la brecha MER vs ROAS pixel.</div>

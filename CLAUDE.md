@@ -175,9 +175,11 @@ pushear a `main` sin romper prod.
   aparece ahí mismo el selector del segundo rango (default **"período anterior equivalente"**:
   misma cantidad de días, ventana inmediatamente anterior — calculado client-side con
   `presetToRange` importado de `lib/dates.js`, que es puro; también presets y fechas custom) y se
-  comparan DOS lugares: los **KPIs del Dashboard** (delta % por KPI) y la **banda de Tienda Nube**
+  comparan TRES lugares: los **KPIs del Dashboard** (delta % por KPI), la **banda de Tienda Nube**
   (facturación, inversión, MER, CAC y margen de contribución — `tnSummaryCmp`/`tnDetailCmp`, dos
-  fetches extra de summary/daily con el rango comparado). Colores: verde = mejora, rojo = empeora;
+  fetches extra de summary/daily con el rango comparado) y la **banda de GOOGLE ANALYTICS**
+  (sesiones, compras, CR del sitio y % compras pagas — `ga4Cmp`, un fetch extra de `/api/ga4`
+  con since/until del rango comparado). Colores: verde = mejora, rojo = empeora;
   **invertido** para CPA/costo por conv/CAC donde bajar es bueno; inversión neutra/gris. Respeta
   la vista combinada (compara la SUMA de las cuentas visibles, con conversión de moneda por
   cuenta) y el modo mensajes. El fetch de ads de comparación va aparte (`dataCmp`/`statsCmp` en
