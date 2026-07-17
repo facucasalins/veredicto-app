@@ -4,6 +4,17 @@ Registro de cambios por versión. **V 1.N = número del PR mergeado** — es el 
 app muestra en el header ("V 1.N ▮▮▮"), así se confirma de un vistazo qué versión corre en prod.
 Regla de la casa: cada PR suma su entrada acá ANTES de mergearse.
 
+## V 1.25 — Inversión manual de TikTok en la banda de Tienda Nube
+- Mientras no haya acceso a la API de TikTok, botón **🎵 TIKTOK** en la cabecera de la banda:
+  se carga a mano lo invertido en el período (en USD) y se convierte al **dólar oficial de hoy**
+  (mismo `/api/fx` de siempre, promedio compra/venta). El monto convertido se SUMA a las cuatro
+  métricas de la banda — inversión (la etiqueta pasa a "ADS" y el desglose muestra "TT $X manual"),
+  MER, CAC y margen de contribución — solo del período actual (en COMPARAR, el período comparado
+  no lo lleva porque no lo sabemos). Nota al pie con la cuenta completa (USD × cotización = $).
+- No toca NADA más: ni APIs, ni panel, ni cerebro/Plan/chat. El monto y el estado del botón quedan
+  guardados por tienda en el browser (localStorage, igual que el margen bruto). Si algún día se
+  conecta una cuenta tt: real, el botón se esconde solo para no contar la inversión dos veces.
+
 ## V 1.24 — La banda de Google Analytics también compara + filtro de plataforma en Top Ads
 - Con el checkbox ⇄ COMPARAR activo, la banda de GA4 muestra deltas vs el período comparado en
   sesiones, compras del embudo, conversión del sitio y % de compras pagas (verde = mejora,
