@@ -4,6 +4,12 @@ Registro de cambios por versión. **V 1.N = número del PR mergeado** — es el 
 app muestra en el header ("V 1.N ▮▮▮"), así se confirma de un vistazo qué versión corre en prod.
 Regla de la casa: cada PR suma su entrada acá ANTES de mergearse.
 
+## V 1.27 — PREGUNTAR: respuestas largas sin cortar
+- El chat quedaba a mitad de frase en respuestas largas: la llamada a Claude estaba capada en
+  `max_tokens: 2000`. Ahora 8000 (sin costo extra en respuestas normales — se paga por token
+  usado, no por el tope) y, si igual llegara al límite, avisa "…me quedé sin espacio, decime
+  seguí" en vez de cortar en silencio.
+
 ## V 1.24 — La banda de Google Analytics también compara + filtro de plataforma en Top Ads
 - Con el checkbox ⇄ COMPARAR activo, la banda de GA4 muestra deltas vs el período comparado en
   sesiones, compras del embudo, conversión del sitio y % de compras pagas (verde = mejora,
