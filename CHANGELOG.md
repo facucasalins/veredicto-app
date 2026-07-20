@@ -4,6 +4,13 @@ Registro de cambios por versión. **V 1.N = número del PR mergeado** — es el 
 app muestra en el header ("V 1.N ▮▮▮"), así se confirma de un vistazo qué versión corre en prod.
 Regla de la casa: cada PR suma su entrada acá ANTES de mergearse.
 
+## V 1.25 — Toggle DPA en Top Ads
+- **Checkbox "DPA" en TOP ADS DEL MES**: a la derecha del header (aparece en cualquier vista —
+  combinada o cuenta sola — si hay catálogos de Meta con spend ≥ piso). Destildado saca los DPA
+  del ranking y re-corta el top 6, para ver limpio qué rinde fuera del catálogo. Solo aplica a
+  los catálogos de Meta — en Google el equivalente (PMax/Shopping) se filtra con los botones
+  de plataforma.
+
 ## V 1.24 — La banda de Google Analytics también compara + filtro de plataforma en Top Ads
 - Con el checkbox ⇄ COMPARAR activo, la banda de GA4 muestra deltas vs el período comparado en
   sesiones, compras del embudo, conversión del sitio y % de compras pagas (verde = mejora,
