@@ -1772,7 +1772,15 @@ function Dash({ stats, u = {}, goal, setGoal, factTienda, tnStore, modo = "venta
   const multiPlat = plats.length > 1;
   const platSel = multiPlat && plats.includes(topPlat) ? topPlat : "todas";
   const pool = stats.topPool || stats.topAds;
-  const topAds = (platSel === "todas" ? pool : pool.filter((r) => (r.plat || "meta") === platSel)).slice(0, 6);
+  const platPool = platSel === "todas" ? pool : pool.filter((r) => (r.plat || "meta") === platSel);
+  // Toggle DPA: destildado saca los catálogos de Meta (fmt "DPA") del ranking, para ver limpio
+  // qué rinde fuera del catálogo. Aparece en cualquier vista si el recorte actual tiene algún
+  // DPA con spend ≥ piso; solo aplica a Meta (en Google el catálogo es PMax/Shopping y se
+  // filtra con los botones de plataforma).
+  const [conDpa, setConDpa] = useState(true);
+  const esDpa = (r) => (r.plat || "meta") === "meta" && r.fmt === "DPA";
+  const hayDpa = platPool.some(esDpa);
+  const topAds = (conDpa ? platPool : platPool.filter((r) => !esDpa(r))).slice(0, 6);
   // COMPARAR (checkbox del header): c = KPIs del período comparado (null si está apagado o
   // cargando). dl arma el prop de delta de cada Kpi: invert=true cuando BAJAR es bueno
   // (CPA, costo/conv); null = neutro.
@@ -1818,8 +1826,11 @@ function Dash({ stats, u = {}, goal, setGoal, factTienda, tnStore, modo = "venta
               {plats.map((p) => <button key={p} className={"modotgl psel" + (platSel === p ? " on" : "")} onClick={() => setTopPlat(p)}>{p === "google" ? "GOOGLE" : p === "tiktok" ? "TIKTOK" : "META"}</button>)}
             </span>
           )}
+          {hayDpa && (
+            <label className="dpachk" title="Destildá para sacar los catálogos (DPA) del ranking"><input type="checkbox" checked={conDpa} onChange={(e) => setConDpa(e.target.checked)} />DPA</label>
+          )}
         </div>
-        {topAds.length === 0 && <div className="dedup">Sin anuncios de esta plataforma con spend ≥ piso en el período.</div>}
+        {topAds.length === 0 && <div className="dedup">Sin anuncios con spend ≥ piso para este filtro en el período.</div>}
         <div className="topgrid">
           {topAds.map((r, i) => { const b = BUCKETS[r.v]; const bd = r.breakdown || []; const exp = bd.length > 0; const isOpen = openCard === r.id; return (
             <div className={"topcard" + (exp ? " clickable" : "") + (isOpen ? " open" : "")} key={r.id} style={{ "--bar": b.color }} onClick={exp ? () => setOpenCard(isOpen ? null : r.id) : undefined}>
@@ -2547,6 +2558,8 @@ const CSS = `
 .scount{margin-left:auto;color:var(--soft);font-size:13px;font-family:'Space Mono',monospace;}
 .platsel{display:flex;gap:6px;flex-shrink:0;}
 .modotgl.psel{font-size:10px;padding:3px 9px;letter-spacing:0.5px;}
+.dpachk{display:inline-flex;align-items:center;gap:5px;font-family:'Space Mono',monospace;font-size:10px;font-weight:700;letter-spacing:0.5px;color:var(--ink);background:var(--paper2);border:2px solid var(--ink);border-radius:6px;padding:2px 8px;cursor:pointer;user-select:none;flex-shrink:0;}
+.dpachk input{accent-color:var(--ink);cursor:pointer;margin:0;}
 .items{display:flex;flex-direction:column;gap:9px;}
 .item{display:flex;align-items:center;gap:14px;background:var(--paper2);border:2px solid var(--ink);border-left:7px solid var(--bar);border-radius:9px;padding:12px 15px;box-shadow:3px 3px 0 var(--ink);transition:opacity .15s,transform .08s,box-shadow .08s;}
 .item:hover{transform:translate(-1px,-1px);box-shadow:4px 4px 0 var(--ink);}
