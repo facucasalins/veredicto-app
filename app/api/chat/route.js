@@ -311,14 +311,16 @@ REGLAS:
       const r = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01" },
-        body: JSON.stringify({ model: process.env.ANTHROPIC_MODEL || "claude-sonnet-4-6", max_tokens: 2000, system, tools: toolDefs, messages: apiMessages }),
+        body: JSON.stringify({ model: process.env.ANTHROPIC_MODEL || "claude-sonnet-4-6", max_tokens: 8000, system, tools: toolDefs, messages: apiMessages }),
       });
       const data = await r.json();
       if (data.error) return Response.json({ error: data.error.message || "Error de Claude" }, { status: 500 });
 
       const toolUses = (data.content || []).filter((b) => b.type === "tool_use");
       if (data.stop_reason !== "tool_use" || !toolUses.length) {
-        const text = (data.content || []).filter((b) => b.type === "text").map((b) => b.text).join("\n").trim();
+        let text = (data.content || []).filter((b) => b.type === "text").map((b) => b.text).join("\n").trim();
+        // Si igual llegó al tope de tokens, avisar en vez de cortar en silencio a mitad de frase.
+        if (data.stop_reason === "max_tokens" && text) text += "\n\n_…me quedé sin espacio. Decime \"seguí\" y continúo desde acá._";
         return Response.json({ text: text || "No pude armar una respuesta con los datos disponibles." });
       }
       apiMessages.push({ role: "assistant", content: data.content });
