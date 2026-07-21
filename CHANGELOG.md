@@ -10,6 +10,26 @@ Regla de la casa: cada PR suma su entrada acá ANTES de mergearse.
   usado, no por el tope) y, si igual llegara al límite, avisa "…me quedé sin espacio, decime
   seguí" en vez de cortar en silencio.
 
+## V 1.26 — Toggle DPA en Top Ads
+- **Checkbox "DPA" en TOP ADS DEL MES**: a la derecha del header (aparece en cualquier vista —
+  combinada o cuenta sola — si hay catálogos de Meta con spend ≥ piso). Destildado saca los DPA
+  del ranking y re-corta el top 6, para ver limpio qué rinde fuera del catálogo. Solo aplica a
+  los catálogos de Meta — en Google el equivalente (PMax/Shopping) se filtra con los botones
+  de plataforma.
+
+## V 1.25 — Inversión manual de TikTok (por período) sumada a la banda de Tienda Nube
+- Mientras no haya acceso a la API de TikTok, botón **🎵 TIKTOK** en el header, a la derecha del
+  selector de período: se carga a mano lo invertido en ese período (en USD) y se convierte al
+  **dólar oficial de hoy** (mismo `/api/fx` de siempre, promedio compra/venta). Con ⇄ COMPARAR
+  activo aparece un segundo campo en la fila del período comparado, así cada período lleva SU
+  monto y los deltas de la banda comparan justo.
+- El monto convertido se SUMA a las cuatro métricas de la banda — inversión (la etiqueta pasa a
+  "ADS" y el desglose muestra "TT $X manual"), MER, CAC y margen de contribución — y a sus deltas.
+  Nota al pie con la cuenta completa (USD × cotización = $ por período).
+- No toca NADA más: ni APIs, ni panel, ni cerebro/Plan/chat. Los montos y el estado del botón
+  quedan guardados por tienda en el browser (localStorage, igual que el margen bruto). Si algún
+  día se conecta una cuenta tt: real, el botón se esconde solo para no contar la inversión dos veces.
+
 ## V 1.24 — La banda de Google Analytics también compara + filtro de plataforma en Top Ads
 - Con el checkbox ⇄ COMPARAR activo, la banda de GA4 muestra deltas vs el período comparado en
   sesiones, compras del embudo, conversión del sitio y % de compras pagas (verde = mejora,

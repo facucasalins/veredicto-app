@@ -162,7 +162,9 @@ pushear a `main` sin romper prod.
   `/api/ads` POR CUENTA en paralelo y mergea client-side: cada fila queda tagueada con `plat`
   (meta|google|tiktok → badge M/G/TT en Panel y Top cards cuando hay mezcla; el TOP ADS DEL MES
   suma botones TODAS/META/GOOGLE/TIKTOK a la derecha del header que re-cortan el top 6 sobre el
-  ranking completo `stats.topPool` — sin eso, filtrar los 6 ya elegidos dejaría 1 card) y `_acc` (la cuenta,
+  ranking completo `stats.topPool` — sin eso, filtrar los 6 ya elegidos dejaría 1 card; al lado
+  hay un checkbox **DPA** que destildado saca los catálogos de Meta (`fmt:"DPA"`) del ranking —
+  aparece en CUALQUIER vista, también cuenta sola, si hay DPAs con spend ≥ piso) y `_acc` (la cuenta,
   para convertir moneda POR CUENTA — una vista puede mezclar Meta en USD con Google en ARS). La
   inversión se muestra con desglose por plataforma (KPIs del Dash/Panel y banda de Tienda Nube), y
   el **MER pasa a ser multi-canal de verdad** (facturación ÷ suma de TODAS las plataformas
