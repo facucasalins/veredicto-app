@@ -407,6 +407,21 @@ export default function App() {
   const [margen, setMargen] = useState("");
   useEffect(() => { if (!tnStore) return; try { setMargen(localStorage.getItem("nusa_margen_" + tnStore) || ""); } catch {} }, [tnStore]);
   const setMargenP = (v) => { setMargen(v); try { localStorage.setItem("nusa_margen_" + tnStore, v); } catch {} };
+  // Inversión MANUAL de TikTok (USD) mientras no haya acceso a su API: se carga a mano por tienda,
+  // se convierte al dólar oficial de hoy y se SUMA solo a la banda (inversión, MER, CAC, margen).
+  // Si algún día se conecta una cuenta tt: real, el botón se esconde para no contar doble.
+  const [ttUsd, setTtUsd] = useState("");
+  const [ttUsdCmp, setTtUsdCmp] = useState(""); // ídem para el período COMPARADO (así los deltas comparan justo)
+  const [ttOn, setTtOn] = useState(false);
+  useEffect(() => { if (!tnStore) return; try { setTtUsd(localStorage.getItem("nusa_tt_usd_" + tnStore) || ""); setTtUsdCmp(localStorage.getItem("nusa_tt_usd_cmp_" + tnStore) || ""); setTtOn(localStorage.getItem("nusa_tt_on_" + tnStore) === "1"); } catch {} }, [tnStore]);
+  const setTtUsdP = (v) => { setTtUsd(v); try { localStorage.setItem("nusa_tt_usd_" + tnStore, v); } catch {} };
+  const setTtUsdCmpP = (v) => { setTtUsdCmp(v); try { localStorage.setItem("nusa_tt_usd_cmp_" + tnStore, v); } catch {} };
+  const setTtOnP = (v) => { setTtOn(v); try { localStorage.setItem("nusa_tt_on_" + tnStore, v ? "1" : ""); } catch {} };
+  const ttHasReal = allIds.some((id) => String(id).startsWith("tt:"));
+  const ttUsdN = parseFloat(String(ttUsd).replace(",", "."));
+  const ttExtra = ttOn && !ttHasReal && isFinite(ttUsdN) && ttUsdN > 0 && fx && fx.rate ? Math.round(ttUsdN * fx.rate) : 0;
+  const ttUsdCmpN = parseFloat(String(ttUsdCmp).replace(",", "."));
+  const ttExtraCmp = ttOn && !ttHasReal && isFinite(ttUsdCmpN) && ttUsdCmpN > 0 && fx && fx.rate ? Math.round(ttUsdCmpN * fx.rate) : 0;
   useEffect(() => {
     if (!account) { setData([]); setAudiencias([]); setErr(""); return; }
     if (preset === "custom" && !(cSince && cUntil)) return; // esperá a que cargue las dos fechas
@@ -637,6 +652,12 @@ export default function App() {
               {!soloGoogle && <select className="cselect" value={sheetTab} onChange={(e) => setSheetTab(e.target.value)}><option value="">— pestaña sheet —</option>{sheetTabs.map((t) => <option key={t.gid} value={t.title}>{t.title}</option>)}</select>}
               <select className="cselect" value={preset} onChange={(e) => setPreset(e.target.value)}><option value="today">Hoy</option><option value="yesterday">Ayer</option><option value="last_7d">Últimos 7 días</option><option value="last_14d">Últimos 14 días</option><option value="last_30d">Últimos 30 días</option><option value="last_90d">Últimos 90 días</option><option value="this_month">Este mes</option><option value="last_month">Mes pasado</option><option value="maximum">Máximo</option><option value="custom">Personalizado…</option></select>
               {preset === "custom" && <span className="daterange"><input type="date" className="cdate" value={cSince} max={cUntil || undefined} onChange={(e) => setCSince(e.target.value)} /><i>→</i><input type="date" className="cdate" value={cUntil} min={cSince || undefined} onChange={(e) => setCUntil(e.target.value)} /></span>}
+              {tnStore && !ttHasReal && (
+                <span className="ttinline" title="Sin acceso a la API de TikTok todavía: cargá a mano lo invertido en ESTE período (en USD). Se convierte al dólar oficial de hoy y se suma a inversión, MER, CAC y margen de la banda de Tienda Nube.">
+                  <button className={"ttbtn" + (ttOn ? " on" : "")} onClick={() => setTtOnP(!ttOn)}>🎵 TIKTOK</button>
+                  {ttOn && <>USD <input className="ttusdh" type="number" min="0" placeholder="0" value={ttUsd} onChange={(e) => setTtUsdP(e.target.value)} /><em>{fx && fx.rate ? (ttExtra > 0 ? "≈ " + money(ttExtra) : "") : "⚠ sin cotización"}</em></>}
+                </span>
+              )}
               {tnStores.length > 0 && <select className="cselect" value={tnStore} onChange={(e) => setTnStore(e.target.value)}><option value="">— sin tienda nube —</option>{tnStores.map((s) => <option key={s.name} value={s.name}>🛒 {s.name}</option>)}</select>}
             </div>
             {/* fila 3: comparación opcional (solo con cuenta elegida; el selector aparece al tildar) */}
@@ -646,6 +667,11 @@ export default function App() {
                 {cmpOn && (<>
                   <select className="cselect" value={cmpPreset} onChange={(e) => setCmpPreset(e.target.value)}><option value="prev">vs período anterior equivalente</option><option value="yesterday">vs Ayer</option><option value="last_7d">vs Últimos 7 días</option><option value="last_14d">vs Últimos 14 días</option><option value="last_30d">vs Últimos 30 días</option><option value="last_90d">vs Últimos 90 días</option><option value="this_month">vs Este mes</option><option value="last_month">vs Mes pasado</option><option value="custom">vs Personalizado…</option></select>
                   {cmpPreset === "custom" && <span className="daterange"><input type="date" className="cdate" value={cmpSince} max={cmpUntil || undefined} onChange={(e) => setCmpSince(e.target.value)} /><i>→</i><input type="date" className="cdate" value={cmpUntil} min={cmpSince || undefined} onChange={(e) => setCmpUntil(e.target.value)} /></span>}
+                  {tnStore && !ttHasReal && ttOn && (
+                    <span className="ttinline" title="Lo invertido en TikTok en el período COMPARADO (en USD), para que los deltas de la banda comparen justo.">
+                      🎵 USD <input className="ttusdh" type="number" min="0" placeholder="0" value={ttUsdCmp} onChange={(e) => setTtUsdCmpP(e.target.value)} /><em>{ttExtraCmp > 0 ? "≈ " + money(ttExtraCmp) : ""}</em>
+                    </span>
+                  )}
                   {cmpRange && <span className="cmprange mono">{cmpRange.since} → {cmpRange.until}{cmpLoading ? " · comparando…" : ""}</span>}
                 </>)}
               </div>
@@ -680,23 +706,30 @@ export default function App() {
                   const cS = cmpOn ? tnSummaryCmp : null;
                   const cD = cmpOn ? tnDetailCmp : null;
                   const invOf = (s) => (s.fx && !s.fx.error ? s.inversionConv : s.inversion);
+                  // TikTok manual: cada período lleva su propio extra (input actual y "vs" del header)
+                  const invShown = (account ? invOf(tnSummary) : 0) + ttExtra;
+                  const merShown = ttExtra > 0 ? (invShown > 0 ? +(tnSummary.facturacion / invShown).toFixed(2) : null) : tnSummary.mer;
+                  const cacShown = tnDetail && tnDetail.cac != null ? tnDetail.cac + (ttExtra > 0 && tnDetail.clientesNuevos ? Math.round(ttExtra / tnDetail.clientesNuevos) : 0) : null;
+                  const invPrev = cS ? (account ? invOf(cS) : 0) + ttExtraCmp : null;
+                  const merPrev = cS ? (ttExtraCmp > 0 ? (invPrev > 0 ? +(cS.facturacion / invPrev).toFixed(2) : null) : cS.mer) : null;
+                  const cacPrev = cD && cD.cac != null ? cD.cac + (ttExtraCmp > 0 && cD.clientesNuevos ? Math.round(ttExtraCmp / cD.clientesNuevos) : 0) : null;
                   return <>
                 <div className="tnstat"><div className="tnlab">FACTURACIÓN TIENDA</div><div className="tnval">{money(tnSummary.facturacion)}</div><div className="tnsub">{tnSummary.orders} órdenes {tnSummary.criterio === "no_canceladas" ? "(pagadas + pendientes)" : "pagadas"} · ticket {money(tnSummary.ticket)}</div>{cS && <TnDelta cur={tnSummary.facturacion} prev={cS.facturacion} />}</div>
-                <div className="tnstat"><div className="tnlab">INVERSIÓN {mixOn ? "ADS" : String(account || "").startsWith("g:") ? "GOOGLE" : String(account || "").startsWith("tt:") ? "TIKTOK" : "META"}</div><div className="tnval">{account ? money(tnSummary.fx && !tnSummary.fx.error ? tnSummary.inversionConv : tnSummary.inversion) : "—"}</div><div className="tnsub">{!account ? "elegí el cliente de Meta" : tnSummary.porPlataforma ? tnSummary.porPlataforma.map((p) => (p.plataforma === "Google" ? "G " : p.plataforma === "TikTok" ? "TT " : "M ") + short(p.inversion)).join(" · ") : tnSummary.fx && !tnSummary.fx.error ? ("USD " + money(tnSummary.inversion) + " · " + tnSummary.fx.fuente + " $" + nf.format(Math.round(tnSummary.fx.rate))) : tnSummary.fx && tnSummary.fx.error ? ("⚠ no pude cotizar el dólar — MER sin convertir") : ("ROAS pixel " + (tnSummary.roasMeta || 0).toFixed(1) + "x")}</div>{account && cS && <TnDelta cur={invOf(tnSummary)} prev={invOf(cS)} invert={null} />}</div>
-                <div className="tnstat tnmer" title="MER TOTAL = facturación de la tienda ÷ inversión en ads (la empujan TODOS los canales). MER PAUTA = total × % de compras que GA4 atribuye a canales pagos — el retorno de la plata invertida sola, sin el empuje de orgánico/directo/email (last-click, orientativo)."><div className="tnlab">MER TOTAL · PAUTA</div><div className="tnval">{tnSummary.mer != null ? tnSummary.mer.toFixed(2) + "x" : "—"}{(() => { const sh = ga4 && tnSummary.mer != null ? shareComprasPagas(ga4.canales) : null; return sh != null ? <span className="tnvalpauta"> · {(tnSummary.mer * sh).toFixed(1)}x <small>pauta</small></span> : null; })()}</div><div className="tnsub">{tnSummary.criterio === "no_canceladas" ? ("pagadas: " + money(tnSummary.facturacionPagada) + " (" + tnSummary.ordersPagadas + ") · pendientes: " + money(tnSummary.facturacionPendiente) + " (" + tnSummary.ordersPendientes + ")") : tnSummary.ordersPendientes ? ("+ " + money(tnSummary.facturacionPendiente) + " pendientes (" + tnSummary.ordersPendientes + " órd.) sin contar") : "facturación / inversión"}</div>{ga4 && tnSummary.mer != null && (() => { const sh = shareComprasPagas(ga4.canales); return sh != null ? <div className="tnsub tnmerpauta">{Math.round(sh * 100)}% de las compras vienen de canales pagos (GA4)</div> : null; })()}{cS && tnSummary.mer != null && <TnDelta cur={tnSummary.mer} prev={cS.mer} fmt={(x) => x.toFixed(2) + "x"} />}</div>
+                <div className="tnstat"><div className="tnlab">INVERSIÓN {mixOn || ttExtra > 0 ? "ADS" : String(account || "").startsWith("g:") ? "GOOGLE" : String(account || "").startsWith("tt:") ? "TIKTOK" : "META"}</div><div className="tnval">{account || ttExtra > 0 ? money(invShown) : "—"}</div><div className="tnsub">{!account ? "elegí el cliente de Meta" : tnSummary.porPlataforma ? tnSummary.porPlataforma.map((p) => (p.plataforma === "Google" ? "G " : p.plataforma === "TikTok" ? "TT " : "M ") + short(p.inversion)).join(" · ") : tnSummary.fx && !tnSummary.fx.error ? ("USD " + money(tnSummary.inversion) + " · " + tnSummary.fx.fuente + " $" + nf.format(Math.round(tnSummary.fx.rate))) : tnSummary.fx && tnSummary.fx.error ? ("⚠ no pude cotizar el dólar — MER sin convertir") : ("ROAS pixel " + (tnSummary.roasMeta || 0).toFixed(1) + "x")}{ttExtra > 0 && " · TT " + short(ttExtra) + " manual"}</div>{account && cS && <TnDelta cur={invShown} prev={invPrev} invert={null} />}</div>
+                <div className="tnstat tnmer" title="MER TOTAL = facturación de la tienda ÷ inversión en ads (la empujan TODOS los canales). MER PAUTA = total × % de compras que GA4 atribuye a canales pagos — el retorno de la plata invertida sola, sin el empuje de orgánico/directo/email (last-click, orientativo)."><div className="tnlab">MER TOTAL · PAUTA</div><div className="tnval">{merShown != null ? merShown.toFixed(2) + "x" : "—"}{(() => { const sh = ga4 && merShown != null ? shareComprasPagas(ga4.canales) : null; return sh != null ? <span className="tnvalpauta"> · {(merShown * sh).toFixed(1)}x <small>pauta</small></span> : null; })()}</div><div className="tnsub">{tnSummary.criterio === "no_canceladas" ? ("pagadas: " + money(tnSummary.facturacionPagada) + " (" + tnSummary.ordersPagadas + ") · pendientes: " + money(tnSummary.facturacionPendiente) + " (" + tnSummary.ordersPendientes + ")") : tnSummary.ordersPendientes ? ("+ " + money(tnSummary.facturacionPendiente) + " pendientes (" + tnSummary.ordersPendientes + " órd.) sin contar") : "facturación / inversión"}</div>{ga4 && merShown != null && (() => { const sh = shareComprasPagas(ga4.canales); return sh != null ? <div className="tnsub tnmerpauta">{Math.round(sh * 100)}% de las compras vienen de canales pagos (GA4)</div> : null; })()}{cS && merShown != null && <TnDelta cur={merShown} prev={merPrev} fmt={(x) => x.toFixed(2) + "x"} />}</div>
                 <div className="tnstat" title="Inversión en pauta ÷ clientes NUEVOS de la tienda en el período (primera compra). No es el CPA del pixel: acá cuentan personas nuevas reales, no compras atribuidas.">
                   <div className="tnlab">CAC (CLIENTE NUEVO)</div>
-                  <div className="tnval">{tnDetail && tnDetail.cac != null ? money(tnDetail.cac) : tnDetailLoading ? "…" : "—"}</div>
+                  <div className="tnval">{cacShown != null ? money(cacShown) : tnDetailLoading ? "…" : "—"}</div>
                   <div className="tnsub">{tnDetail && tnDetail.cac != null ? (nf.format(tnDetail.clientesNuevos) + " nuevos · " + nf.format(tnDetail.clientesRecurrentes) + " recurrentes") : tnDetailLoading ? "contando clientes nuevos…" : tnDetail && tnDetail.error ? (tnDetail.code === "RANGO_MUY_GRANDE" ? "rango muy grande — acotá el período" : "no se pudo calcular") : "inversión / clientes nuevos"}</div>
-                  {cD && tnDetail && tnDetail.cac != null && <TnDelta cur={tnDetail.cac} prev={cD.cac} invert={true} />}
+                  {cD && cacShown != null && <TnDelta cur={cacShown} prev={cacPrev} invert={true} />}
                 </div>
                 <div className="tnstat" title="Margen de contribución del período: facturación × tu margen bruto (producto − costo, antes de la pauta) − inversión en pauta. Lo que queda para cubrir fijos y ganar.">
                   <div className="tnlab">MARGEN CONTRIBUCIÓN</div>
                   {(() => {
                     const m = parseFloat(String(margen).replace(",", "."));
-                    const inv = account ? (tnSummary.fx && !tnSummary.fx.error ? tnSummary.inversionConv : tnSummary.inversion) : 0;
+                    const inv = invShown;
                     const cm = isFinite(m) && m > 0 ? Math.round(tnSummary.facturacion * (m / 100) - inv) : null;
-                    const cmPrev = cm != null && cS ? Math.round(cS.facturacion * (m / 100) - (account ? invOf(cS) : 0)) : null;
+                    const cmPrev = cm != null && cS ? Math.round(cS.facturacion * (m / 100) - invPrev) : null;
                     return <>
                       <div className="tnval" style={cm != null && cm < 0 ? { color: "#E08578" } : undefined}>{cm != null ? money(cm) : "—"}</div>
                       <div className="tnsub">fact × <input className="tnmargin" type="number" min="1" max="95" placeholder="%" value={margen} onChange={(e) => setMargenP(e.target.value)} />% margen bruto − inversión{cm == null ? " → cargá tu margen" : ""}</div>
@@ -710,6 +743,7 @@ export default function App() {
               <div className="tnnote">{tnSummary.criterio === "no_canceladas"
                 ? "MER = facturación de TODAS las órdenes no canceladas (pagadas + pendientes de pago, sin las de pago anulado — criterio interno del cliente) dividida la inversión en Meta, mismo período. Mide la eficiencia global del marketing, no solo lo atribuido al pixel."
                 : "MER = facturación COBRADA de la tienda (órdenes pagadas, igual que Tienda Nube) dividida la inversión en Meta, mismo período. Las pendientes de pago no suman al titular. Mide la eficiencia global del marketing, no solo lo atribuido al pixel."}</div>
+              {(ttExtra > 0 || ttExtraCmp > 0) && <div className="tnnote">🎵 TikTok manual (× ${nf.format(Math.round(fx.rate))}, dólar oficial hoy): {ttExtra > 0 ? "USD " + nf.format(ttUsdN) + " = " + money(ttExtra) + " en el período actual" : "nada en el período actual"}{ttExtraCmp > 0 ? " · USD " + nf.format(ttUsdCmpN) + " = " + money(ttExtraCmp) + " en el comparado" : ""}. Suma a inversión, MER, CAC y margen. Carga a mano hasta tener acceso a la API de TikTok.</div>}
               <button className="tnchart-toggle" onClick={() => setTnChartOpen(!tnChartOpen)}>{tnChartOpen ? "▴ OCULTAR DÍA POR DÍA" : "▾ VER DÍA POR DÍA — inversión · facturación · órdenes · visitas"}</button>
               {tnChartOpen && (tnDetail && Array.isArray(tnDetail.dias) && tnDetail.dias.length
                 ? <TnDaily dias={tnDetail.dias} />
@@ -2564,6 +2598,13 @@ td{padding:11px 12px;vertical-align:middle;}.num{text-align:right;}.name{font-we
 .tnmargin{width:42px;background:transparent;border:1px solid #5A5447;color:#F2EBD9;border-radius:4px;padding:1px 4px;font-family:'Space Mono',monospace;font-size:10.5px;text-align:right;-moz-appearance:textfield;}
 .tnmargin::-webkit-outer-spin-button,.tnmargin::-webkit-inner-spin-button{-webkit-appearance:none;margin:0;}
 .tnmargin:focus{outline:none;border-color:#E9DEC8;}
+.ttinline{display:inline-flex;align-items:center;gap:6px;font-family:'Space Mono',monospace;font-size:11px;color:var(--ink);margin:4px 0;white-space:nowrap;flex:0 0 auto;}
+.ttinline em{font-style:normal;color:#6B6455;}
+.ttbtn{display:inline-flex;align-items:center;gap:5px;font-family:'Space Mono',monospace;font-size:12px;font-weight:700;border:2px solid var(--ink);border-radius:6px;padding:5px 9px;background:var(--paper);color:var(--ink);cursor:pointer;user-select:none;}
+.ttbtn.on{background:var(--ink);color:var(--paper);}
+.ttusdh{width:84px;font-family:'Space Mono',monospace;font-size:12px;border:2px solid var(--ink);border-radius:6px;padding:5px 7px;background:var(--paper);color:var(--ink);text-align:right;-moz-appearance:textfield;}
+.ttusdh::-webkit-outer-spin-button,.ttusdh::-webkit-inner-spin-button{-webkit-appearance:none;margin:0;}
+.ttusdh:focus{outline:none;border-color:#BD4F1E;}
 /* desplegable del gráfico diario */
 .tnchart-toggle{display:block;margin-top:10px;background:transparent;border:1px solid #5A5447;color:#9A937F;border-radius:6px;padding:6px 12px;font-family:'Space Mono',monospace;font-size:10.5px;letter-spacing:1px;cursor:pointer;}
 .tnchart-toggle:hover{color:#E9DEC8;border-color:#9A937F;}
