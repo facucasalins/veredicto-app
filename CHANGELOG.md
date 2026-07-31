@@ -4,6 +4,13 @@ Registro de cambios por versión. **V 1.N = número del PR mergeado** — es el 
 app muestra en el header ("V 1.N ▮▮▮"), así se confirma de un vistazo qué versión corre en prod.
 Regla de la casa: cada PR suma su entrada acá ANTES de mergearse.
 
+## V 1.28 — PREGUNTAR: no más timeouts
+- El chat tiraba seguido "la consulta tardó demasiado y se cortó": la ruta tenía un tope de 60s,
+  más bajo que el default de Vercel (300s) — y una respuesta creativa larga tarda 1-2 minutos
+  sola. Ahora el chat tiene los 5 minutos completos.
+- Herramientas en paralelo: cuando Claude pide varias fuentes en la misma vuelta (anuncios +
+  planilla + biblioteca), se consultan a la vez en vez de una atrás de otra.
+
 ## V 1.27 — PREGUNTAR: respuestas largas sin cortar
 - El chat quedaba a mitad de frase en respuestas largas: la llamada a Claude estaba capada en
   `max_tokens: 2000`. Ahora 8000 (sin costo extra en respuestas normales — se paga por token
