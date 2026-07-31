@@ -12,7 +12,7 @@ import { gaEnabled, propertyFor, getResumen as gaGetResumen, getCanales as gaGet
 import { SESSION_COOKIE, verifySession, authDisabled, canSeeAccount } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 60; // Vercel: el loop de tools + paginación de TN puede pasar los 10s default
+export const maxDuration = 300; // Vercel (Fluid): el loop de tools + una respuesta larga (hasta 8000 tokens) puede pasar tranquilo los 60s
 
 // Chat de la cuenta: preguntas en lenguaje natural sobre LOS DATOS de la cuenta elegida (Meta,
 // Tienda Nube, planilla de análisis cualitativo). Claude corre un loop de tool-use con
@@ -324,13 +324,12 @@ REGLAS:
         return Response.json({ text: text || "No pude armar una respuesta con los datos disponibles." });
       }
       apiMessages.push({ role: "assistant", content: data.content });
-      const results = [];
-      for (const tu of toolUses) {
+      const results = await Promise.all(toolUses.map(async (tu) => {
         let result;
         try { result = await runTool(tu.name, tu.input || {}); }
         catch (e) { result = { error: e.message }; }
-        results.push({ type: "tool_result", tool_use_id: tu.id, content: JSON.stringify(result) });
-      }
+        return { type: "tool_result", tool_use_id: tu.id, content: JSON.stringify(result) };
+      }));
       apiMessages.push({ role: "user", content: results });
     }
     return Response.json({ text: "La pregunta necesitó demasiadas consultas — probá algo más acotado." });

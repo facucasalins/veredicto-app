@@ -1477,12 +1477,12 @@ function Chat({ account, accountName, store, tab, accCur, extras = [], extrasCur
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ account, accountName, store, tab, accCur, extras, extrasCur, criterio, messages: next.slice(-12) }),
       });
-      // El server puede no responder JSON: si la consulta se pasa de los 60s, Vercel devuelve su
-      // propia página de error en texto. Parseamos a mano para no romper con "Unexpected token".
+      // El server puede no responder JSON: si la consulta se pasa del tope de Vercel (5 min),
+      // devuelve su propia página de error en texto. Parseamos a mano para no romper con "Unexpected token".
       const raw = await res.text();
       let d;
       try { d = JSON.parse(raw); }
-      catch { throw new Error(res.status === 504 || /timeout|FUNCTION_INVOCATION/i.test(raw) ? "La consulta tardó demasiado y se cortó. Probá un período más corto (por ejemplo, un mes a la vez)." : "El servidor no respondió bien. Probá de nuevo o acotá la consulta."); }
+      catch { throw new Error(res.status === 504 || /timeout|FUNCTION_INVOCATION/i.test(raw) ? "La consulta tardó demasiado y se cortó. Probá de nuevo, o pedila en partes (primero los datos, después las ideas)." : "El servidor no respondió bien. Probá de nuevo o acotá la consulta."); }
       if (d.error) throw new Error(d.error);
       saveMsgs([...next, { role: "assistant", content: d.text }].slice(-30));
     } catch (e) { setErr("No se pudo responder: " + e.message); } finally { setLoading(false); }
