@@ -422,6 +422,20 @@ export default function App() {
   const ttExtra = ttOn && !ttHasReal && isFinite(ttUsdN) && ttUsdN > 0 && fx && fx.rate ? Math.round(ttUsdN * fx.rate) : 0;
   const ttUsdCmpN = parseFloat(String(ttUsdCmp).replace(",", "."));
   const ttExtraCmp = ttOn && !ttHasReal && isFinite(ttUsdCmpN) && ttUsdCmpN > 0 && fx && fx.rate ? Math.round(ttUsdCmpN * fx.rate) : 0;
+  // Ajuste MANUAL de la inversión (RESTA): campañas que no son del objetivo ventas de la tienda
+  // (ej. mayorista) ensucian el MER/CAC/margen del mes. Se carga a mano en pesos por tienda y se
+  // resta solo de la banda de Tienda Nube — el resto del panel sigue mostrando la inversión completa.
+  const [ajInv, setAjInv] = useState("");
+  const [ajInvCmp, setAjInvCmp] = useState(""); // ídem período COMPARADO (así los deltas comparan justo)
+  const [ajOn, setAjOn] = useState(false);
+  useEffect(() => { if (!tnStore) return; try { setAjInv(localStorage.getItem("nusa_aj_inv_" + tnStore) || ""); setAjInvCmp(localStorage.getItem("nusa_aj_inv_cmp_" + tnStore) || ""); setAjOn(localStorage.getItem("nusa_aj_on_" + tnStore) === "1"); } catch {} }, [tnStore]);
+  const setAjInvP = (v) => { setAjInv(v); try { localStorage.setItem("nusa_aj_inv_" + tnStore, v); } catch {} };
+  const setAjInvCmpP = (v) => { setAjInvCmp(v); try { localStorage.setItem("nusa_aj_inv_cmp_" + tnStore, v); } catch {} };
+  const setAjOnP = (v) => { setAjOn(v); try { localStorage.setItem("nusa_aj_on_" + tnStore, v ? "1" : ""); } catch {} };
+  const ajInvN = parseFloat(String(ajInv).replace(",", "."));
+  const ajResta = ajOn && isFinite(ajInvN) && ajInvN > 0 ? Math.round(ajInvN) : 0;
+  const ajInvCmpN = parseFloat(String(ajInvCmp).replace(",", "."));
+  const ajRestaCmp = ajOn && isFinite(ajInvCmpN) && ajInvCmpN > 0 ? Math.round(ajInvCmpN) : 0;
   useEffect(() => {
     if (!account) { setData([]); setAudiencias([]); setErr(""); return; }
     if (preset === "custom" && !(cSince && cUntil)) return; // esperá a que cargue las dos fechas
@@ -696,6 +710,11 @@ export default function App() {
               <button className={"modotgl tng" + (tnCount === "pagadas" ? " on" : "")} onClick={() => setCount("pagadas")}>PAGADAS</button>
               <button className={"modotgl tng" + (tnCount === "no_canceladas" ? " on" : "")} onClick={() => setCount("no_canceladas")}>NO CANCELADAS</button>
             </div>
+            <span className="ttinline ajinline" title="Restá de la inversión lo gastado en campañas que NO son del objetivo ventas de la tienda (ej. mayorista). El monto (en $ de la banda) se descuenta de inversión, MER, CAC y margen — el resto del panel sigue mostrando la inversión completa.">
+              <button className={"ttbtn" + (ajOn ? " on" : "")} onClick={() => setAjOnP(!ajOn)}>− AJUSTAR INVERSIÓN</button>
+              {ajOn && <>−$ <input className="ttusdh ajmonto" type="number" min="0" placeholder="0" value={ajInv} onChange={(e) => setAjInvP(e.target.value)} />
+                {cmpOn && <><em>comparado</em> −$ <input className="ttusdh ajmonto" type="number" min="0" placeholder="0" value={ajInvCmp} onChange={(e) => setAjInvCmpP(e.target.value)} /></>}</>}
+            </span>
             <span className="tnrange">{tnLoading ? "cargando…" : tnSummary ? (tnSummary.since + " → " + tnSummary.until) : "sin datos"}</span>
           </div>
           {tnSummary && (
@@ -706,16 +725,16 @@ export default function App() {
                   const cS = cmpOn ? tnSummaryCmp : null;
                   const cD = cmpOn ? tnDetailCmp : null;
                   const invOf = (s) => (s.fx && !s.fx.error ? s.inversionConv : s.inversion);
-                  // TikTok manual: cada período lleva su propio extra (input actual y "vs" del header)
-                  const invShown = (account ? invOf(tnSummary) : 0) + ttExtra;
-                  const merShown = ttExtra > 0 ? (invShown > 0 ? +(tnSummary.facturacion / invShown).toFixed(2) : null) : tnSummary.mer;
-                  const cacShown = tnDetail && tnDetail.cac != null ? tnDetail.cac + (ttExtra > 0 && tnDetail.clientesNuevos ? Math.round(ttExtra / tnDetail.clientesNuevos) : 0) : null;
-                  const invPrev = cS ? (account ? invOf(cS) : 0) + ttExtraCmp : null;
-                  const merPrev = cS ? (ttExtraCmp > 0 ? (invPrev > 0 ? +(cS.facturacion / invPrev).toFixed(2) : null) : cS.mer) : null;
-                  const cacPrev = cD && cD.cac != null ? cD.cac + (ttExtraCmp > 0 && cD.clientesNuevos ? Math.round(ttExtraCmp / cD.clientesNuevos) : 0) : null;
+                  // TikTok manual (suma) y ajuste manual (resta): cada período lleva su propio monto
+                  const invShown = Math.max(0, (account ? invOf(tnSummary) : 0) + ttExtra - ajResta);
+                  const merShown = ttExtra > 0 || ajResta > 0 ? (invShown > 0 ? +(tnSummary.facturacion / invShown).toFixed(2) : null) : tnSummary.mer;
+                  const cacShown = tnDetail && tnDetail.cac != null ? Math.max(0, tnDetail.cac + (tnDetail.clientesNuevos ? Math.round((ttExtra - ajResta) / tnDetail.clientesNuevos) : 0)) : null;
+                  const invPrev = cS ? Math.max(0, (account ? invOf(cS) : 0) + ttExtraCmp - ajRestaCmp) : null;
+                  const merPrev = cS ? (ttExtraCmp > 0 || ajRestaCmp > 0 ? (invPrev > 0 ? +(cS.facturacion / invPrev).toFixed(2) : null) : cS.mer) : null;
+                  const cacPrev = cD && cD.cac != null ? Math.max(0, cD.cac + (cD.clientesNuevos ? Math.round((ttExtraCmp - ajRestaCmp) / cD.clientesNuevos) : 0)) : null;
                   return <>
                 <div className="tnstat"><div className="tnlab">FACTURACIÓN TIENDA</div><div className="tnval">{money(tnSummary.facturacion)}</div><div className="tnsub">{tnSummary.orders} órdenes {tnSummary.criterio === "no_canceladas" ? "(pagadas + pendientes)" : "pagadas"} · ticket {money(tnSummary.ticket)}</div>{cS && <TnDelta cur={tnSummary.facturacion} prev={cS.facturacion} />}</div>
-                <div className="tnstat"><div className="tnlab">INVERSIÓN {mixOn || ttExtra > 0 ? "ADS" : String(account || "").startsWith("g:") ? "GOOGLE" : String(account || "").startsWith("tt:") ? "TIKTOK" : "META"}</div><div className="tnval">{account || ttExtra > 0 ? money(invShown) : "—"}</div><div className="tnsub">{!account ? "elegí el cliente de Meta" : tnSummary.porPlataforma ? tnSummary.porPlataforma.map((p) => (p.plataforma === "Google" ? "G " : p.plataforma === "TikTok" ? "TT " : "M ") + short(p.inversion)).join(" · ") : tnSummary.fx && !tnSummary.fx.error ? ("USD " + money(tnSummary.inversion) + " · " + tnSummary.fx.fuente + " $" + nf.format(Math.round(tnSummary.fx.rate))) : tnSummary.fx && tnSummary.fx.error ? ("⚠ no pude cotizar el dólar — MER sin convertir") : ("ROAS pixel " + (tnSummary.roasMeta || 0).toFixed(1) + "x")}{ttExtra > 0 && " · TT " + short(ttExtra) + " manual"}</div>{account && cS && <TnDelta cur={invShown} prev={invPrev} invert={null} />}</div>
+                <div className="tnstat"><div className="tnlab">INVERSIÓN {mixOn || ttExtra > 0 || ajResta > 0 ? "ADS" : String(account || "").startsWith("g:") ? "GOOGLE" : String(account || "").startsWith("tt:") ? "TIKTOK" : "META"}</div><div className="tnval">{account || ttExtra > 0 ? money(invShown) : "—"}</div><div className="tnsub">{!account ? "elegí el cliente de Meta" : tnSummary.porPlataforma ? tnSummary.porPlataforma.map((p) => (p.plataforma === "Google" ? "G " : p.plataforma === "TikTok" ? "TT " : "M ") + short(p.inversion)).join(" · ") : tnSummary.fx && !tnSummary.fx.error ? ("USD " + money(tnSummary.inversion) + " · " + tnSummary.fx.fuente + " $" + nf.format(Math.round(tnSummary.fx.rate))) : tnSummary.fx && tnSummary.fx.error ? ("⚠ no pude cotizar el dólar — MER sin convertir") : ("ROAS pixel " + (tnSummary.roasMeta || 0).toFixed(1) + "x")}{ttExtra > 0 && " · TT " + short(ttExtra) + " manual"}{ajResta > 0 && " · −" + short(ajResta) + " ajuste"}</div>{account && cS && <TnDelta cur={invShown} prev={invPrev} invert={null} />}</div>
                 <div className="tnstat tnmer" title="MER TOTAL = facturación de la tienda ÷ inversión en ads (la empujan TODOS los canales). MER PAUTA = total × % de compras que GA4 atribuye a canales pagos — el retorno de la plata invertida sola, sin el empuje de orgánico/directo/email (last-click, orientativo)."><div className="tnlab">MER TOTAL · PAUTA</div><div className="tnval">{merShown != null ? merShown.toFixed(2) + "x" : "—"}{(() => { const sh = ga4 && merShown != null ? shareComprasPagas(ga4.canales) : null; return sh != null ? <span className="tnvalpauta"> · {(merShown * sh).toFixed(1)}x <small>pauta</small></span> : null; })()}</div><div className="tnsub">{tnSummary.criterio === "no_canceladas" ? ("pagadas: " + money(tnSummary.facturacionPagada) + " (" + tnSummary.ordersPagadas + ") · pendientes: " + money(tnSummary.facturacionPendiente) + " (" + tnSummary.ordersPendientes + ")") : tnSummary.ordersPendientes ? ("+ " + money(tnSummary.facturacionPendiente) + " pendientes (" + tnSummary.ordersPendientes + " órd.) sin contar") : "facturación / inversión"}</div>{ga4 && merShown != null && (() => { const sh = shareComprasPagas(ga4.canales); return sh != null ? <div className="tnsub tnmerpauta">{Math.round(sh * 100)}% de las compras vienen de canales pagos (GA4)</div> : null; })()}{cS && merShown != null && <TnDelta cur={merShown} prev={merPrev} fmt={(x) => x.toFixed(2) + "x"} />}</div>
                 <div className="tnstat" title="Inversión en pauta ÷ clientes NUEVOS de la tienda en el período (primera compra). No es el CPA del pixel: acá cuentan personas nuevas reales, no compras atribuidas.">
                   <div className="tnlab">CAC (CLIENTE NUEVO)</div>
@@ -743,6 +762,7 @@ export default function App() {
               <div className="tnnote">{tnSummary.criterio === "no_canceladas"
                 ? "MER = facturación de TODAS las órdenes no canceladas (pagadas + pendientes de pago, sin las de pago anulado — criterio interno del cliente) dividida la inversión en Meta, mismo período. Mide la eficiencia global del marketing, no solo lo atribuido al pixel."
                 : "MER = facturación COBRADA de la tienda (órdenes pagadas, igual que Tienda Nube) dividida la inversión en Meta, mismo período. Las pendientes de pago no suman al titular. Mide la eficiencia global del marketing, no solo lo atribuido al pixel."}</div>
+              {(ajResta > 0 || ajRestaCmp > 0) && <div className="tnnote">− Ajuste manual de inversión: {ajResta > 0 ? money(ajResta) + " restados en el período actual" : "nada restado en el período actual"}{ajRestaCmp > 0 ? " · " + money(ajRestaCmp) + " en el comparado" : ""} (campañas fuera del objetivo ventas de la tienda, ej. mayorista). Descuenta de inversión, MER, CAC y margen de ESTA banda — el resto del panel muestra la inversión completa.</div>}
               {(ttExtra > 0 || ttExtraCmp > 0) && <div className="tnnote">🎵 TikTok manual (× ${nf.format(Math.round(fx.rate))}, dólar oficial hoy): {ttExtra > 0 ? "USD " + nf.format(ttUsdN) + " = " + money(ttExtra) + " en el período actual" : "nada en el período actual"}{ttExtraCmp > 0 ? " · USD " + nf.format(ttUsdCmpN) + " = " + money(ttExtraCmp) + " en el comparado" : ""}. Suma a inversión, MER, CAC y margen. Carga a mano hasta tener acceso a la API de TikTok.</div>}
               <button className="tnchart-toggle" onClick={() => setTnChartOpen(!tnChartOpen)}>{tnChartOpen ? "▴ OCULTAR DÍA POR DÍA" : "▾ VER DÍA POR DÍA — inversión · facturación · órdenes · visitas"}</button>
               {tnChartOpen && (tnDetail && Array.isArray(tnDetail.dias) && tnDetail.dias.length
@@ -2618,6 +2638,13 @@ td{padding:11px 12px;vertical-align:middle;}.num{text-align:right;}.name{font-we
 .ttusdh{width:84px;font-family:'Space Mono',monospace;font-size:12px;border:2px solid var(--ink);border-radius:6px;padding:5px 7px;background:var(--paper);color:var(--ink);text-align:right;-moz-appearance:textfield;}
 .ttusdh::-webkit-outer-spin-button,.ttusdh::-webkit-inner-spin-button{-webkit-appearance:none;margin:0;}
 .ttusdh:focus{outline:none;border-color:#BD4F1E;}
+.ajinline{margin-left:18px;}
+.ajinline .ttbtn{background:transparent;color:#C9C2AD;border-color:#5A5447;font-size:10px;letter-spacing:1px;padding:5px 10px;}
+.ajinline .ttbtn.on{background:#E9DEC8;color:#1E1812;border-color:#E9DEC8;}
+.ajinline .ttusdh{background:#24241F;color:#F2EBD9;border-color:#5A5447;}
+.ajinline .ttusdh:focus{border-color:#E9DEC8;}
+.ajinline em{color:#9A937F;}
+.ajmonto{width:110px;}
 /* desplegable del gráfico diario */
 .tnchart-toggle{display:block;margin-top:10px;background:transparent;border:1px solid #5A5447;color:#9A937F;border-radius:6px;padding:6px 12px;font-family:'Space Mono',monospace;font-size:10.5px;letter-spacing:1px;cursor:pointer;}
 .tnchart-toggle:hover{color:#E9DEC8;border-color:#9A937F;}
