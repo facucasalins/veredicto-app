@@ -4,6 +4,15 @@ Registro de cambios por versión. **V 1.N = número del PR mergeado** — es el 
 app muestra en el header ("V 1.N ▮▮▮"), así se confirma de un vistazo qué versión corre en prod.
 Regla de la casa: cada PR suma su entrada acá ANTES de mergearse.
 
+## V 1.29 — Banda Tienda Nube: ajuste manual de inversión (resta)
+- **Botón "− AJUSTAR INVERSIÓN"** en el head de la banda, a la derecha del toggle VENTA =: para
+  descontar lo gastado en campañas que NO son del objetivo ventas de la tienda (ej. mayorista).
+  El monto se resta de inversión, MER, CAC y margen de contribución; la card de inversión muestra
+  "· −$X ajuste" y una nota al pie deja la cuenta clara.
+- Con ⇄ COMPARAR activo hay un segundo campo para el período comparado, así los deltas comparan
+  justo. Monto y estado guardados por tienda en el browser (localStorage, como el margen bruto).
+- Solo afecta la banda: el resto del panel (Dashboard, cerebro, Plan) sigue con la inversión completa.
+
 ## V 1.28 — PREGUNTAR: no más timeouts
 - El chat tiraba seguido "la consulta tardó demasiado y se cortó": la ruta tenía un tope de 60s,
   más bajo que el default de Vercel (300s) — y una respuesta creativa larga tarda 1-2 minutos
