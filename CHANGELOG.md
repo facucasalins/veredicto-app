@@ -4,7 +4,7 @@ Registro de cambios por versión. **V 1.N = número del PR mergeado** — es el 
 app muestra en el header ("V 1.N ▮▮▮"), así se confirma de un vistazo qué versión corre en prod.
 Regla de la casa: cada PR suma su entrada acá ANTES de mergearse.
 
-## V 1.31 — Tienda Nube: un solo barrido, cache y sin datos silenciosamente incompletos
+## V 1.30 — Tienda Nube: un solo barrido, cache y sin datos silenciosamente incompletos
 - **Causa raíz de la lentitud y de "no me carga nuevos vs recurrentes"**: la banda hacía TRES
   barridos completos de `/orders` a la vez (summary en serie, daily y tendencia en paralelo, ×2 con
   COMPARAR) contra el rate limit de Tienda Nube (balde de 40, 2/seg). Las páginas que caían con 429
