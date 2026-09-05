@@ -4,6 +4,26 @@ Registro de cambios por versión. **V 1.N = número del PR mergeado** — es el 
 app muestra en el header ("V 1.N ▮▮▮"), así se confirma de un vistazo qué versión corre en prod.
 Regla de la casa: cada PR suma su entrada acá ANTES de mergearse.
 
+## V 1.30 — Tienda Nube: un solo barrido, cache y sin datos silenciosamente incompletos
+- **Causa raíz de la lentitud y de "no me carga nuevos vs recurrentes"**: la banda hacía TRES
+  barridos completos de `/orders` a la vez (summary en serie, daily y tendencia en paralelo, ×2 con
+  COMPARAR) contra el rate limit de Tienda Nube (balde de 40, 2/seg). Las páginas que caían con 429
+  se reemplazaban por `[]` en silencio → clientes nuevos/recurrentes bajos o en cero, intermitente.
+- **Un barrido por (tienda, rango)**: `sweepOrders` trae las órdenes UNA vez y arma un agregado que
+  sirve para ambos criterios de venta; summary, daily (CAC + gráfico) y el chat son vistas sobre él.
+  Las llamadas concurrentes en la misma lambda comparten la misma promesa.
+- **Cache 5 min** (memoria + Upstash si está conectado): togglear criterio/COMPARAR o cambiar de
+  pestaña ya no vuelve a pegarle a la API. El resultado parcial NO se cachea.
+- **Páginas de 50 con 6 en vuelo** (medido: la latencia de TN es lineal en órdenes por página,
+  ~65 ms/orden) → Juanita 30 días pasó de ~30 s a ~11 s con números idénticos. Cola de concurrencia
+  POR TIENDA compartida entre todas las funciones, timeout 25 s y reintentos con backoff en 429/5xx
+  (respeta `x-rate-limit-reset`).
+- **Aviso de datos parciales**: si una página sigue fallando tras reintentar, la respuesta viaja con
+  `parcial:true` + `paginasFallidas` y la banda lo muestra en rojo en vez de un número bajo mudo.
+  El CAC también aclara las órdenes sin cliente (checkout invitado) y cuándo no aplica.
+- Summary en rangos enormes (>6.000 órdenes) cae a un barrido liviano sin `customer` (antes
+  paginaba 50 páginas en serie). `kvSet` acepta TTL. `maxDuration` 120 en summary/daily.
+
 ## V 1.29 — Banda Tienda Nube: ajuste manual de inversión (resta)
 - **Botón "− AJUSTAR INVERSIÓN"** en el head de la banda, a la derecha del toggle VENTA =: para
   descontar lo gastado en campañas que NO son del objetivo ventas de la tienda (ej. mayorista).

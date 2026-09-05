@@ -739,7 +739,11 @@ export default function App() {
                 <div className="tnstat" title="Inversión en pauta ÷ clientes NUEVOS de la tienda en el período (primera compra). No es el CPA del pixel: acá cuentan personas nuevas reales, no compras atribuidas.">
                   <div className="tnlab">CAC (CLIENTE NUEVO)</div>
                   <div className="tnval">{cacShown != null ? money(cacShown) : tnDetailLoading ? "…" : "—"}</div>
-                  <div className="tnsub">{tnDetail && tnDetail.cac != null ? (nf.format(tnDetail.clientesNuevos) + " nuevos · " + nf.format(tnDetail.clientesRecurrentes) + " recurrentes") : tnDetailLoading ? "contando clientes nuevos…" : tnDetail && tnDetail.error ? (tnDetail.code === "RANGO_MUY_GRANDE" ? "rango muy grande — acotá el período" : "no se pudo calcular") : "inversión / clientes nuevos"}</div>
+                  <div className="tnsub">{tnDetail && !tnDetail.error && tnDetail.dias
+                    ? (nf.format(tnDetail.clientesNuevos) + " nuevos · " + nf.format(tnDetail.clientesRecurrentes) + " recurrentes"
+                      + (tnDetail.ordenesSinCliente ? " · " + nf.format(tnDetail.ordenesSinCliente) + " órd. sin cliente" : "")
+                      + (tnDetail.cac == null && !tnDetail.clientesNuevos ? " — sin clientes nuevos, CAC no aplica" : ""))
+                    : tnDetailLoading ? "contando clientes nuevos…" : tnDetail && tnDetail.error ? (tnDetail.code === "RANGO_MUY_GRANDE" ? "rango muy grande — acotá el período" : "no se pudo calcular") : "inversión / clientes nuevos"}</div>
                   {cD && cacShown != null && <TnDelta cur={cacShown} prev={cacPrev} invert={true} />}
                 </div>
                 <div className="tnstat" title="Margen de contribución del período: facturación × tu margen bruto (producto − costo, antes de la pauta) − inversión en pauta. Lo que queda para cubrir fijos y ganar.">
@@ -762,6 +766,7 @@ export default function App() {
               <div className="tnnote">{tnSummary.criterio === "no_canceladas"
                 ? "MER = facturación de TODAS las órdenes no canceladas (pagadas + pendientes de pago, sin las de pago anulado — criterio interno del cliente) dividida la inversión en Meta, mismo período. Mide la eficiencia global del marketing, no solo lo atribuido al pixel."
                 : "MER = facturación COBRADA de la tienda (órdenes pagadas, igual que Tienda Nube) dividida la inversión en Meta, mismo período. Las pendientes de pago no suman al titular. Mide la eficiencia global del marketing, no solo lo atribuido al pixel."}</div>
+              {(tnSummary.parcial || (tnDetail && tnDetail.parcial)) && <div className="tnnote" style={{ color: "#E08578" }}>⚠ Datos PARCIALES: Tienda Nube no devolvió {nf.format((tnSummary.parcial ? tnSummary.paginasFallidas : 0) || tnDetail?.paginasFallidas || 0)} página(s) de órdenes ni reintentando (límite de consultas). Facturación y clientes pueden estar bajos — recargá en un minuto.</div>}
               {(ajResta > 0 || ajRestaCmp > 0) && <div className="tnnote">− Ajuste manual de inversión: {ajResta > 0 ? money(ajResta) + " restados en el período actual" : "nada restado en el período actual"}{ajRestaCmp > 0 ? " · " + money(ajRestaCmp) + " en el comparado" : ""} (campañas fuera del objetivo ventas de la tienda, ej. mayorista). Descuenta de inversión, MER, CAC y margen de ESTA banda — el resto del panel muestra la inversión completa.</div>}
               {(ttExtra > 0 || ttExtraCmp > 0) && <div className="tnnote">🎵 TikTok manual (× ${nf.format(Math.round(fx.rate))}, dólar oficial hoy): {ttExtra > 0 ? "USD " + nf.format(ttUsdN) + " = " + money(ttExtra) + " en el período actual" : "nada en el período actual"}{ttExtraCmp > 0 ? " · USD " + nf.format(ttUsdCmpN) + " = " + money(ttExtraCmp) + " en el comparado" : ""}. Suma a inversión, MER, CAC y margen. Carga a mano hasta tener acceso a la API de TikTok.</div>}
               <button className="tnchart-toggle" onClick={() => setTnChartOpen(!tnChartOpen)}>{tnChartOpen ? "▴ OCULTAR DÍA POR DÍA" : "▾ VER DÍA POR DÍA — inversión · facturación · órdenes · visitas"}</button>

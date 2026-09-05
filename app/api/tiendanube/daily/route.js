@@ -6,6 +6,7 @@ import { presetToRange } from "@/lib/dates";
 import { SESSION_COOKIE, verifySession, authDisabled, canSeeAccount } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 120; // el barrido de órdenes (cacheado 5 min) puede tardar en tiendas grandes
 
 // Detalle diario para la banda del Dashboard: CAC (inversión / clientes NUEVOS de la tienda) y la
 // serie día por día que cruza inversión (Meta/TikTok/Google — con la vista combinada suma TODAS
@@ -73,6 +74,8 @@ export async function GET(req) {
       clientesNuevos: tienda.nuevos.clientes,
       clientesRecurrentes: tienda.recurrentes.clientes,
       factNuevos: tienda.nuevos.facturacion,
+      ordenesSinCliente: tienda.sinCliente.ordenes, // checkout como invitado: no entran al split
+      parcial: tienda.parcial, paginasFallidas: tienda.paginasFallidas, // páginas que TN no devolvió ni reintentando
       dias,
     });
   } catch (e) {
