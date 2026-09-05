@@ -56,17 +56,26 @@ respuestas concisas.
   firmada HMAC-SHA256 (Edge + Node). `authenticate` (async), `hashPassword`, `makeSessionToken`,
   `verifySession`, `canSeeAccount`, `authDisabled` (el gate de login sigue dependiendo SOLO de que
   APP_USERS tenga al menos un usuario).
-- `lib/tiendanube.js` — `listStores()`, `getStoreRevenue(name, since, until, criterio?)` y
-  `getTopProducts(...)`. Header de auth es `Authentication: bearer <token>` (NO "Authorization") +
-  `User-Agent` obligatorio. El endpoint `/orders` sin filtro devuelve TODO (abiertas + archivadas
-  `closed` + canceladas). **Criterio de VENTA configurable por tienda** (campo `ventas` en
-  `TIENDANUBE_STORES`, toggle "VENTA =" en la banda): `"pagadas"` (default, como el panel de stats
-  de TN: solo `payment_status === "paid"`) o `"no_canceladas"` (conteo interno de clientes como
-  MoraShop: toda orden no cancelada, pagada o pendiente). Las de pago **anulado (voided)** no son
-  venta bajo ningún criterio. Devuelve siempre el desglose (`facturacionPagada/Pendiente`, `anuladas`).
-  El criterio se propaga a TODO: MER, objetivo del mes, vista Cliente, cerebro (snapshot con
-  `criterio_venta`), Plan y chat (system + tools `tiendanube_resumen` y `tiendanube_productos`,
-  incluido el top de productos — `getTopProducts` acepta el mismo `criterio`).
+- `lib/tiendanube.js` — `listStores()`, `getStoreRevenue(name, since, until, criterio?)`,
+  `getStoreDaily(...)` (porDia + nuevos/recurrentes + `sinCliente`), `getCustomerSplit(...)` (chat),
+  `getTopProducts(...)`, `getStockProducts(...)`. Header de auth es `Authentication: bearer <token>`
+  (NO "Authorization") + `User-Agent` obligatorio. El endpoint `/orders` sin filtro devuelve TODO
+  (abiertas + archivadas `closed` + canceladas). **UN barrido por (tienda, rango)**: `sweepOrders`
+  trae las órdenes una vez (páginas de 50, 6 en vuelo — la latencia de TN es lineal en órdenes por
+  página, ~65 ms/orden medido) y arma un agregado que sirve para AMBOS criterios; revenue/daily/split
+  son vistas sobre él. Cache 5 min en memoria + Upstash (`nusa:tn:orders:<store>:<since>:<until>`),
+  dedup de llamadas concurrentes (`_inflight`), cola de concurrencia POR TIENDA compartida, timeout
+  25 s y reintentos con backoff en 429/5xx (`x-rate-limit-reset`). Rate limit de TN: balde de 40 que
+  drena a 2/seg (×10 en planes Next/Evolution). Si una página falla tras reintentar → `parcial:true`
+  + `paginasFallidas` (NO se cachea; la banda lo muestra en rojo). Tope `ORDER_CAP` 6.000 órdenes →
+  `RANGO_MUY_GRANDE` (daily); el summary cae a un barrido liviano sin `customer` (tope doble).
+  **Criterio de VENTA configurable por tienda** (campo `ventas` en `TIENDANUBE_STORES`, toggle
+  "VENTA =" en la banda): `"pagadas"` (default, como el panel de stats de TN: solo
+  `payment_status === "paid"`) o `"no_canceladas"` (conteo interno de clientes como MoraShop: toda
+  orden no cancelada, pagada o pendiente). Las de pago **anulado (voided)** no son venta bajo ningún
+  criterio. Devuelve siempre el desglose (`facturacionPagada/Pendiente`, `anuladas`). El criterio se
+  propaga a TODO: MER, objetivo del mes, vista Cliente, cerebro (snapshot con `criterio_venta`), Plan
+  y chat (system + tools `tiendanube_resumen` y `tiendanube_productos`, incluido el top de productos).
 - `lib/dates.js` — `presetToRange(preset)` → `{since, until}`. Alinea Meta y Tienda Nube al mismo período.
 - `lib/tiktok.js` — cliente de la **TikTok Marketing API** (Business API v1.3), espejo de `lib/meta.js`:
   `ttEnabled()`, `getAccounts()` (ids prefijados **`tt:`**, conviven con Meta en el mismo dropdown),

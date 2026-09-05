@@ -6,6 +6,7 @@ import { presetToRange } from "@/lib/dates";
 import { SESSION_COOKIE, verifySession, authDisabled, canSeeAccount } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 120; // comparte el barrido cacheado con daily; en frío puede tardar
 
 // Facturación de la tienda (Tienda Nube) vs inversión en ads, sobre el MISMO rango.
 // MER (Marketing Efficiency Ratio) = facturación total / inversión en ads.
