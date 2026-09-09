@@ -134,6 +134,10 @@ respuestas concisas.
   **MEDIR: Ventas | Mensajes** (`modo`) que filtra y cambia la métrica de toda la app, y toggle
   **MONEDA CUENTA: Pesos | USD** (`accCur`, auto-detectado del `currency` de Meta, override manual).
   NO reescribir entero; editar quirúrgico. `money()` muestra 2 decimales en montos < 100 no enteros (USD).
+- `app/api/video` — "▶ ver video": `?account=&ad=` → 302 a la vista previa oficial del anuncio
+  (`getAdPreviewUrl` en `lib/meta.js`: `/{ad}/previews` → src del iframe, abre sin login; fallback
+  post → Administrador). Cada fila de `buildRows` lleva `adId` (anuncio de más spend del creativo).
+  Solo Meta; el link vence a las ~24 h así que se resuelve al clic.
 - `app/api/*` — `accounts` (filtra por sesión), `ads` (insights + targeting + estado en paralelo,
   cruza Sheet, arma tipoMap), `login`, `logout`, `sheets/tabs` (scopeada por `tabs` de sesión),
   `tiendanube/{stores,summary}` (stores scopeadas por cuenta), `copy` (generador), **`analyze`**

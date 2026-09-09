@@ -4,6 +4,16 @@ Registro de cambios por versión. **V 1.N = número del PR mergeado** — es el 
 app muestra en el header ("V 1.N ▮▮▮"), así se confirma de un vistazo qué versión corre en prod.
 Regla de la casa: cada PR suma su entrada acá ANTES de mergearse.
 
+## V 1.31 — "▶ ver video": abrir el anuncio en una pestaña nueva
+- Chip **▶ ver video** al lado del nombre del creativo en el TOP ADS DEL MES, en el desplegable
+  por creativo de TOP PERFORMERS y en la tabla del PANEL. Abre en pestaña nueva la vista previa
+  oficial del anuncio (el video se reproduce ahí), sin buscarlo a mano en el Administrador.
+- Cómo: cada creativo lleva `adId` (el anuncio con más spend del grupo); `/api/video` resuelve al
+  clic `/{ad}/previews` de Meta y redirige (302). El link de Meta vence a las ~24 h, por eso no se
+  guarda. La URL directa del archivo (`video.source`) NO está permitida para el token de Sistema.
+  Fallback: el post (`effective_object_story_id`) y, último, el anuncio en el Administrador.
+- Solo Meta: en Google/TikTok el chip no aparece. Verifica sesión y `canSeeAccount`.
+
 ## V 1.30 — Tienda Nube: un solo barrido, cache y sin datos silenciosamente incompletos
 - **Causa raíz de la lentitud y de "no me carga nuevos vs recurrentes"**: la banda hacía TRES
   barridos completos de `/orders` a la vez (summary en serie, daily y tendencia en paralelo, ×2 con
