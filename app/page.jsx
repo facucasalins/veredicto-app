@@ -88,6 +88,12 @@ const tf = (r) => { const m = String(r?.id || "").match(/\((\d{1,2}\.\d{2}\.\d{2
 const TF = ({ r }) => tf(r) ? <span className="tf">{tf(r)}</span> : null;
 // Tag de estado: solo aparece si SABEMOS que el creativo está pausado (activa === false).
 const Paused = ({ r }) => r && r.activa === false ? <span className="pausedtag">⏸ PAUSADA</span> : null;
+// "Ver video": abre la vista previa oficial del anuncio (video incluido) en una pestaña nueva.
+// /api/video resuelve el link de Meta AL CLIC (vence a las ~24 h). Solo creativos de Meta con
+// anuncio identificado (adId = el de más spend del creativo). stopPropagation: las cards se expanden al clic.
+const VideoLink = ({ r }) => r && r.adId && r._acc && (!r.plat || r.plat === "meta")
+  ? <a className="vlink" href={"/api/video?account=" + encodeURIComponent(r._acc) + "&ad=" + r.adId} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} title="Abre la vista previa del anuncio (con el video) en una pestaña nueva">▶ ver video</a>
+  : null;
 // Clasificación de calidad de Meta (vs competencia por la misma audiencia). Solo aparece si Meta
 // la informó (≥500 impresiones); diagnóstico de creativo. Valor titular = ponderado por spend.
 const QUAL = {
@@ -1028,7 +1034,7 @@ function Top({ withV, u, audData, modo = "ventas" }) {
                 <div className="rexp">
                   {membersFor(d.key).sort((a, b) => b.spend - a.spend).map((m) => (
                     <div className="rexad" key={m.id}>
-                      <div className="rexhead"><b>{m.nombre}</b><TF r={m} /><Paused r={m} /><RolTag r={m} /><Calidad v={m.calidad} mix={m.calidadMix} /> <span className="rexkpi">{msg ? (money(m.costoConv) + "/conv · " + short(m.spend) + " · " + nf.format(m.conversaciones) + " conv") : (m.roas.toFixed(1) + "x · " + short(m.spend) + " · " + nf.format(m.ventas) + " vtas")}</span></div>
+                      <div className="rexhead"><b>{m.nombre}</b><TF r={m} /><Paused r={m} /><RolTag r={m} /><Calidad v={m.calidad} mix={m.calidadMix} /><VideoLink r={m} /> <span className="rexkpi">{msg ? (money(m.costoConv) + "/conv · " + short(m.spend) + " · " + nf.format(m.conversaciones) + " conv") : (m.roas.toFixed(1) + "x · " + short(m.spend) + " · " + nf.format(m.ventas) + " vtas")}</span></div>
                       {(m.breakdown || []).map((b, j) => (
                         <div className="rexline" key={j}><span className="rexcamp">{b.campaign}</span> › <span className="rexset">{b.adset}</span>{b.aud ? <span className="rexaud">{b.aud}</span> : null}<Calidad v={b.calidad} /><Freq v={b.freq} max={freqCap(b.aud, u.freqMax)} /><span className="rexmeta">{short(b.spend)} · {msg ? (nf.format(b.conversaciones) + " conv") : (nf.format(b.ventas) + " vtas · " + b.roas.toFixed(1) + "x")}</span></div>
                       ))}
@@ -1860,7 +1866,7 @@ function Dash({ stats, u = {}, goal, setGoal, factTienda, tnStore, modo = "venta
           {topAds.map((r, i) => { const b = BUCKETS[r.v]; const bd = r.breakdown || []; const exp = bd.length > 0; const isOpen = openCard === r.id; return (
             <div className={"topcard" + (exp ? " clickable" : "") + (isOpen ? " open" : "")} key={r.id} style={{ "--bar": b.color }} onClick={exp ? () => setOpenCard(isOpen ? null : r.id) : undefined}>
               <div className="tcardtop"><span className="trank">{String(i + 1).padStart(2, "0")}</span><span className="badge" style={{ background: b.bg, color: b.color }}><span className="sq" style={{ background: b.color }} />{r.v}</span></div>
-              <div className="tname">{Object.keys(stats.spendByPlat || {}).length > 1 && <PlatTag p={r.plat} />}{r.nombre} <span className="fmt">{r.fmt}</span><TF r={r} /><Paused r={r} /><Calidad v={r.calidad} mix={r.calidadMix} /></div>{msg ? <div className="troas">{money(r.costoConv)}</div> : <div className="troas">{r.roas.toFixed(1)}<small>x</small></div>}<div className="tmeta mono">{msg ? (nf.format(r.conversaciones) + " conv · " + short(r.spend)) : (short(r.spend) + " spend · " + r.ang)}</div>
+              <div className="tname">{Object.keys(stats.spendByPlat || {}).length > 1 && <PlatTag p={r.plat} />}{r.nombre} <span className="fmt">{r.fmt}</span><TF r={r} /><Paused r={r} /><Calidad v={r.calidad} mix={r.calidadMix} /><VideoLink r={r} /></div>{msg ? <div className="troas">{money(r.costoConv)}</div> : <div className="troas">{r.roas.toFixed(1)}<small>x</small></div>}<div className="tmeta mono">{msg ? (nf.format(r.conversaciones) + " conv · " + short(r.spend)) : (short(r.spend) + " spend · " + r.ang)}</div>
               {exp && <div className="tcardmore"><span className="tcardcaret">{isOpen ? "▾" : "▸"}</span>{isOpen ? "ocultar" : "ver"} {bd.length} conjunto{bd.length !== 1 ? "s" : ""}</div>}
               {isOpen && (
                 <div className="tcardexp" onClick={(e) => e.stopPropagation()}>
@@ -2078,7 +2084,7 @@ function Panel({ rows, u = {}, stats, sort, setSortKey, modo = "ventas" }) {
           <tbody>
             {rows.map((r) => { const b = BUCKETS[r.v]; return (
               <tr key={r.id} style={{ "--bar": b.color }}>
-                <td className="name">{mix && <PlatTag p={r.plat} />}{r.nombre} <span className="fmt">{r.fmt}</span><TF r={r} /><Paused r={r} /><RolTag r={r} /><Calidad v={r.calidad} mix={r.calidadMix} /></td>
+                <td className="name">{mix && <PlatTag p={r.plat} />}{r.nombre} <span className="fmt">{r.fmt}</span><TF r={r} /><Paused r={r} /><RolTag r={r} /><Calidad v={r.calidad} mix={r.calidadMix} /><VideoLink r={r} /></td>
                 <td className="ang">{r.ang}{r.sec !== "—" ? <span className="sec"> / {r.sec}</span> : null}<span className="split">{r.split}</span></td>
                 <td className="aud">{r.aud}</td><td className="mono num">{money(r.spend)}</td>{msg ? <><td className="mono num strong">{nf.format(r.conversaciones)}</td><td className="mono num">{money(r.costoConv)}</td></> : <><td className="mono num strong">{r.roas.toFixed(1)}x</td><td className="mono num">{money(r.cpa)}</td></>}
                 <td><span className="badge" style={{ background: b.bg, color: b.color }}><span className="sq" style={{ background: b.color }} />{r.v}</span></td>
@@ -2605,6 +2611,7 @@ tbody tr{border-bottom:1px solid var(--line);box-shadow:inset 5px 0 0 var(--bar)
 tbody tr:hover{background:#EFE6D2;}tbody tr:last-child{border-bottom:none;}
 td{padding:11px 12px;vertical-align:middle;}.num{text-align:right;}.name{font-weight:700;}
 .fmt{font-size:9px;color:var(--soft);border:1px solid var(--line);border-radius:3px;padding:1px 5px;margin-left:6px;font-family:'Space Mono',monospace;letter-spacing:1px;}
+.vlink{font-size:9px;color:#0F6E56;border:1px solid #0F6E56;border-radius:3px;padding:1px 6px;margin-left:6px;font-family:'Space Mono',monospace;letter-spacing:1px;text-decoration:none;font-weight:700;white-space:nowrap;cursor:pointer;}.vlink:hover{background:#0F6E56;color:#FFF;}
 .tf{font-size:9px;color:var(--soft);background:rgba(0,0,0,.04);border:1px solid var(--line);border-radius:3px;padding:1px 5px;margin-left:6px;font-family:'Space Mono',monospace;letter-spacing:.5px;white-space:nowrap;}
 .pausedtag{font-size:9px;color:#8A1C12;background:#FBE8E6;border:1px solid #E0A59E;border-radius:3px;padding:1px 5px;margin-left:6px;font-family:'Space Mono',monospace;letter-spacing:.5px;white-space:nowrap;font-weight:700;}
 .qualtag{font-size:9px;border:1px solid currentColor;border-radius:3px;padding:1px 5px;margin-left:6px;font-family:'Space Mono',monospace;letter-spacing:.5px;white-space:nowrap;font-weight:700;cursor:help;}
