@@ -134,6 +134,11 @@ respuestas concisas.
   **MEDIR: Ventas | Mensajes** (`modo`) que filtra y cambia la métrica de toda la app, y toggle
   **MONEDA CUENTA: Pesos | USD** (`accCur`, auto-detectado del `currency` de Meta, override manual).
   NO reescribir entero; editar quirúrgico. `money()` muestra 2 decimales en montos < 100 no enteros (USD).
+- `app/api/export` + `lib/export.js` — "⬇ CSV": `?account=&preset=|since=&until=&nivel=anuncio|
+  conjunto|campana` → descarga (Content-Disposition) de los resultados del período: misma data que
+  `/api/ads` (insights + estado + audiencia real + tipo) sin Sheet ni nomenclatura, por anuncio o
+  agregada por conjunto/campaña (ROAS recompuesto desde spend×roas). Excel es-AR (`;`, coma
+  decimal, BOM). Montos en moneda de la cuenta. Meta/TikTok/Google.
 - `app/api/*` — `accounts` (filtra por sesión), `ads` (insights + targeting + estado en paralelo,
   cruza Sheet, arma tipoMap), `login`, `logout`, `sheets/tabs` (scopeada por `tabs` de sesión),
   `tiendanube/{stores,summary}` (stores scopeadas por cuenta), `copy` (generador), **`analyze`**

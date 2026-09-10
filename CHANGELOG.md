@@ -4,6 +4,20 @@ Registro de cambios por versión. **V 1.N = número del PR mergeado** — es el 
 app muestra en el header ("V 1.N ▮▮▮"), así se confirma de un vistazo qué versión corre en prod.
 Regla de la casa: cada PR suma su entrada acá ANTES de mergearse.
 
+## V 1.32 — ⬇ CSV: descargar los resultados del período
+- Selector **⬇ CSV…** al lado del período (header): baja un archivo con los resultados de la
+  cuenta en el rango elegido (presets o fechas personalizadas) **por anuncio** (con su campaña y
+  conjunto), **por conjunto** o **por campaña**. En la vista combinada, una opción por cuenta.
+- Columnas: campaña/conjunto/anuncio con sus ids, estado, audiencia real, tipo (ventas/mensajes),
+  spend, impresiones, clics, CTR, CPM, CPC, ventas, facturación atribuida, ROAS, CPA,
+  conversaciones, costo/conv, embudo (LPV, VC, ATC, checkout), video (3s, ThruPlay, 100%). Por
+  anuncio suma alcance, frecuencia y las clasificaciones de calidad de Meta. ROAS agregado
+  recompuesto desde la facturación (no promedio simple). Orden: más spend primero.
+- Formato Excel es-AR: separador `;`, decimales con coma, BOM UTF-8. Montos en la moneda de la
+  cuenta (columna `moneda`), como el Administrador. Meta, TikTok y Google (misma forma de fila).
+- `/api/export` (`lib/export.js`): sesión + `canSeeAccount`, `Content-Disposition` para que el
+  browser lo baje directo. `getAds` de Meta ahora trae `campaign_id`.
+
 ## V 1.30 — Tienda Nube: un solo barrido, cache y sin datos silenciosamente incompletos
 - **Causa raíz de la lentitud y de "no me carga nuevos vs recurrentes"**: la banda hacía TRES
   barridos completos de `/orders` a la vez (summary en serie, daily y tendencia en paralelo, ×2 con
