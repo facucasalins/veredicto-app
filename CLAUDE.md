@@ -174,7 +174,11 @@ respuestas concisas.
   **MONEDA CUENTA: Pesos | USD** (`accCur`, auto-detectado del `currency` de Meta, override manual).
   NO reescribir entero; editar quirúrgico. `money()` muestra 2 decimales en montos < 100 no enteros (USD).
 - `app/api/conciencia/*` — `clasificar` (POST rows con campos del Sheet → niveles), `override`
-  (POST/DELETE, requiere Upstash → 409 si no), `proximo-test` (POST matriz + motivadores + receta →
+  (POST/DELETE, requiere Upstash → 409 si no; guarda también `nivel_previo`/`fuente_previa` — lo
+  automático antes de la corrección — que `classifyRows` devuelve en la entrada override y la
+  sección **CALIBRACIÓN** de ÁNGULOS usa para coincidencia global/por fuente/por nivel, matriz de
+  confusión 5×5, aviso de reglas fallando <80% con 20+ overrides y CSV de overrides = set de
+  entrenamiento del prompt v3 de Gemini), `proximo-test` (POST matriz + motivadores + receta →
   3 hipótesis JSON de Claude, mode-aware). Ver `lib/conciencia.js`.
 - `app/api/video` — "▶ ver video": `?account=&ad=` → 302 a la vista previa oficial del anuncio
   (`getAdPreviewUrl` en `lib/meta.js`: `/{ad}/previews` → src del iframe, abre sin login; fallback

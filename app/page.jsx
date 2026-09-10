@@ -1420,9 +1420,12 @@ function Angulos({ withV, u, modo = "ventas", account, extras = [], tab, account
       try { await fetch("/api/conciencia/override", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ account, extras, tab, fingerprint: fp }) }); } catch {}
       setVer((v) => v + 1); return;
     }
-    setClasif((p) => ({ ...p, niveles: { ...p.niveles, [fp]: { ...cur, nivel: +nivel, fuente: "override", confianza: "alta" } } }));
+    // lo automático previo viaja con el override (calibración); si ya era override, conservamos el previo original
+    const nivel_previo = cur.fuente === "override" ? cur.nivel_previo ?? null : (cur.nivel || null);
+    const fuente_previa = cur.fuente === "override" ? cur.fuente_previa || null : (cur.fuente || null);
+    setClasif((p) => ({ ...p, niveles: { ...p.niveles, [fp]: { ...cur, nivel: +nivel, fuente: "override", confianza: "alta", nivel_previo, fuente_previa, t: Date.now() } } }));
     try {
-      const r = await fetch("/api/conciencia/override", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ account, extras, tab, fingerprint: fp, nivel: +nivel, motivador: cur.motivador, motivadorTipo: cur.motivadorTipo }) });
+      const r = await fetch("/api/conciencia/override", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ account, extras, tab, fingerprint: fp, nivel: +nivel, motivador: cur.motivador, motivadorTipo: cur.motivadorTipo, nivel_previo, fuente_previa }) });
       const j = await r.json(); if (j.error) setErr("Override no guardado: " + j.error + " (quedó solo en esta vista)");
     } catch (e) { setErr("Override no guardado: " + e.message); }
   };
@@ -1525,7 +1528,57 @@ function Angulos({ withV, u, modo = "ventas", account, extras = [], tab, account
         {tests && <TestsOut hip={tests} onBrief={(h) => onBrief && onBrief(briefDe(h))} />}
         <Historial items={hist} render={(it) => <TestsOut hip={it.hipotesis} onBrief={(h) => onBrief && onBrief(briefDe(h))} />} />
       </section>
+
+      <Calibracion filas={filas} niv={niv} accountName={accountName} tab={tab} />
     </>
+  );
+}
+
+// ─────────── CALIBRACIÓN: qué tan bien clasifica lo automático, medido contra los overrides ───────────
+// Cada override guarda nivel_previo/fuente_previa (lo que dijo regla/Claude antes). Con eso:
+// coincidencia global, por fuente y por nivel, y matriz de confusión 5×5 (automático × manual).
+// Con menos de 20 overrides avisa "faltan N". Si las reglas caen bajo 80% con 20+, avisa en qué
+// nivel fallan y muestra ejemplos. El CSV de overrides es el set de entrenamiento del prompt v3.
+const CAL_MIN = 20;
+function Calibracion({ filas, niv, accountName = "", tab = "" }) {
+  const ovs = useMemo(() => filas.filter((r) => r.c && r.c.fuente === "override").map((r) => ({ r, manual: r.c.nivel, auto: r.c.nivel_previo || null, fuente: r.c.fuente_previa || "nd" })), [filas, niv]); // eslint-disable-line react-hooks/exhaustive-deps
+  const conAuto = ovs.filter((o) => o.auto);
+  const pct = (arr) => (arr.length ? Math.round((arr.filter((o) => o.auto === o.manual).length / arr.length) * 100) : null);
+  const porFuente = ["regla", "claude"].map((f) => { const a = conAuto.filter((o) => o.fuente === f); return { f, n: a.length, p: pct(a) }; });
+  const porNivel = [5, 4, 3, 2, 1].map((n) => { const a = conAuto.filter((o) => o.auto === n); return { n, cnt: a.length, p: pct(a) }; });
+  const conf = {}; for (const a of [5, 4, 3, 2, 1]) { conf[a] = {}; for (const m of [5, 4, 3, 2, 1]) conf[a][m] = 0; }
+  for (const o of conAuto) if (conf[o.auto] && conf[o.auto][o.manual] != null) conf[o.auto][o.manual] += 1;
+  // reglas fallando: 20+ overrides y coincidencia por regla < 80% → nivel(es) con más errores + ejemplos
+  const regla = conAuto.filter((o) => o.fuente === "regla");
+  const reglaP = pct(regla);
+  const reglasFallan = ovs.length >= CAL_MIN && regla.length && reglaP != null && reglaP < 80;
+  const errRegla = regla.filter((o) => o.auto !== o.manual);
+  const nivelFalla = (() => { const c = {}; for (const o of errRegla) c[o.auto] = (c[o.auto] || 0) + 1; return Object.entries(c).sort((a, b) => b[1] - a[1]).map(([n]) => n); })();
+  const exportar = () => {
+    const cell = (v) => { const t = v == null ? "" : String(v); return /[;"\n\r]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t; };
+    const head = ["fingerprint", "marca", "texto_gancho", "nivel_auto", "fuente", "nivel_manual", "motivador"];
+    const lines = [head.join(";"), ...ovs.map((o) => [o.r.fp, (o.r.sheet && o.r.sheet.marca) || accountName, (o.r.sheet && o.r.sheet.texto_gancho) || "", o.auto || "", o.fuente, o.manual, o.r.c.motivador || ""].map(cell).join(";"))];
+    const blob = new Blob(["\ufeff" + lines.join("\r\n") + "\r\n"], { type: "text/csv;charset=utf-8" });
+    const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = `nusa_overrides_${String(tab || accountName).replace(/[^\w.-]+/g, "_")}.csv`; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  };
+  return (
+    <section className="sect">
+      <div className="secthead"><span className="sverb" style={{ background: "#857A6A", color: "#fff" }}><span className="sq" style={{ background: "#fff" }} />⚖</span><span className="stitle">CALIBRACIÓN</span>
+        <span className="sright">{ovs.length} override{ovs.length !== 1 ? "s" : ""}{ovs.length < CAL_MIN ? ` · faltan ${CAL_MIN - ovs.length} para calibrar` : ""}{ovs.length > 0 && <button className="cretry" style={{ marginLeft: 8 }} onClick={exportar}>⬇ CSV overrides</button>}</span></div>
+      {!ovs.length ? <div className="dedup">Todavía no hay overrides. Cada corrección manual de nivel (en la lista de una celda) queda guardada con lo que dijo la clasificación automática, y acá se mide cuánto acierta.</div> : (
+        <>
+          {reglasFallan && <div className="cwarn">⚠ Las reglas duras están fallando{nivelFalla.length ? ` en nivel ${nivelFalla.join(" y ")}` : ""} ({reglaP}% de coincidencia en {regla.length} overrides). Ejemplos: {errRegla.slice(0, 5).map((o) => `${o.r.fp} (regla ${o.auto} → manual ${o.manual})`).join(" · ")}</div>}
+          <div className="calgrid">
+            <div className="calbox"><div className="callab">COINCIDENCIA GLOBAL</div><div className="calval">{pct(conAuto) != null ? pct(conAuto) + "%" : "—"}</div><div className="calsub">{conAuto.length} con clasificación previa</div></div>
+            {porFuente.map((x) => <div className="calbox" key={x.f}><div className="callab">POR {x.f.toUpperCase()}</div><div className="calval">{x.p != null ? x.p + "%" : "—"}</div><div className="calsub">{x.n} override{x.n !== 1 ? "s" : ""}</div></div>)}
+            <div className="calbox"><div className="callab">POR NIVEL (automático)</div><div className="calsub">{porNivel.map((x) => <span key={x.n} className="calniv">{x.n}: {x.p != null ? x.p + "%" : "—"} <small>({x.cnt})</small></span>)}</div></div>
+          </div>
+          <div className="thinnote">Matriz de confusión: filas = nivel automático (regla/Claude), columnas = nivel manual. La diagonal es acierto.</div>
+          <div className="cmatrixwrap"><table className="calconf"><thead><tr><th>auto \ manual</th>{[5, 4, 3, 2, 1].map((m) => <th key={m}>{m}</th>)}</tr></thead>
+            <tbody>{[5, 4, 3, 2, 1].map((a) => <tr key={a}><th>{a}</th>{[5, 4, 3, 2, 1].map((m) => <td key={m} className={a === m ? "diag" : conf[a][m] ? "err" : ""}>{conf[a][m] || ""}</td>)}</tr>)}</tbody></table></div>
+        </>
+      )}
+    </section>
   );
 }
 function TestsOut({ hip = [], onBrief }) {
@@ -3040,6 +3093,8 @@ tbody tr{border-bottom:1px solid var(--line);box-shadow:inset 5px 0 0 var(--bar)
 tbody tr:hover{background:#EFE6D2;}tbody tr:last-child{border-bottom:none;}
 td{padding:11px 12px;vertical-align:middle;}.num{text-align:right;}.name{font-weight:700;}
 .fmt{font-size:9px;color:var(--soft);border:1px solid var(--line);border-radius:3px;padding:1px 5px;margin-left:6px;font-family:'Space Mono',monospace;letter-spacing:1px;}
+.calgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-bottom:10px;}.calbox{border:2px solid var(--ink);border-radius:8px;padding:10px 12px;background:#F6F1E4;}.callab{font-family:'Space Mono',monospace;font-size:9px;letter-spacing:1px;color:var(--soft);}.calval{font-family:'Anton',Impact,sans-serif;font-size:26px;color:var(--ink);}.calsub{font-size:11px;color:#6B6552;}.calniv{display:inline-block;margin-right:8px;}
+.calconf{border-collapse:collapse;font-size:12px;}.calconf th,.calconf td{border:1px solid var(--line);padding:6px 12px;text-align:center;min-width:40px;}.calconf th{font-family:'Space Mono',monospace;font-size:10px;color:var(--soft);}.calconf td.diag{background:#DCE9E1;color:#2E8B6B;font-weight:700;}.calconf td.err{background:#F1D9D3;color:#C5362B;font-weight:700;}
 .ccconf{font-size:9px;color:var(--soft);font-weight:400;text-transform:none;letter-spacing:0;}.cretry{background:#F4C24A;border:1px solid var(--ink);border-radius:4px;padding:2px 8px;font-family:'Space Mono',monospace;font-size:10px;cursor:pointer;font-weight:700;}
 .norepchk{margin:0 0 8px;display:inline-flex;align-items:center;gap:6px;font-size:11px;color:#C5362B;cursor:pointer;}
 .ctdesc{font-size:11px;color:var(--soft);margin-top:4px;}.ctdesc summary{cursor:pointer;font-family:'Space Mono',monospace;font-size:9.5px;letter-spacing:.5px;}.ctdesc div{margin:2px 0 0 8px;}.outang .outtext{display:block;line-height:1.5;}
