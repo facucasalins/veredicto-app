@@ -336,6 +336,7 @@ export default function App() {
   const [metaErr, setMetaErr] = useState("");
   const [me, setMe] = useState(null);
   const [genPrefill, setGenPrefill] = useState(null); // brief precargado desde ÁNGULOS → GENERAR
+  const [conciencia, setConciencia] = useState(null); // { key, data } — clasificación compartida entre ÁNGULOS y GENERAR (ángulos nuevos)
   useEffect(() => { fetch("/api/accounts").then((r) => r.json()).then((j) => { setAccounts(j.accounts || []); setMe(j.me || null); setMetaErr(j.error && !(j.accounts || []).length ? j.error : ""); }).catch(() => setMetaErr("No se pudo conectar con Meta")); }, []);
   const logout = async () => { try { await fetch("/api/logout", { method: "POST" }); } finally { window.location.href = "/login"; } };
   // la lectura del analista queda obsoleta si cambia el cliente/período/tienda/mezcla → la limpiamos
@@ -849,11 +850,11 @@ export default function App() {
           {effView === "hoy" && (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Hoy acc={acciones} u={ueff} done={done} toggle={toggle} total={totalTasks} doneCount={doneCount} mantener={stats.counts.Mantener} modo={modo} />)}
           {effView === "grabar" && (soloGoogle ? <SinGoogle que="Qué grabar" /> : !withVCreative.length ? <EmptyState account={account} loading={loading} err={err} /> : <QueGrabar withV={withVCreative} u={ueff} modo={modo} role={role} accountName={(accounts.find((a) => a.id === account) || {}).name || ""} />)}
           {effView === "top" && (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Top withV={withV} u={ueff} audData={audConv} modo={modo} />)}
-          {effView === "angulos" && (soloGoogle ? <SinGoogle que="Ángulos" /> : !withVCreative.length ? <EmptyState account={account} loading={loading} err={err} /> : <Angulos withV={withVCreative} u={ueff} modo={modo} account={account} extras={extras} tab={sheetTab} accountName={(accounts.find((a) => a.id === account) || {}).name || ""} preset={preset} cSince={cSince} cUntil={cUntil} onBrief={(ctx) => { setGenPrefill({ tipo: "hooks", modo: "explorar", contexto: ctx, t: Date.now() }); setView("gen"); }} />)}
+          {effView === "angulos" && (soloGoogle ? <SinGoogle que="Ángulos" /> : !withVCreative.length ? <EmptyState account={account} loading={loading} err={err} /> : <Angulos withV={withVCreative} u={ueff} modo={modo} account={account} extras={extras} tab={sheetTab} accountName={(accounts.find((a) => a.id === account) || {}).name || ""} preset={preset} cSince={cSince} cUntil={cUntil} onBrief={(ctx) => { setGenPrefill({ tipo: "hooks", modo: "explorar", contexto: ctx, t: Date.now() }); setView("gen"); }} conciencia={conciencia} onClasif={setConciencia} />)}
           {effView === "embudo" && (soloGoogle ? <SinGoogle que="El embudo" /> : !withVCreative.length ? <EmptyState account={account} loading={loading} err={err} /> : <Embudo withV={withVCreative} u={ueff} modo={modo} accountName={(accounts.find((a) => a.id === account) || {}).name || ""} />)}
           {effView === "panel" && (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Panel rows={rows} u={ueff} stats={stats} sort={sort} setSortKey={setSortKey} modo={modo} />)}
           {effView === "bib" && <Biblioteca rows={withVCreative} hookMatch={hookMatch} setHookMatch={setHookMatch} />}
-          {effView === "gen" && (soloGoogle ? <SinGoogle que="El generador" /> : <Generar rows={withVCreative} accountName={(accounts.find((a) => a.id === account) || {}).name || ""} prefill={genPrefill} />)}
+          {effView === "gen" && (soloGoogle ? <SinGoogle que="El generador" /> : <Generar rows={withVCreative} accountName={(accounts.find((a) => a.id === account) || {}).name || ""} prefill={genPrefill} account={account} extras={extras} tab={sheetTab} u={ueff} modoApp={modo} periodKey={[account, ...extras].join(",") + "|" + sheetTab + "|" + preset + "|" + cSince + "|" + cUntil} conciencia={conciencia} onClasif={setConciencia} />)}
           {effView === "chat" && (!account ? <EmptyState account={account} loading={loading} err={err} /> : <Chat account={account} accountName={(accounts.find((a) => a.id === account) || {}).name || ""} store={tnStore} tab={sheetTab} accCur={accCur} extras={extras} extrasCur={extras.map(curOf)} criterio={tnCount} />)}
           {effView === "usuarios" && <Usuarios accounts={accounts} sheetTabs={sheetTabs} tnStores={tnStores} />}
         </>
@@ -1203,7 +1204,57 @@ const pctf = (x, d = 1) => (x == null ? "—" : (x * 100).toFixed(d) + "%");
 const fpOf = (r) => String(r.id).split("‖").pop(); // vista combinada: "cuenta‖fingerprint"
 const diasPeriodo = (preset, cSince, cUntil) => { const r = preset === "custom" ? (cSince && cUntil ? { since: cSince, until: cUntil } : null) : presetToRange(preset); if (!r) return null; return Math.round((new Date(r.until) - new Date(r.since)) / 86400000) + 1; };
 
-function Angulos({ withV, u, modo = "ventas", account, extras = [], tab, accountName = "", preset, cSince, cUntil, onBrief }) {
+// Fila del panel enriquecida para la matriz: nivel (de la clasificación), partes por CONJUNTO
+// (etapa real + spend/revenue/ventas/video de ese conjunto), hook/hold del creativo y el flag
+// "sin reproducciones". La usan ÁNGULOS y el contexto de GENERAR (ángulos nuevos).
+const filaConciencia = (r, niv, clasif, loading) => {
+  const fp = fpOf(r); const c = niv[fp] || null;
+  const nivel = c && c.nivel ? c.nivel : "nd";
+  const motivo = nivel !== "nd" ? null : (c ? (clasif && clasif.claude ? "claude" : "regla") : (loading ? "pendiente" : "regla"));
+  const partes = (r.breakdown || []).map((b) => ({ etapa: etapaAud(b.aud), aud: b.aud, adset: b.adset, spend: b.spend || 0, rev: (b.spend || 0) * (b.roas || 0), ventas: b.ventas || 0, conv: b.conversaciones || 0, imp: b.impresiones || 0, v3: b.video3s || 0, tp: b.thruplay || 0 }));
+  return { ...r, fp, c, nivel, motivo, partes, hook: hookRate(r), hold: holdRate(r), norepro: sinRepro(r) };
+};
+// Métricas de un creativo DENTRO de una etapa (sus conjuntos de esa etapa).
+const enEtapa = (r, etapa) => {
+  const ps = etapa === "total" ? r.partes : r.partes.filter((p) => p.etapa === etapa);
+  const sp = ps.reduce((s, p) => s + p.spend, 0); if (sp <= 0) return null;
+  const imp = ps.reduce((s, p) => s + p.imp, 0), v3 = ps.reduce((s, p) => s + p.v3, 0), tp = ps.reduce((s, p) => s + p.tp, 0);
+  const cv = ps.reduce((s, p) => s + p.conv, 0), vt = ps.reduce((s, p) => s + p.ventas, 0), rv = ps.reduce((s, p) => s + p.rev, 0);
+  return { spend: sp, rev: rv, ventas: vt, conv: cv, roas: sp ? rv / sp : 0, costo: cv ? sp / cv : null, hook: imp ? v3 / imp : null, hold: v3 ? tp / v3 : null, auds: [...new Set(ps.map((p) => p.aud).filter(Boolean))] };
+};
+// Inventario de motivadores probados (tipo → motivador) sobre un set de filas.
+const motivadoresDe = (filas, msg) => {
+  const by = {};
+  for (const r of filas) { if (!r.c || !r.c.motivador) continue; const k = (r.c.motivadorTipo || "—") + "‖" + r.c.motivador; const g = by[k] || (by[k] = { tipo: r.c.motivadorTipo || "—", motivador: r.c.motivador, n: 0, spend: 0, rev: 0, conv: 0, hooks: [], niveles: new Set() }); g.n += 1; g.spend += r.spend; g.rev += r.spend * (r.roas || 0); g.conv += r.conversaciones || 0; if (!r.norepro) g.hooks.push(r.hook); g.niveles.add(r.nivel); }
+  return Object.values(by).map((g) => ({ ...g, roas: g.spend ? g.rev / g.spend : 0, costoConv: g.conv ? g.spend / g.conv : null, hook: mediana(g.hooks), niveles: [...g.niveles].sort((a, b) => b - a) })).sort((a, b) => b.spend - a.spend);
+};
+// Contexto que reciben Claude en PRÓXIMO TEST y en GENERAR → ángulos nuevos. SIN los creativos
+// "sin reproducciones" (no solo fuera de las medianas: fuera del payload entero). Incluye:
+// - motivadores probados COMPLETOS (motivador, tipo, niveles, creativos, hook, ROAS/costo)
+// - "voz": texto_gancho literal de los 8 mejores por hook rate en frío y los 5 mejores por
+//   ROAS (mensajes: costo/conv) en caliente — así habla esta marca
+// - por celda: motivadores y formatos de gancho ya usados con su cantidad (regla de celda llena)
+const contextoAngulos = (filasTodas, u, msg) => {
+  const filas = filasTodas.filter((r) => !r.norepro);
+  const gancho = (r) => (r.sheet && r.sheet.texto_gancho && r.sheet.texto_gancho !== "nd" ? r.sheet.texto_gancho : null);
+  const conG = filas.filter((r) => gancho(r));
+  const frio = conG.map((r) => ({ r, m: enEtapa(r, "frio") })).filter((x) => x.m && x.m.hook != null && x.m.spend >= u.pisoSpend).sort((a, b) => b.m.hook - a.m.hook).slice(0, 8);
+  const cal = conG.map((r) => ({ r, m: enEtapa(r, "caliente") })).filter((x) => x.m && x.m.spend >= u.pisoSpend && (msg ? x.m.costo : x.m.roas > 0)).sort((a, b) => (msg ? a.m.costo - b.m.costo : b.m.roas - a.m.roas)).slice(0, 5);
+  const voz = {
+    frio_mejor_hook_rate: frio.map((x) => ({ gancho: gancho(x.r), hook_rate: +(x.m.hook * 100).toFixed(1), nivel: x.r.nivel, tipo: x.r.c?.motivadorTipo || "" })),
+    caliente_mejor_venta: cal.map((x) => ({ gancho: gancho(x.r), ...(msg ? { costo_conv: Math.round(x.m.costo) } : { roas: +x.m.roas.toFixed(2) }), nivel: x.r.nivel, tipo: x.r.c?.motivadorTipo || "" })),
+  };
+  const motivadores = motivadoresDe(filas, msg).map((m) => ({ tipo: m.tipo, motivador: m.motivador, niveles: m.niveles, creativos: m.n, spend: Math.round(m.spend), hook_rate: m.hook != null ? +(m.hook * 100).toFixed(1) : null, ...(msg ? { costo_conv: m.costoConv && Math.round(m.costoConv) } : { roas: +m.roas.toFixed(2) }) }));
+  const celdas = {};
+  for (const n of NIV_ORDEN) { celdas[n] = {}; for (const e of ETAPAS) {
+    const rs = filas.filter((r) => r.nivel === n).map((r) => ({ r, m: enEtapa(r, e) })).filter((x) => x.m);
+    const cnt = (f) => { const o = {}; for (const x of rs) { const k = f(x.r); if (k) o[k] = (o[k] || 0) + 1; } return Object.fromEntries(Object.entries(o).sort((a, b) => b[1] - a[1]).slice(0, 8)); };
+    celdas[n][e] = { creativos: rs.length, motivadores_en_celda: cnt((r) => r.c && r.c.motivador), formatos_en_celda: cnt((r) => r.sheet && r.sheet.gformato !== "nd" ? r.sheet.gformato : null) };
+  } }
+  return { motivadores, voz, celdas, excluidos_sin_reproducciones: filasTodas.length - filas.length };
+};
+
+function Angulos({ withV, u, modo = "ventas", account, extras = [], tab, accountName = "", preset, cSince, cUntil, onBrief, conciencia = null, onClasif }) {
   const msg = modo === "mensajes";
   const [clasif, setClasif] = useState(null); // { niveles: {fp → {nivel, fuente, motivador, motivadorTipo, confianza}}, cache, claude }
   const [loading, setLoading] = useState(false);
@@ -1221,12 +1272,13 @@ function Angulos({ withV, u, modo = "ventas", account, extras = [], tab, account
   // Clasificación: una vez por (cuentas, tab, período). Manda solo los campos del Sheet que usa la lib.
   useEffect(() => {
     if (!tab || !rowsSheet.length) { setClasif(null); return; }
+    if (conciencia && conciencia.key === periodKey && conciencia.data && !ver) { setClasif(conciencia.data); return; } // ya clasificado (mismo período) → sin refetch
     let cancelled = false;
     setLoading(true); setErr(""); setSel(null);
     const rows = rowsSheet.map((r) => { const o = { fingerprint: fpOf(r) }; for (const k of CONC_CAMPOS) o[k] = r.sheet[k]; return o; });
     fetch("/api/conciencia/clasificar", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ account, extras, tab, rows }) })
       .then((r) => r.json())
-      .then((j) => { if (cancelled) return; if (j.error) setErr(j.error); else setClasif(j); })
+      .then((j) => { if (cancelled) return; if (j.error) setErr(j.error); else { setClasif(j); if (onClasif) onClasif({ key: periodKey, data: j }); } })
       .catch((e) => { if (!cancelled) setErr(e.message); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
@@ -1239,13 +1291,7 @@ function Angulos({ withV, u, modo = "ventas", account, extras = [], tab, account
   // retargeting) NO entran a la matriz — se reportan en el desglose "sin nivel" del header para
   // que se vea cuánta plata queda afuera y por qué. Cada fila lleva sus PARTES por conjunto (etapa
   // real + spend/revenue/ventas/video de ese conjunto).
-  const filas = useMemo(() => rowsSheet.map((r) => {
-    const fp = fpOf(r); const c = niv[fp] || null;
-    const nivel = c && c.nivel ? c.nivel : "nd";
-    const motivo = nivel !== "nd" ? null : (c ? (clasif && clasif.claude ? "claude" : "regla") : (loading ? "pendiente" : "regla"));
-    const partes = (r.breakdown || []).map((b) => ({ etapa: etapaAud(b.aud), aud: b.aud, adset: b.adset, spend: b.spend || 0, rev: (b.spend || 0) * (b.roas || 0), ventas: b.ventas || 0, conv: b.conversaciones || 0, imp: b.impresiones || 0, v3: b.video3s || 0, tp: b.thruplay || 0 }));
-    return { ...r, fp, c, nivel, motivo, partes, hook: hookRate(r), hold: holdRate(r), norepro: sinRepro(r) };
-  }), [rowsSheet, niv, clasif, loading]);
+  const filas = useMemo(() => rowsSheet.map((r) => filaConciencia(r, niv, clasif, loading)), [rowsSheet, niv, clasif, loading]);
   const totalSpend = filas.reduce((s, r) => s + r.spend, 0);
   const metricaVenta = (r) => (msg ? (r.conversaciones ? r.costoConv : null) : r.roas);
   const medVenta = useMemo(() => mediana(filas.filter((r) => r.spend >= u.pisoSpend).map(metricaVenta)), [filas, u.pisoSpend, msg]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -1316,11 +1362,7 @@ function Angulos({ withV, u, modo = "ventas", account, extras = [], tab, account
   }, [matriz, filas, totalSpend, u.pisoSpend, msg, medHook]);
 
   // MOTIVADORES probados: motivadorTipo → motivador
-  const motivadores = useMemo(() => {
-    const by = {};
-    for (const r of filas) { if (!r.c || !r.c.motivador) continue; const k = (r.c.motivadorTipo || "—") + "‖" + r.c.motivador; const g = by[k] || (by[k] = { tipo: r.c.motivadorTipo || "—", motivador: r.c.motivador, n: 0, spend: 0, rev: 0, conv: 0, hooks: [], niveles: new Set() }); g.n += 1; g.spend += r.spend; g.rev += r.spend * (r.roas || 0); g.conv += r.conversaciones || 0; g.hooks.push(r.hook); g.niveles.add(r.nivel); }
-    return Object.values(by).map((g) => ({ ...g, roas: g.spend ? g.rev / g.spend : 0, costoConv: g.conv ? g.spend / g.conv : null, hook: mediana(g.hooks), niveles: [...g.niveles].sort((a, b) => b - a) })).sort((a, b) => b.spend - a.spend);
-  }, [filas]);
+  const motivadores = useMemo(() => motivadoresDe(filas, msg), [filas, msg]);
 
   // Override manual de nivel (celda abierta): guarda y recalcula en el momento
   const setOverride = async (fp, nivel) => {
@@ -1342,9 +1384,10 @@ function Angulos({ withV, u, modo = "ventas", account, extras = [], tab, account
     setTLoading(true); setTErr("");
     const best = topWinners(withV, 1)[0] || null;
     const receta = best ? { angulo: best.sheet?.angulo || best.ang, categoria: best.ang, hook: best.sheet?.tipo_gancho || best.hook, audiencia: best.aud, formato: best.fmt, nivel: niv[fpOf(best)]?.nivel || "nd" } : {};
-    const mx = {}; for (const n of NIV_ORDEN) { mx[n] = {}; for (const e of ETAPAS) { const c = matriz[n][e]; mx[n][e] = { estado: c.estado, creativos: c.n, spend: Math.round(c.spend), pct_spend: Math.round(c.pct * 100), ...(msg ? { costo_conv: c.costoConv && Math.round(c.costoConv) } : { roas: +c.roas.toFixed(2), cpa: c.cpa && Math.round(c.cpa) }), hook_rate: c.hook != null ? +(c.hook * 100).toFixed(1) : null, hold_rate: c.hold != null ? +(c.hold * 100).toFixed(1) : null }; } }
+    const ctx = contextoAngulos(filas, u, msg); // sin los "sin reproducciones" — fuera del payload entero
+    const mx = {}; for (const n of NIV_ORDEN) { mx[n] = {}; for (const e of ETAPAS) { const c = matriz[n][e]; const cc = ctx.celdas[n][e]; mx[n][e] = { estado: c.estado, creativos: cc.creativos, spend: Math.round(c.spend), pct_spend: Math.round(c.pct * 100), ...(msg ? { costo_conv: c.costoConv && Math.round(c.costoConv) } : { roas: +c.roas.toFixed(2), cpa: c.cpa && Math.round(c.cpa) }), hook_rate: c.hook != null ? +(c.hook * 100).toFixed(1) : null, hold_rate: c.hold != null ? +(c.hold * 100).toFixed(1) : null, motivadores_en_celda: cc.motivadores_en_celda, formatos_en_celda: cc.formatos_en_celda }; } }
     const body = { account, extras, tab, modo, accountName, marca: modaSheet("marca"), publico: modaSheet("publico"), periodo: dias ? dias + " días" : preset, umbral: u, receta, lectura,
-      matriz: mx, motivadores: motivadores.slice(0, 20).map((m) => ({ tipo: m.tipo, motivador: m.motivador, creativos: m.n, spend: Math.round(m.spend), ...(msg ? { costo_conv: m.costoConv && Math.round(m.costoConv) } : { roas: +m.roas.toFixed(2) }), hook_rate: m.hook != null ? +(m.hook * 100).toFixed(1) : null, niveles: m.niveles })),
+      matriz: mx, motivadores: ctx.motivadores, voz: ctx.voz, excluidos_sin_reproducciones: ctx.excluidos_sin_reproducciones,
       referencias: { mediana_hook_rate: medHook != null ? +(medHook * 100).toFixed(1) : null, mediana_hold_rate: medHold != null ? +(medHold * 100).toFixed(1) : null, ...(msg ? { mediana_costo_conv: medVenta && Math.round(medVenta) } : { mediana_roas: medVenta }) } };
     try {
       const r = await fetch("/api/conciencia/proximo-test", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
@@ -1353,7 +1396,7 @@ function Angulos({ withV, u, modo = "ventas", account, extras = [], tab, account
       saveHist([{ t: Date.now(), label: (msg ? "mensajes" : "ventas") + " · " + (dias ? dias + "d" : preset), modo, hipotesis: j.hipotesis }, ...hist].slice(0, 15));
     } catch (e) { setTErr("No se pudieron sugerir tests: " + e.message); } finally { setTLoading(false); }
   };
-  const briefDe = (h) => `Nivel de conciencia objetivo: ${h.nivel_objetivo} (${NIV_LABEL[h.nivel_objetivo] || ""}). Motivador: ${h.motivador}. Etapa de audiencia: ${h.etapa_audiencia_sugerida}. Ejemplo de gancho: "${h.hook_ejemplo}". Formato sugerido: ${h.formato_sugerido}. Por qué: ${h.por_que} Métrica de éxito: ${h.metrica_de_exito}. Cantidad de videos: ${h.cantidad_de_videos}.`;
+  const briefDe = (h) => `Nivel de conciencia objetivo: ${h.nivel_objetivo} (${NIV_LABEL[h.nivel_objetivo] || ""}). Motivador (${h.motivadorTipo || "—"}): ${h.motivador}.${h.motivador_cercano ? " Más cercano ya probado: " + h.motivador_cercano + " — se diferencia en: " + (h.diferencia || "") + "." : ""} Etapa de audiencia: ${h.etapa_audiencia_sugerida}. Ejemplo de gancho: "${h.hook_ejemplo}". Formato sugerido: ${h.formato_sugerido}. Por qué: ${h.por_que} Métrica de éxito: ${h.metrica_de_exito}. Cantidad de videos: ${h.cantidad_de_videos}.`;
 
   if (!tab) return <section className="sect"><div className="anplaceholder">Elegí una <b>planilla</b> (pestaña del Sheet) en el header: el nivel de conciencia se juzga por el gancho de cada video, que vive ahí.</div></section>;
   const celdaSel = sel ? matriz[sel.nivel][sel.etapa] : null;
@@ -1435,10 +1478,12 @@ function TestsOut({ hip = [], onBrief }) {
   return (
     <div className="ctests">{hip.map((h, i) => (
       <div className="ctest" key={i}>
-        <div className="cthead"><span className="ctniv">NIVEL {h.nivel_objetivo}</span><span className="ctlab">{NIV_LABEL[h.nivel_objetivo] || ""}</span><span className="ctetapa">{String(h.etapa_audiencia_sugerida || "").toUpperCase()}</span></div>
+        <div className="cthead"><span className="ctniv">NIVEL {h.nivel_objetivo}</span><span className="ctlab">{NIV_LABEL[h.nivel_objetivo] || ""}</span>{h.motivadorTipo && <span className="cmtipo">{h.motivadorTipo}</span>}<span className="ctetapa">{String(h.etapa_audiencia_sugerida || "").toUpperCase()}</span></div>
         <div className="ctmot">{h.motivador}</div>
         <div className="cthook">“{h.hook_ejemplo}”</div>
         <div className="ctwhy"><b>Por qué:</b> {h.por_que}</div>
+        {h.motivador_cercano && <div className="ctwhy"><b>Más cercano ya probado:</b> {h.motivador_cercano} · <b>se diferencia en:</b> {h.diferencia}</div>}
+        {Array.isArray(h.descarte) && h.descarte.length > 0 && <details className="ctdesc"><summary>descartó {h.descarte.length} idea{h.descarte.length > 1 ? "s" : ""}</summary>{h.descarte.map((d, j) => <div key={j}>· <i>{d.idea}</i> — {d.motivo}</div>)}</details>}
         <div className="ctmeta"><span><b>Formato:</b> {h.formato_sugerido}</span><span><b>Éxito:</b> {h.metrica_de_exito}</span><span><b>Videos:</b> {h.cantidad_de_videos}</span></div>
         {onBrief && <button className="ctbrief" onClick={() => onBrief(h)}>✎ ARMAR BRIEF →</button>}
       </div>))}</div>
@@ -2543,12 +2588,20 @@ const GEN_TIPOS = {
   angulos: {
     label: "Ángulos nuevos",
     btn: "GENERAR ÁNGULOS",
-    max: 1500,
-    system: `${GEN_PERSONA}\n\nTu tarea: proponer 6 ÁNGULOS DE VENTA NUEVOS para testear, distintos a los que la marca ya usa pero coherentes con el producto y con lo que funciona. Para cada uno: un nombre corto y una explicación de 1-2 oraciones de por qué podría funcionar y cómo se ejecutaría en un creativo. Devolvé EXCLUSIVAMENTE JSON válido, sin markdown ni backticks: {"angulos":[{"nombre":"...","desc":"..."}, ... 6 items]}`,
+    max: 8000, // 6 ángulos con descarte + motivador + hook: con 4000 se cortaba
+    system: `${GEN_PERSONA}\n\nTu tarea: proponer 6 ÁNGULOS DE VENTA NUEVOS para testear, distintos a los que la marca ya usa pero coherentes con el producto y con lo que funciona. Cada ángulo es un MOTIVADOR concreto (el dolor, deseo, objeción, ocasión o identidad que toca) con un tipo.
+
+REGLAS (no negociables):
+1. DIVERSIDAD: los 6 ángulos cubren los 5 tipos Dolor, Ocasion, Identidad, Objecion y Deseo (uno de cada) y el sexto es Oferta. Ninguno repite el motivador de otro.
+2. Si te paso el INVENTARIO de motivadores ya probados: PROHIBIDO proponer un motivador que ya tenga 3 o más creativos probados (ni con otras palabras). Cada ángulo nombra el motivador probado más cercano y dice en qué se diferencia.
+3. Si te paso ganchos literales de la marca ("así habla esta marca"): tus hooks de ejemplo tienen que sonar a esos — mismo registro, largo y jerga — no a un manifiesto ni a un eslogan.
+4. Razoná antes de proponer: cada ángulo lleva "descarte" con 2 ideas que consideraste y por qué las descartaste (ya probada / fuera de voz / mismo tipo que otra).
+
+Devolvé EXCLUSIVAMENTE JSON válido, sin markdown ni backticks, con los campos EN ESTE ORDEN por ángulo: {"angulos":[{"descarte":[{"idea":"...","motivo":"ya probada | fuera de voz | mismo tipo que otra"},{"idea":"...","motivo":"..."}],"tipo":"Dolor|Ocasion|Identidad|Objecion|Deseo|Oferta","nombre":"nombre corto","motivador":"el motivador concreto, ≤80 chars","cercano":"motivador probado más cercano (o \"ninguno\")","diferencia":"en qué se diferencia, 1 frase","desc":"por qué podría funcionar y cómo se ejecuta en un creativo, 1-2 oraciones","hook_ejemplo":"1 línea, el gancho de los primeros 3 s"}, ... 6 items]}`,
   },
 };
 
-function Generar({ rows = [], accountName = "", prefill = null }) {
+function Generar({ rows = [], accountName = "", prefill = null, account, extras = [], tab, u = {}, modoApp = "ventas", periodKey = "", conciencia = null, onClasif }) {
   // Receta ganadora = mayor ROAS entre creativos CONFIABLES (con spend real y al menos 5 ventas,
   // para no coronar un ROAS ruidoso de poca data). Si ninguno llega a 5 ventas, cae a los que tienen spend.
   const best = useMemo(() => topWinners(rows, 1)[0] || null, [rows]);
@@ -2572,9 +2625,38 @@ function Generar({ rows = [], accountName = "", prefill = null }) {
   const [extra, setExtra] = useState("");
   useEffect(() => { if (prefill && prefill.t) { setTipo(prefill.tipo || "hooks"); setModo(prefill.modo || "explorar"); setExtra(prefill.contexto || ""); setOut(null); } }, [prefill && prefill.t]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Ángulos nuevos: mismo contexto que PRÓXIMO TEST (motivadores probados completos, voz de la
+  // marca, celdas). Reusa la clasificación de ÁNGULOS si es del mismo período; si no, la pide.
+  const [ctxNota, setCtxNota] = useState("");
+  const contextoParaAngulos = async () => {
+    const rowsSheet = rows.filter((r) => r.sheet);
+    if (!tab || !rowsSheet.length) { setCtxNota("Sin planilla del Sheet elegida: los ángulos salen sin el inventario de motivadores probados."); return ""; }
+    let data = conciencia && conciencia.key === periodKey ? conciencia.data : null;
+    if (!data) {
+      setCtxNota("Clasificando el nivel de conciencia de los creativos…");
+      const body = { account, extras, tab, rows: rowsSheet.map((r) => { const o = { fingerprint: fpOf(r) }; for (const k of CONC_CAMPOS) o[k] = r.sheet[k]; return o; }) };
+      const j = await (await fetch("/api/conciencia/clasificar", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })).json();
+      if (j.error) { setCtxNota("No se pudo clasificar (" + j.error + "): ángulos sin inventario de motivadores."); return ""; }
+      data = j; if (onClasif) onClasif({ key: periodKey, data: j });
+    }
+    const msg = modoApp === "mensajes";
+    const filas = rowsSheet.map((r) => filaConciencia(r, data.niveles || {}, data, false));
+    const ctx = contextoAngulos(filas, u, msg);
+    setCtxNota(`Contexto: ${ctx.motivadores.length} motivadores ya probados · ${ctx.voz.frio_mejor_hook_rate.length + ctx.voz.caliente_mejor_venta.length} ganchos de referencia${ctx.excluidos_sin_reproducciones ? " · " + ctx.excluidos_sin_reproducciones + " videos sin reproducciones excluidos" : ""}.`);
+    const saturados = ctx.motivadores.filter((m) => m.creativos >= 3);
+    return "\n\nINVENTARIO DE MOTIVADORES YA PROBADOS (tipo · motivador · niveles · creativos · hook rate · " + (msg ? "costo/conv" : "ROAS") + "):\n" +
+      ctx.motivadores.map((m) => `- [${m.tipo}] ${m.motivador} · niveles ${m.niveles.join("/")} · ${m.creativos} creativo${m.creativos !== 1 ? "s" : ""} · hook ${m.hook_rate != null ? m.hook_rate + "%" : "—"} · ${msg ? (m.costo_conv ? "$" + m.costo_conv : "—") : m.roas + "x"}`).join("\n") +
+      (saturados.length ? "\n\nPROHIBIDO proponer estos motivadores (ya tienen 3+ creativos probados): " + saturados.map((m) => `"${m.motivador}"`).join(", ") : "") +
+      "\n\nASÍ HABLA ESTA MARCA (ganchos literales que ya funcionan — los tuyos tienen que sonar a esto, no a un manifiesto):\n" +
+      "Mejor hook rate en frío:\n" + ctx.voz.frio_mejor_hook_rate.map((v) => `- "${v.gancho}" (${v.hook_rate}% · nivel ${v.nivel})`).join("\n") +
+      "\nMejor venta en caliente:\n" + ctx.voz.caliente_mejor_venta.map((v) => `- "${v.gancho}" (${msg ? "$" + v.costo_conv + "/conv" : v.roas + "x"} · nivel ${v.nivel})`).join("\n");
+  };
+
   const generar = async () => {
     setLoading(true); setErr(""); setOut(null);
     const cfg = GEN_TIPOS[tipo];
+    let ctxAng = "";
+    if (tipo === "angulos") { try { ctxAng = await contextoParaAngulos(); } catch (e) { setCtxNota("Sin contexto de ángulos: " + e.message); } }
     const hookLib = tipo === "hooks" ? "\n\nBiblioteca de patrones de gancho (referencia estructural):\n" + HOOKS.slice(0, 30).map((h) => "- " + h[1]).join("\n") : "";
     const modoTxt = modo === "explorar"
       ? "MODO EXPLORAR (salir de la caja): NO repitas la receta ganadora — usala solo como contraste de lo YA probado. Proponé enfoques, ganchos y ángulos NUEVOS y bien distintos para abrir vetas no exploradas, manteniendo coherencia con el producto y la marca."
@@ -2590,7 +2672,7 @@ Receta ganadora actual (lo que mejor rinde):
 - Audiencia top: ${recipe.audiencia}
 - Formato: ${recipe.formato}
 
-${emoji ? "Podés usar emojis con moderación." : "Sin emojis."}${hookLib}`;
+${emoji ? "Podés usar emojis con moderación." : "Sin emojis."}${hookLib}${ctxAng}`;
     try {
       const res = await fetch("/api/copy", {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -2598,9 +2680,11 @@ ${emoji ? "Podés usar emojis con moderación." : "Sin emojis."}${hookLib}`;
       });
       const data = await res.json();
       if (data.error) throw new Error(data.error.message || data.error);
+      if (data.stop_reason === "max_tokens") throw new Error("la respuesta se cortó por largo — probá de nuevo");
       const text = (data.content || []).filter((b) => b.type === "text").map((b) => b.text).join("\n");
       const clean = text.replace(/```json|```/g, "").trim();
-      setOut({ tipo, data: JSON.parse(clean) });
+      let parsed; try { parsed = JSON.parse(clean); } catch { throw new Error("la IA devolvió un formato inválido — probá de nuevo"); }
+      setOut({ tipo, data: parsed });
     } catch (e) {
       setErr("No se pudo generar: " + e.message);
     } finally { setLoading(false); }
@@ -2627,9 +2711,9 @@ ${emoji ? "Podés usar emojis con moderación." : "Sin emojis."}${hookLib}`;
       <div className="genblock">
         <div className="genblockh">ÁNGULOS NUEVOS</div>
         {(d.angulos || []).map((a, i) => (
-          <div className="outitem" key={"a" + i}>
-            <span className="outtext"><b>{a.nombre}</b> — {a.desc}</span>
-            <button className="copybtn" onClick={() => copy(a.nombre + " — " + a.desc, "a" + i)}>{copied === "a" + i ? "✓" : "⧉"}</button>
+          <div className="outitem outang" key={"a" + i}>
+            <span className="outtext">{a.tipo && <span className="cmtipo">{a.tipo}</span>} <b>{a.nombre}</b>{a.motivador ? <> — {a.motivador}</> : null}<br />{a.desc}{a.hook_ejemplo && <div className="cthook">“{a.hook_ejemplo}”</div>}{a.cercano && a.cercano !== "ninguno" && <div className="ctwhy"><b>Más cercano ya probado:</b> {a.cercano} · <b>se diferencia en:</b> {a.diferencia}</div>}{Array.isArray(a.descarte) && a.descarte.length > 0 && <details className="ctdesc"><summary>descartó {a.descarte.length} idea{a.descarte.length > 1 ? "s" : ""}</summary>{a.descarte.map((x, j) => <div key={j}>· <i>{x.idea}</i> — {x.motivo}</div>)}</details>}</span>
+            <button className="copybtn" onClick={() => copy((a.tipo ? "[" + a.tipo + "] " : "") + a.nombre + " — " + (a.motivador || "") + "\n" + a.desc + (a.hook_ejemplo ? "\nHook: " + a.hook_ejemplo : ""), "a" + i)}>{copied === "a" + i ? "✓" : "⧉"}</button>
           </div>
         ))}
       </div>
@@ -2646,6 +2730,7 @@ ${emoji ? "Podés usar emojis con moderación." : "Sin emojis."}${hookLib}`;
   return (
     <section className="gen">
       {extra && <div className="genbrief"><b>BRIEF DESDE ÁNGULOS</b> {extra} <button className="genbriefx" onClick={() => setExtra("")}>✕ quitar</button></div>}
+      {tipo === "angulos" && ctxNota && <div className="thinnote">{ctxNota}</div>}
       <div className="genintro">Generá con IA (Claude Sonnet 4.6) usando tu <b>receta ganadora</b>{best ? "" : " — elegí un cliente para cargarla"}. Elegí qué querés generar y dale.</div>
       <div className="reciperow">
         <span className="recipechip">ÁNGULO · {recipe.angulo}</span>
@@ -2895,6 +2980,7 @@ tbody tr{border-bottom:1px solid var(--line);box-shadow:inset 5px 0 0 var(--bar)
 tbody tr:hover{background:#EFE6D2;}tbody tr:last-child{border-bottom:none;}
 td{padding:11px 12px;vertical-align:middle;}.num{text-align:right;}.name{font-weight:700;}
 .fmt{font-size:9px;color:var(--soft);border:1px solid var(--line);border-radius:3px;padding:1px 5px;margin-left:6px;font-family:'Space Mono',monospace;letter-spacing:1px;}
+.ctdesc{font-size:11px;color:var(--soft);margin-top:4px;}.ctdesc summary{cursor:pointer;font-family:'Space Mono',monospace;font-size:9.5px;letter-spacing:.5px;}.ctdesc div{margin:2px 0 0 8px;}.outang .outtext{display:block;line-height:1.5;}
 .norepro{font-size:9px;color:#C5362B;border:1px solid #C5362B;border-radius:3px;padding:1px 5px;margin-left:6px;font-family:'Space Mono',monospace;letter-spacing:.5px;white-space:nowrap;}
 .cnd{font-size:11.5px;color:#7A5410;background:#F1E4C4;border:1px solid #C2861F;border-radius:6px;padding:6px 10px;margin:8px 0;display:flex;flex-wrap:wrap;gap:6px 10px;}.cnd b{font-family:'Space Mono',monospace;font-size:10px;letter-spacing:1px;}
 .ctot td{border-top:2px solid var(--ink);padding-top:6px;}.ctotcell{text-align:center;font-size:12px;color:var(--ink);}.ctotcell small{color:var(--soft);}.ccnr{font-size:9.5px;color:#C5362B;margin-top:2px;}.cdaud{display:block;font-weight:400;color:var(--soft);font-size:10px;}

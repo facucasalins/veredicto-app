@@ -143,7 +143,14 @@ respuestas concisas.
   Solo entran creativos CON fila en el Sheet; lo sin Sheet (catálogos) va al desglose "sin nivel"
   del header. Videos "⚠ sin reproducciones" (`sinRepro`: formato de video, >5.000 impresiones,
   <2% de 3 s — Meta no los cuenta como video) se marcan (también en el PANEL) y quedan fuera de
-  las medianas de hook/hold y del veredicto en frío.
+  las medianas de hook/hold y del veredicto en frío. **`contextoAngulos(filas, u, msg)`** arma el
+  contexto que comparten PRÓXIMO TEST y GENERAR → Ángulos nuevos: sin los "sin reproducciones",
+  inventario completo de motivadores, "voz" (8 mejores ganchos por hook rate en frío + 5 mejores
+  por venta en caliente) y motivadores/formatos por celda. `/api/conciencia/proximo-test` valida
+  diversidad (3 motivadorTipo distintos, sin motivador repetido ni saturado con 3+ creativos) y
+  pide UNA corrección si falla; devuelve `advertencia` si sigue rota. `GEN_TIPOS.angulos` exige 5
+  tipos + Oferta, cercano/diferencia y `descarte` por ángulo. La clasificación se comparte entre
+  pestañas vía `conciencia` en App (`{key, data}`).
 - `lib/fx.js` — cotización del **dólar oficial** (Argentina) para no mezclar monedas cuando la cuenta de
   Meta está en USD. `getDolarOficial()` (PROMEDIO de compra y venta = medio del spread, cache en memoria
   ~1h) y `convertMonto(monto, from, to)` (solo ARS↔USD). Fuente: dolarapi.com, fallback criptoya.com.

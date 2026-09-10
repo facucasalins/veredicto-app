@@ -40,6 +40,20 @@ Regla de la casa: cada PR suma su entrada acá ANTES de mergearse.
 - **Desglose "sin nivel"** en el header: cuánto spend quedó sin nivel y por qué — sin fila en el
   Sheet (fuera de la matriz; típico catálogos DPA), Claude no respondió, regla sin match — con
   la acción para corregirlo.
+- **PRÓXIMO TEST y GENERAR → Ángulos nuevos, con el mismo contexto** (`contextoAngulos`): los
+  creativos "sin reproducciones" quedan FUERA del payload entero; va el inventario COMPLETO de
+  motivadores probados (motivador, tipo, niveles, creativos, hook, ROAS/costo); la "voz de la
+  marca" (texto_gancho literal de los 8 mejores por hook rate en frío y los 5 mejores por venta en
+  caliente); y por celda los motivadores y formatos ya usados con su cantidad.
+- Reglas duras en ambos: prohibido proponer un motivador con 3+ creativos probados (la ruta lo
+  valida y pide corrección una vez); cada propuesta nombra el motivador probado más cercano y en
+  qué se diferencia; diversidad obligatoria (3 hipótesis con motivadorTipo distintos; 6 ángulos =
+  Dolor, Ocasión, Identidad, Objeción, Deseo + Oferta, sin repetir motivador); celda llena (3+
+  creativos con ese formato/motivador) → motivador nuevo, no formato; `descarte` con 2 ideas
+  consideradas y por qué se descartaron, ANTES de la propuesta. Los hooks tienen que sonar a los
+  ganchos literales, no a un manifiesto.
+- GENERAR reusa la clasificación de ÁNGULOS si es del mismo período (estado compartido en App);
+  si no, la pide sola. Tarjetas muestran tipo, más cercano/diferencia y el descarte plegado.
 - Calibrado contra Juanita Shoes (30 días: 17/17 esperados) y Shark (10/11; FitTecnico queda en 3
   por rúbrica). Dos desvíos documentados de las reglas del spec: precio dentro de un Comparativo
   no es nivel 5, y ángulo Social_Proof sobre Entretenimiento va a Claude en vez de a 4.
