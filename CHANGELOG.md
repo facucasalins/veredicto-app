@@ -4,6 +4,21 @@ Registro de cambios por versión. **V 1.N = número del PR mergeado** — es el 
 app muestra en el header ("V 1.N ▮▮▮"), así se confirma de un vistazo qué versión corre en prod.
 Regla de la casa: cada PR suma su entrada acá ANTES de mergearse.
 
+## V 1.37 — ÁNGULOS: seguimiento de tests, cierra el loop (PR D)
+- **Estado por hipótesis**: propuesta → aprobada → grabada → en pauta → evaluada, con botones en
+  cada card (y ↶ para volver). Al pasar a "en pauta" se **vinculan los creativos reales**
+  (selector de fingerprints del panel, o texto del nombre) y se guarda la fecha.
+- **Evaluación** automática a los 30 días de "en pauta" (o "⚖ evaluar ahora"): sobre los creativos
+  vinculados calcula la métrica de la celda contra el **benchmark guardado al proponer** (medianas
+  de hook/hold/CTR/costo LPV/ROAS y el umbral de ese momento): hook/hold en frío y niveles 1-2,
+  CTR + costo por LPV en 3-4, ROAS/CPA (o costo/conv) vs umbral en 5 → cumplió / no cumplió /
+  sin data, con los números. Persiste en `hist_test` (localStorage + Upstash).
+- Sección **TESTS** arriba de PRÓXIMO TEST: tabla de todas las hipótesis por estado (nivel,
+  motivador, etapa, fecha, creativos, resultado) y contador propuestas / grabadas / cumplidas.
+- El **cerebro** recibe `tests_en_curso` y `tests_evaluados` en el snapshot y comenta los
+  evaluados en SEGUIMIENTO. **PRÓXIMO TEST** recibe los evaluados y no vuelve a proponer una
+  hipótesis que falló salvo que diga por qué esta vez sería distinto.
+
 ## V 1.36 — ÁNGULOS: inventario de voz real de las clientas (PR C)
 - `lib/voz.js` + Upstash `nusa:voz:<tab>`: por marca, motivadores REALES {id, tipo, frase_literal
   (cómo lo dijo la clienta), resumen, fuente comentarios|whatsapp|meli|resenas|manual, fecha,

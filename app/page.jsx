@@ -1443,14 +1443,28 @@ function Angulos({ withV, u, modo = "ventas", account, extras = [], tab, account
     const body = { account, extras, tab, modo, accountName, marca: modaSheet("marca"), publico: modaSheet("publico"), periodo: dias ? dias + " días" : preset, umbral: u, receta, lectura,
       matriz: mx, motivadores: ctx.motivadores, voz: ctx.voz, excluidos_sin_reproducciones: ctx.excluidos_sin_reproducciones,
       voz_clientas: vozPayload(voz, cruce, ctx.motivadores),
+      tests_evaluados: hist.flatMap((it) => (it.hipotesis || []).filter((h) => h.evaluacion).map((h) => ({ nivel: h.nivel_objetivo, tipo: h.motivadorTipo, motivador: h.motivador, etapa: h.etapa_audiencia_sugerida, resultado: h.evaluacion.resultado, detalle: h.evaluacion.detalle, fecha: h.evaluacion.t }))),
       referencias: { mediana_hook_rate: medHook != null ? +(medHook * 100).toFixed(1) : null, mediana_hold_rate: medHold != null ? +(medHold * 100).toFixed(1) : null, ...(msg ? { mediana_costo_conv: medVenta && Math.round(medVenta) } : { mediana_roas: medVenta }) } };
     try {
       const r = await fetch("/api/conciencia/proximo-test", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
       const j = await r.json(); if (j.error) throw new Error(j.error);
-      setTests(j.hipotesis);
-      saveHist([{ t: Date.now(), label: (msg ? "mensajes" : "ventas") + " · " + (dias ? dias + "d" : preset), modo, hipotesis: j.hipotesis }, ...hist].slice(0, 15));
+      // benchmark de la vista al momento de proponer: contra esto se evalúa cada hipótesis después
+      const rel = filas.filter((r) => r.spend >= u.pisoSpend && !r.norepro);
+      const benchmark = { mediana_hook: medHook, mediana_hold: medHold, mediana_ctr: mediana(rel.map((r) => (r.impresiones ? (r.clics || 0) / r.impresiones : null))), mediana_costo_lpv: mediana(rel.map((r) => (r.lpv ? r.spend / r.lpv : null))), ...(msg ? { mediana_costo_conv: medVenta } : { mediana_roas: medVenta }), umbral: { roasMin: u.roasMin, cpaMax: u.cpaMax, costoMax: u.costoMax, pisoSpend: u.pisoSpend } };
+      const hip = j.hipotesis.map((h) => ({ ...h, estado: "propuesta", creativos: [] }));
+      setTests(null);
+      saveHist([{ t: Date.now(), label: (msg ? "mensajes" : "ventas") + " · " + (dias ? dias + "d" : preset), modo, hipotesis: hip, benchmark }, ...hist].slice(0, 15));
     } catch (e) { setTErr("No se pudieron sugerir tests: " + e.message); } finally { setTLoading(false); }
   };
+  // ── Seguimiento de tests: estado por hipótesis, vínculo con creativos reales y evaluación ──
+  const updateHip = (t, i, patch) => saveHist(hist.map((it) => (it.t === t ? { ...it, hipotesis: it.hipotesis.map((h, j) => (j === i ? { ...h, ...patch } : h)) } : it)));
+  const evaluarHip = (t, i) => { const it = hist.find((x) => x.t === t); if (!it) return; const ev = evaluarHipotesis(it.hipotesis[i], it.benchmark || {}, withV, msg); updateHip(t, i, { evaluacion: ev, estado: "evaluada" }); };
+  // Automática a los 30 días de "en pauta" (una vez por carga, solo las que no tienen evaluación)
+  useEffect(() => {
+    const now = Date.now(); let cambio = false;
+    const nuevo = hist.map((it) => ({ ...it, hipotesis: (it.hipotesis || []).map((h) => { if (h.estado === "en_pauta" && h.fecha_pauta && now - new Date(h.fecha_pauta).getTime() >= 30 * 864e5 && !h.evaluacion) { cambio = true; return { ...h, evaluacion: evaluarHipotesis(h, it.benchmark || {}, withV, msg), estado: "evaluada" }; } return h; }) }));
+    if (cambio) saveHist(nuevo);
+  }, [hist.length, withV.length]); // eslint-disable-line react-hooks/exhaustive-deps
   const briefDe = (h) => `Nivel de conciencia objetivo: ${h.nivel_objetivo} (${NIV_LABEL[h.nivel_objetivo] || ""}). Motivador (${h.motivadorTipo || "—"}): ${h.motivador}.${h.motivador_cercano ? " Más cercano ya probado: " + h.motivador_cercano + " — se diferencia en: " + (h.diferencia || "") + "." : ""} Etapa de audiencia: ${h.etapa_audiencia_sugerida}. Ejemplo de gancho: "${h.hook_ejemplo}". Formato sugerido: ${h.formato_sugerido}. Por qué: ${h.por_que} Métrica de éxito: ${h.metrica_de_exito}. Cantidad de videos: ${h.cantidad_de_videos}.`;
 
   if (!tab) return <section className="sect"><div className="anplaceholder">Elegí una <b>planilla</b> (pestaña del Sheet) en el header: el nivel de conciencia se juzga por el gancho de cada video, que vive ahí.</div></section>;
@@ -1524,14 +1538,16 @@ function Angulos({ withV, u, modo = "ventas", account, extras = [], tab, account
 
       <VozClientas account={account} extras={extras} tab={tab} motivadores={motivadores} voz={voz} setVoz={setVoz} cruce={cruce} setCruce={setCruce} msg={msg} />
 
+      <TestsTabla hist={hist} />
+
       <section className="an">
         <div className="anhead">
           <div><div className="antitle">◎ PRÓXIMO TEST</div><div className="ansub">Claude cruza la matriz (celdas sin probar, ganadoras y perdedoras) con los motivadores ya tocados y propone 3 hipótesis específicas de la marca. Nunca juzga niveles 1-3 por {msg ? "costo/conv" : "ROAS"}.</div></div>
           <button className="anbtn" onClick={sugerir} disabled={tLoading || loading || !filas.length}>{tLoading ? "● PENSANDO..." : tests ? "↻ SUGERIR DE NUEVO" : "▶ SUGERIR TESTS"}</button>
         </div>
         {tErr && <div className="generr">{tErr}</div>}
-        {tests && <TestsOut hip={tests} onBrief={(h) => onBrief && onBrief(briefDe(h))} />}
-        <Historial items={hist} render={(it) => <TestsOut hip={it.hipotesis} onBrief={(h) => onBrief && onBrief(briefDe(h))} />} />
+        {hist[0] && !tErr && <TestsOut item={hist[0]} rows={withV} msg={msg} onUpdate={(i, patch) => updateHip(hist[0].t, i, patch)} onEval={(i) => evaluarHip(hist[0].t, i)} onBrief={(h) => onBrief && onBrief(briefDe(h))} />}
+        <Historial items={hist.slice(1)} render={(it) => <TestsOut item={it} rows={withV} msg={msg} onUpdate={(i, patch) => updateHip(it.t, i, patch)} onEval={(i) => evaluarHip(it.t, i)} onBrief={(h) => onBrief && onBrief(briefDe(h))} />} />
       </section>
 
       <Calibracion filas={filas} niv={niv} accountName={accountName} tab={tab} />
@@ -1678,11 +1694,58 @@ function Calibracion({ filas, niv, accountName = "", tab = "" }) {
     </section>
   );
 }
-function TestsOut({ hip = [], onBrief }) {
+// ─────────── Seguimiento de tests: estado, vínculo con creativos reales y evaluación ───────────
+// Estados: propuesta → aprobada → grabada → en_pauta → evaluada. Al pasar a "en pauta" se vinculan
+// los creativos reales (fingerprints del panel o texto del nombre) y se guarda la fecha. La
+// evaluación (automática a los 30 días o "evaluar ahora") mide sobre los creativos vinculados la
+// métrica de la celda contra el benchmark guardado al proponer: hook/hold en frío (niveles 1-2),
+// CTR y costo por LPV en 3-4, ROAS/CPA (o costo/conv) vs umbral en 5. Persiste en hist_test.
+const ESTADOS_TEST = ["propuesta", "aprobada", "grabada", "en_pauta", "evaluada"];
+const ESTADO_LAB = { propuesta: "PROPUESTA", aprobada: "APROBADA", grabada: "GRABADA", en_pauta: "EN PAUTA", evaluada: "EVALUADA" };
+const ESTADO_COLOR = { propuesta: "#857A6A", aprobada: "#2E6E94", grabada: "#C2861F", en_pauta: "#0F6E56", evaluada: "#1E1812" };
+// Creativos vinculados: por fingerprint exacto o por texto contenido en el nombre/id.
+const creativosDe = (h, rows) => { const links = h.creativos || []; return rows.filter((r) => links.some((l) => fpOf(r) === l || String(r.id).includes(l) || String(r.nombre || "").toLowerCase().includes(String(l).toLowerCase()))); };
+function evaluarHipotesis(h, bench, rows, msg) {
+  const rs = creativosDe(h, rows);
+  const t = new Date().toISOString();
+  const sum = (k) => rs.reduce((s, r) => s + (r[k] || 0), 0);
+  const spend = sum("spend"), imp = sum("impresiones"), v3 = sum("video3s"), tp = sum("thruplay"), clics = sum("clics"), lpv = sum("lpv"), ventas = sum("ventas"), conv = sum("conversaciones"), rev = rs.reduce((s, r) => s + r.spend * (r.roas || 0), 0);
+  const piso = (bench.umbral && bench.umbral.pisoSpend) || 0;
+  if (!rs.length) return { t, resultado: "sin_data", detalle: "sin creativos vinculados que existan en el panel", creativos: 0 };
+  if (spend < piso) return { t, resultado: "sin_data", detalle: `spend ${short(spend)} bajo el piso (${short(piso)})`, creativos: rs.length, spend };
+  const n = +h.nivel_objetivo, frio = h.etapa_audiencia_sugerida === "frio";
+  const p = (x) => (x == null ? "—" : (x * 100).toFixed(1) + "%");
+  if (n <= 2 || frio) {
+    const hook = imp ? v3 / imp : null, hold = v3 ? tp / v3 : null;
+    const okH = hook != null && bench.mediana_hook != null && hook >= bench.mediana_hook, okD = hold != null && bench.mediana_hold != null && hold >= bench.mediana_hold;
+    return { t, resultado: hook == null ? "sin_data" : okH ? "cumplio" : "no_cumplio", metrica: "hook/hold rate", detalle: `hook ${p(hook)} vs mediana ${p(bench.mediana_hook)} · hold ${p(hold)} vs ${p(bench.mediana_hold)}${okH && !okD ? " (hold por debajo)" : ""}`, creativos: rs.length, spend };
+  }
+  if (n <= 4) {
+    const ctr = imp ? clics / imp : null, cl = lpv ? spend / lpv : null;
+    const okC = ctr != null && bench.mediana_ctr != null && ctr >= bench.mediana_ctr, okL = cl != null && bench.mediana_costo_lpv != null && cl <= bench.mediana_costo_lpv;
+    return { t, resultado: ctr == null ? "sin_data" : okC && okL ? "cumplio" : "no_cumplio", metrica: "CTR y costo por LPV", detalle: `CTR ${p(ctr)} vs mediana ${p(bench.mediana_ctr)} · costo LPV ${cl != null ? money(cl) : "—"} vs ${bench.mediana_costo_lpv != null ? money(bench.mediana_costo_lpv) : "—"}${okC !== okL ? " (cumple una de las dos)" : ""}`, creativos: rs.length, spend };
+  }
+  const um = bench.umbral || {};
+  if (msg) { const cc = conv ? spend / conv : null; const ok = cc != null && um.costoMax != null && cc <= um.costoMax; return { t, resultado: cc == null ? "sin_data" : um.costoMax == null ? (bench.mediana_costo_conv != null ? (cc <= bench.mediana_costo_conv ? "cumplio" : "no_cumplio") : "sin_data") : ok ? "cumplio" : "no_cumplio", metrica: "costo por conversación", detalle: `${cc != null ? money(cc) : "—"}/conv vs ${um.costoMax != null ? "umbral " + money(um.costoMax) : "mediana " + (bench.mediana_costo_conv != null ? money(bench.mediana_costo_conv) : "—")}`, creativos: rs.length, spend }; }
+  const roas = spend ? rev / spend : 0, cpa = ventas ? spend / ventas : null;
+  const okR = um.roasMin != null ? roas >= um.roasMin : (bench.mediana_roas != null ? roas >= bench.mediana_roas : null), okP = um.cpaMax != null && cpa != null ? cpa <= um.cpaMax : null;
+  const ok = okR === null && okP === null ? null : (okR !== false && okP !== false);
+  return { t, resultado: ok == null ? "sin_data" : ok ? "cumplio" : "no_cumplio", metrica: "ROAS/CPA", detalle: `ROAS ${roas.toFixed(2)}x vs ${um.roasMin != null ? "umbral " + um.roasMin + "x" : "mediana " + (bench.mediana_roas != null ? bench.mediana_roas.toFixed(2) + "x" : "—")} · CPA ${cpa != null ? money(cpa) : "—"}${um.cpaMax != null ? " vs tope " + money(um.cpaMax) : ""}`, creativos: rs.length, spend };
+}
+const RES_LAB = { cumplio: ["✓ CUMPLIÓ", "#2E8B6B"], no_cumplio: ["✗ NO CUMPLIÓ", "#C5362B"], sin_data: ["— SIN DATA", "#857A6A"] };
+function TestsOut({ item, rows = [], msg = false, onUpdate, onEval, onBrief }) {
+  const hip = (item && item.hipotesis) || [];
+  const [linking, setLinking] = useState(null); // índice de la hipótesis vinculando creativos
+  const [sel, setSel] = useState([]);
+  const [txt, setTxt] = useState("");
+  const abrirLink = (i, h) => { setLinking(i); setSel(h.creativos || []); setTxt(""); };
+  const confirmarLink = (i) => { const links = [...new Set([...sel, ...txt.split(/[\n,]/).map((x) => x.trim()).filter(Boolean)])]; onUpdate(i, { creativos: links, estado: "en_pauta", fecha_pauta: new Date().toISOString() }); setLinking(null); };
+  const candidatos = useMemo(() => [...rows].sort((a, b) => b.spend - a.spend).slice(0, 80), [rows]);
   return (
-    <div className="ctests">{hip.map((h, i) => (
+    <div className="ctests">{hip.map((h, i) => { const est = h.estado || "propuesta"; const ev = h.evaluacion; const vinc = creativosDe(h, rows); return (
       <div className="ctest" key={i}>
         <div className="cthead"><span className="ctniv">NIVEL {h.nivel_objetivo}</span><span className="ctlab">{NIV_LABEL[h.nivel_objetivo] || ""}</span>{h.motivadorTipo && <span className="cmtipo">{h.motivadorTipo}</span>}<span className="ctetapa">{String(h.etapa_audiencia_sugerida || "").toUpperCase()}</span></div>
+        <div className="ctestado" style={{ color: ESTADO_COLOR[est] }}>● {ESTADO_LAB[est]}{h.fecha_pauta ? " · en pauta desde " + new Date(h.fecha_pauta).toLocaleDateString("es-AR") : ""}</div>
         <div className="ctmot">{h.motivador}</div>
         {h.verificado_con_clientas != null && <div className={"ctverif" + (h.verificado_con_clientas ? " si" : "")}>{h.verificado_con_clientas ? "✓ verificado con clientas" + (h.frase_clienta ? ": “" + h.frase_clienta + "”" : "") : "no verificado con clientas"}</div>}
         <div className="cthook">“{h.hook_ejemplo}”</div>
@@ -1690,8 +1753,43 @@ function TestsOut({ hip = [], onBrief }) {
         {h.motivador_cercano && <div className="ctwhy"><b>Más cercano ya probado:</b> {h.motivador_cercano} · <b>se diferencia en:</b> {h.diferencia}</div>}
         {Array.isArray(h.descarte) && h.descarte.length > 0 && <details className="ctdesc"><summary>descartó {h.descarte.length} idea{h.descarte.length > 1 ? "s" : ""}</summary>{h.descarte.map((d, j) => <div key={j}>· <i>{d.idea}</i> — {d.motivo}</div>)}</details>}
         <div className="ctmeta"><span><b>Formato:</b> {h.formato_sugerido}</span><span><b>Éxito:</b> {h.metrica_de_exito}</span><span><b>Videos:</b> {h.cantidad_de_videos}</span></div>
-        {onBrief && <button className="ctbrief" onClick={() => onBrief(h)}>✎ ARMAR BRIEF →</button>}
-      </div>))}</div>
+        {(h.creativos || []).length > 0 && <div className="ctlinks"><b>Creativos:</b> {h.creativos.join(" · ")} <small>({vinc.length} en el panel)</small></div>}
+        {ev && <div className="cteval" style={{ borderColor: RES_LAB[ev.resultado][1] }}><b style={{ color: RES_LAB[ev.resultado][1] }}>{RES_LAB[ev.resultado][0]}</b> <span>{ev.metrica ? ev.metrica + " · " : ""}{ev.detalle}</span><small> · {ev.creativos} creativo{ev.creativos !== 1 ? "s" : ""}{ev.spend ? " · " + short(ev.spend) : ""} · {new Date(ev.t).toLocaleDateString("es-AR")}</small></div>}
+        {linking === i ? (
+          <div className="ctlink">
+            <div className="callab">VINCULAR CREATIVOS REALES (fingerprints del panel)</div>
+            <div className="ctlinklist">{candidatos.map((r) => { const fp = fpOf(r); const on = sel.includes(fp); return <label key={r.id} className={"ctlinkopt" + (on ? " on" : "")}><input type="checkbox" checked={on} onChange={() => setSel(on ? sel.filter((x) => x !== fp) : [...sel, fp])} />{r.nombre} <TF r={r} /><small>{short(r.spend)}</small></label>; })}</div>
+            <input className="vozres" placeholder="o pegá el texto del nombre / fingerprint (separá con coma)" value={txt} onChange={(e) => setTxt(e.target.value)} />
+            <div className="ctbtns"><button className="ctbrief" onClick={() => confirmarLink(i)} disabled={!sel.length && !txt.trim()}>✓ EN PAUTA (guarda fecha)</button><button className="cdx" onClick={() => setLinking(null)}>cancelar</button></div>
+          </div>
+        ) : (
+          <div className="ctbtns">
+            {onUpdate && est === "propuesta" && <button className="ctstate" onClick={() => onUpdate(i, { estado: "aprobada" })}>→ APROBAR</button>}
+            {onUpdate && est === "aprobada" && <button className="ctstate" onClick={() => onUpdate(i, { estado: "grabada" })}>→ GRABADA</button>}
+            {onUpdate && (est === "grabada" || est === "aprobada") && <button className="ctstate" onClick={() => abrirLink(i, h)}>→ EN PAUTA…</button>}
+            {onUpdate && est === "en_pauta" && <button className="ctstate" onClick={() => abrirLink(i, h)}>✎ creativos</button>}
+            {onEval && (est === "en_pauta" || est === "evaluada") && <button className="ctstate" onClick={() => onEval(i)}>⚖ EVALUAR AHORA</button>}
+            {onUpdate && est !== "propuesta" && <button className="cdx" onClick={() => onUpdate(i, { estado: ESTADOS_TEST[Math.max(0, ESTADOS_TEST.indexOf(est) - 1)] })} title="volver un estado">↶</button>}
+            {onBrief && <button className="ctbrief" onClick={() => onBrief(h)}>✎ ARMAR BRIEF →</button>}
+          </div>
+        )}
+      </div>); })}</div>
+  );
+}
+// Tabla de TODAS las hipótesis por estado (arriba de PRÓXIMO TEST) + contadores.
+function TestsTabla({ hist }) {
+  const all = hist.flatMap((it) => (it.hipotesis || []).map((h, i) => ({ ...h, _t: it.t, _i: i })));
+  if (!all.length) return null;
+  const cnt = (f) => all.filter(f).length;
+  const orden = (h) => ESTADOS_TEST.indexOf(h.estado || "propuesta");
+  return (
+    <section className="sect">
+      <div className="secthead"><span className="sverb" style={{ background: "#1E1812", color: "#F4C24A" }}><span className="sq" style={{ background: "#F4C24A" }} />⚑</span><span className="stitle">TESTS</span>
+        <span className="sright">{cnt(() => true)} propuestas · {cnt((h) => ["grabada", "en_pauta", "evaluada"].includes(h.estado))} grabadas · {cnt((h) => h.evaluacion && h.evaluacion.resultado === "cumplio")} cumplidas · {cnt((h) => h.evaluacion && h.evaluacion.resultado === "no_cumplio")} no cumplidas</span></div>
+      <div className="cmotwrap"><table className="cmot"><thead><tr><th>ESTADO</th><th>NIVEL</th><th>MOTIVADOR</th><th>ETAPA</th><th>FECHA</th><th>CREATIVOS</th><th>RESULTADO</th></tr></thead>
+        <tbody>{[...all].sort((a, b) => orden(b) - orden(a) || b._t - a._t).map((h) => { const est = h.estado || "propuesta"; const ev = h.evaluacion; return (
+          <tr key={h._t + "-" + h._i}><td><span className="cmtipo" style={{ color: ESTADO_COLOR[est], borderColor: ESTADO_COLOR[est] }}>{ESTADO_LAB[est]}</span></td><td className="mono num">{h.nivel_objetivo}</td><td>{h.motivador}<br /><small className="vozres2">{h.motivadorTipo}</small></td><td className="mono">{h.etapa_audiencia_sugerida}</td><td className="mono">{new Date(h.fecha_pauta || h._t).toLocaleDateString("es-AR")}</td><td className="mono">{(h.creativos || []).length ? h.creativos.join(", ") : "—"}</td><td>{ev ? <><b style={{ color: RES_LAB[ev.resultado][1] }}>{RES_LAB[ev.resultado][0]}</b><br /><small className="vozres2">{ev.detalle}</small></> : "—"}</td></tr>); })}</tbody></table></div>
+    </section>
   );
 }
 
@@ -2207,6 +2305,14 @@ function Analisis({ withV, stats, audiencias, tnSummary, ga4 = null, tendencia =
 
   // Historial por cliente: localStorage + Upstash si está conectado (compartido entre máquinas)
   const [hist, saveHist] = useHistSync("hist_an", account);
+  const [histTests] = useHistSync("hist_test", account); // tests de ÁNGULOS → el cerebro los comenta en SEGUIMIENTO
+  const testsCtx = useMemo(() => {
+    const all = histTests.flatMap((it) => (it.hipotesis || []));
+    const f = (h) => ({ nivel: h.nivel_objetivo, tipo: h.motivadorTipo, motivador: h.motivador, etapa: h.etapa_audiencia_sugerida, estado: h.estado || "propuesta", creativos: h.creativos || [] });
+    const curso = all.filter((h) => ["aprobada", "grabada", "en_pauta"].includes(h.estado)).map(f);
+    const evaluados = all.filter((h) => h.evaluacion).map((h) => ({ ...f(h), resultado: h.evaluacion.resultado, metrica: h.evaluacion.metrica, detalle: h.evaluacion.detalle, fecha: h.evaluacion.t }));
+    return curso.length || evaluados.length ? { tests_en_curso: curso, tests_evaluados: evaluados } : {};
+  }, [histTests]);
 
   const pedir = async () => {
     setLoading(true); setErr(""); setOut(null);
@@ -2226,7 +2332,8 @@ function Analisis({ withV, stats, audiencias, tnSummary, ga4 = null, tendencia =
         .filter((h) => h.foto && h.out && (h.modo || "ventas") === modo)
         .slice(0, 3)
         .map((h) => ({ fecha: new Date(h.t).toISOString().slice(0, 10), dias_atras: Math.max(0, Math.round((Date.now() - h.t) / 86400000)), titular: h.out.titular, foto: h.foto, acciones_recomendadas: (h.out.acciones || []).map((a) => a.accion).slice(0, 5) }));
-      const snap = previas.length ? { ...snapshot, lecturas_anteriores: { nota: "tus lecturas previas de esta cuenta (la más nueva primero); los períodos pueden diferir del actual", lecturas: previas } } : snapshot;
+      const base = { ...snapshot, ...testsCtx };
+      const snap = previas.length ? { ...base, lecturas_anteriores: { nota: "tus lecturas previas de esta cuenta (la más nueva primero); los períodos pueden diferir del actual", lecturas: previas } } : base;
       const res = await fetch("/api/analyze", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ snapshot: snap }) });
       const data = await res.json();
       if (data.error) throw new Error(data.error);
@@ -3208,6 +3315,9 @@ td{padding:11px 12px;vertical-align:middle;}.num{text-align:right;}.name{font-we
 .vozprops{border:2px solid var(--ink);border-radius:8px;padding:10px 12px;background:#EFE8D6;margin-bottom:10px;}.vozprop{display:grid;grid-template-columns:20px 110px 1fr;gap:8px;align-items:start;padding:6px 0;border-top:1px dashed var(--line);}.vozprop.off{opacity:.45;}.vozprop select{font-size:11px;}.vozpbody{display:flex;flex-direction:column;gap:3px;}.vozfrase{font-style:italic;color:#4A4336;font-size:12.5px;}.vozres{font-size:12px;padding:3px 6px;border:1px solid var(--line);border-radius:4px;background:#fff;}.vozmeta{font-size:10.5px;color:var(--soft);}.vozdup{color:#C2861F;}
 .vozmanual{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:8px 0 12px;}.vozmanual input{font-size:12px;padding:4px 6px;border:1px solid var(--line);border-radius:4px;background:#fff;min-width:200px;}.vozmanual select{font-size:11px;}
 .vozsin td{background:#FBF3D9;}.vozbacklog{color:#C2861F;font-family:'Space Mono',monospace;font-size:10px;font-weight:700;}.vozres2{font-size:10.5px;color:var(--soft);}
+.ctestado{font-family:'Space Mono',monospace;font-size:10px;letter-spacing:1px;font-weight:700;}.ctlinks{font-size:11.5px;color:#4A4336;}.cteval{border:2px solid;border-radius:6px;padding:6px 8px;font-size:12px;background:#fff;}.cteval small{color:var(--soft);}
+.ctbtns{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:auto;}.ctstate{background:#fff;border:2px solid var(--ink);border-radius:6px;padding:5px 9px;font-family:'Space Mono',monospace;font-size:10px;letter-spacing:.5px;cursor:pointer;font-weight:700;}
+.ctlink{border:1px dashed var(--ink);border-radius:6px;padding:8px;background:#fff;display:flex;flex-direction:column;gap:6px;}.ctlinklist{max-height:180px;overflow:auto;display:flex;flex-direction:column;gap:2px;}.ctlinkopt{font-size:11.5px;display:flex;align-items:center;gap:6px;padding:2px 4px;border-radius:4px;cursor:pointer;}.ctlinkopt.on{background:#DCE9E1;}.ctlinkopt small{margin-left:auto;color:var(--soft);}
 .ctverif{font-family:'Space Mono',monospace;font-size:9.5px;letter-spacing:.5px;color:#857A6A;}.ctverif.si{color:#0F6E56;font-weight:700;}
 .calgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-bottom:10px;}.calbox{border:2px solid var(--ink);border-radius:8px;padding:10px 12px;background:#F6F1E4;}.callab{font-family:'Space Mono',monospace;font-size:9px;letter-spacing:1px;color:var(--soft);}.calval{font-family:'Anton',Impact,sans-serif;font-size:26px;color:var(--ink);}.calsub{font-size:11px;color:#6B6552;}.calniv{display:inline-block;margin-right:8px;}
 .calconf{border-collapse:collapse;font-size:12px;}.calconf th,.calconf td{border:1px solid var(--line);padding:6px 12px;text-align:center;min-width:40px;}.calconf th{font-family:'Space Mono',monospace;font-size:10px;color:var(--soft);}.calconf td.diag{background:#DCE9E1;color:#2E8B6B;font-weight:700;}.calconf td.err{background:#F1D9D3;color:#C5362B;font-weight:700;}

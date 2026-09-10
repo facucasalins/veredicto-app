@@ -36,6 +36,7 @@ Devolvé EXACTAMENTE 3 hipótesis de test, en JSON puro (sin markdown): {"hipote
 - "frase_clienta": la frase literal de la clienta que lo respalda, o ""
 
 REGLAS (no negociables):
+00. TESTS YA EVALUADOS ("tests_evaluados", si viene): NO vuelvas a proponer una hipótesis que ya falló (mismo nivel + motivador o motivador equivalente con resultado no_cumplio), salvo que digas EXPLÍCITAMENTE en "por_que" por qué esta vez sería distinto (otra etapa, otro formato, otro gancho). Las que cumplieron no son "nuevas": si las proponés es para escalar, no para testear.
 0. VOZ DE LAS CLIENTAS: si te paso "voz_clientas", sus motivadores "sin_creativo" (dijeron ellas y NADIE grabó todavía) tienen PRIORIDAD sobre inventar. Solo inventá si el backlog no alcanza para 3 hipótesis distintas, y marcá lo inventado con verificado_con_clientas:false.
 1. NUNCA propongas como "nuevo" un nivel + motivador que ya figura ganador en la matriz o en el inventario.
 2. PROHIBIDO proponer un motivador que ya tenga 3 o más creativos probados en el inventario (ni reformulado). Cada hipótesis nombra el motivador probado más cercano y dice en qué se diferencia.
@@ -85,7 +86,7 @@ export async function POST(req) {
     marca: body.accountName || body.marca || "", marca_detectada: body.marca || "nd", publico_inferido: body.publico || "nd",
     periodo: body.periodo || "", umbral: body.umbral || {}, receta_ganadora: body.receta || {},
     matriz: body.matriz || {}, motivadores_probados: motivadores, motivadores_PROHIBIDOS_3_o_mas_creativos: motivadores.filter((m) => (m.creativos || 0) >= 3).map((m) => m.motivador),
-    voz_de_la_marca: body.voz || {}, voz_clientas: body.voz_clientas || { sin_creativo: [], probados: [] }, referencias: body.referencias || {}, lectura: body.lectura || [],
+    voz_de_la_marca: body.voz || {}, voz_clientas: body.voz_clientas || { sin_creativo: [], probados: [] }, tests_evaluados: Array.isArray(body.tests_evaluados) ? body.tests_evaluados.slice(0, 40) : [], referencias: body.referencias || {}, lectura: body.lectura || [],
     nota: body.excluidos_sin_reproducciones ? `${body.excluidos_sin_reproducciones} creativos "sin reproducciones" (bug de Meta) fueron excluidos de todo esto.` : undefined,
   };
   try {
