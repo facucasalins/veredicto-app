@@ -15,7 +15,11 @@ export async function POST(req) {
   const nivel = parseInt(body.nivel, 10);
   if (!body.fingerprint || !(nivel >= 1 && nivel <= 5)) return Response.json({ error: "fingerprint y nivel 1-5 requeridos" }, { status: 400 });
   if (!storeEnabled()) return Response.json({ error: "Sin Upstash no se pueden guardar overrides" }, { status: 409 });
-  const ov = { nivel, motivador: String(body.motivador || "").slice(0, 80), motivadorTipo: MOTIVADOR_TIPOS.includes(body.motivadorTipo) ? body.motivadorTipo : "", t: Date.now() };
+  // nivel_previo / fuente_previa (regla|claude) = lo que dijo la clasificación automática antes del
+  // override: es el set de calibración (sección CALIBRACIÓN de ÁNGULOS y CSV de entrenamiento).
+  const np = parseInt(body.nivel_previo, 10);
+  const ov = { nivel, motivador: String(body.motivador || "").slice(0, 80), motivadorTipo: MOTIVADOR_TIPOS.includes(body.motivadorTipo) ? body.motivadorTipo : "",
+    nivel_previo: np >= 1 && np <= 5 ? np : null, fuente_previa: ["regla", "claude"].includes(body.fuente_previa) ? body.fuente_previa : (body.fuente_previa ? "nd" : null), t: Date.now() };
   try { await kvSet(keyOverride(String(body.tab), String(body.fingerprint)), ov); return Response.json({ ok: true, override: ov }); }
   catch (e) { return Response.json({ error: e.message }, { status: 500 }); }
 }

@@ -4,6 +4,18 @@ Registro de cambios por versión. **V 1.N = número del PR mergeado** — es el 
 app muestra en el header ("V 1.N ▮▮▮"), así se confirma de un vistazo qué versión corre en prod.
 Regla de la casa: cada PR suma su entrada acá ANTES de mergearse.
 
+## V 1.35 — ÁNGULOS: validación de la clasificación (PR B)
+- Cada **override** guarda además `nivel_previo` y `fuente_previa` (regla | claude) en el mismo
+  registro de Upstash: lo que dijo lo automático antes de la corrección.
+- Sección **CALIBRACIÓN** al pie de ÁNGULOS: cantidad de overrides, % de coincidencia entre
+  override y clasificación automática (global, por fuente regla/Claude y por nivel) y matriz de
+  confusión 5×5 (automático × manual). Con menos de 20 overrides: "faltan N para calibrar". Se
+  recalcula en el momento con cada override, sin recargar.
+- **⬇ CSV overrides** (fingerprint, marca, texto_gancho, nivel_auto, fuente, nivel_manual,
+  motivador): el set de entrenamiento del prompt v3 de Gemini. Se arma en el browser.
+- Aviso "las reglas duras están fallando en nivel X" con ejemplos si la coincidencia por regla
+  cae bajo 80% con 20+ overrides.
+
 ## V 1.34 — ÁNGULOS: saneamiento (PR A) — batch completo, piso de celda, cron de alertas, videos sin reproducciones
 - **Clasificación en rondas**: `/api/conciencia/clasificar` procesa hasta 2 tandas de 20 por
   llamada (no pasa el timeout del serverless) y devuelve `pendientes`; el front vuelve a pedir
