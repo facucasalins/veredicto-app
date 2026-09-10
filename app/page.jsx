@@ -1223,7 +1223,7 @@ const diasPeriodo = (preset, cSince, cUntil) => { const r = preset === "custom" 
 const filaConciencia = (r, niv, clasif, loading) => {
   const fp = fpOf(r); const c = niv[fp] || null;
   const nivel = c && c.nivel ? c.nivel : "nd";
-  const motivo = nivel !== "nd" ? null : (c ? (clasif && clasif.claude ? "claude" : "regla") : (loading ? "pendiente" : "regla"));
+  const motivo = nivel !== "nd" ? null : (c ? (c.fuente === "pendiente" ? "pendiente" : c.motivo === "claude_fallo" ? "claude" : "regla") : (loading ? "pendiente" : "regla"));
   const partes = (r.breakdown || []).map((b) => ({ etapa: etapaAud(b.aud), aud: b.aud, adset: b.adset, spend: b.spend || 0, rev: (b.spend || 0) * (b.roas || 0), ventas: b.ventas || 0, conv: b.conversaciones || 0, imp: b.impresiones || 0, v3: b.video3s || 0, tp: b.thruplay || 0 }));
   return { ...r, fp, c, nivel, motivo, partes, hook: hookRate(r), hold: holdRate(r), norepro: sinRepro(r) };
 };
@@ -1267,12 +1267,31 @@ const contextoAngulos = (filasTodas, u, msg) => {
   return { motivadores, voz, celdas, excluidos_sin_reproducciones: filasTodas.length - filas.length };
 };
 
+// Clasifica en RONDAS: cada llamada a /clasificar procesa hasta 2 tandas de 20 (para no pasar el
+// timeout del serverless) y devuelve `pendientes`; acá se vuelve a pedir SOLO esos hasta cubrir
+// todo (tope 10 rondas). `onProgress(acc, quedan)` pinta el avance. Devuelve el resultado mergeado.
+async function clasificarTodo(base, rows, onProgress) {
+  let restantes = rows, acc = { niveles: {}, cache: true, claude: true };
+  for (let ronda = 0; ronda < 10 && restantes.length; ronda++) {
+    const j = await (await fetch("/api/conciencia/clasificar", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...base, rows: restantes }) })).json();
+    if (j.error) throw new Error(j.error);
+    acc = { ...acc, ...j, niveles: { ...acc.niveles, ...(j.niveles || {}) } };
+    const pend = new Set(j.pendientes || []);
+    restantes = restantes.filter((r) => pend.has(r.fingerprint));
+    if (onProgress) onProgress(acc, restantes.length);
+  }
+  if (restantes.length) for (const r of restantes) acc.niveles[r.fingerprint] = { nivel: null, fuente: "pendiente", motivador: "", motivadorTipo: "", confianza: "baja" };
+  return acc;
+}
+const filasParaClasificar = (rowsSheet) => rowsSheet.map((r) => { const o = { fingerprint: fpOf(r) }; for (const k of CONC_CAMPOS) o[k] = r.sheet[k]; return o; });
+
 function Angulos({ withV, u, modo = "ventas", account, extras = [], tab, accountName = "", preset, cSince, cUntil, onBrief, conciencia = null, onClasif }) {
   const msg = modo === "mensajes";
   const [clasif, setClasif] = useState(null); // { niveles: {fp → {nivel, fuente, motivador, motivadorTipo, confianza}}, cache, claude }
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
   const [ver, setVer] = useState(0); // fuerza re-clasificar (después de quitar un override)
+  const [quedan, setQuedan] = useState(0); // creativos que faltan clasificar en la ronda actual
   const [sel, setSel] = useState(null); // celda abierta {nivel, etapa}
   const [tests, setTests] = useState(null);
   const [tLoading, setTLoading] = useState(false);
@@ -1287,15 +1306,24 @@ function Angulos({ withV, u, modo = "ventas", account, extras = [], tab, account
     if (!tab || !rowsSheet.length) { setClasif(null); return; }
     if (conciencia && conciencia.key === periodKey && conciencia.data && !ver) { setClasif(conciencia.data); return; } // ya clasificado (mismo período) → sin refetch
     let cancelled = false;
-    setLoading(true); setErr(""); setSel(null);
-    const rows = rowsSheet.map((r) => { const o = { fingerprint: fpOf(r) }; for (const k of CONC_CAMPOS) o[k] = r.sheet[k]; return o; });
-    fetch("/api/conciencia/clasificar", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ account, extras, tab, rows }) })
-      .then((r) => r.json())
-      .then((j) => { if (cancelled) return; if (j.error) setErr(j.error); else { setClasif(j); if (onClasif) onClasif({ key: periodKey, data: j }); } })
+    setLoading(true); setErr(""); setSel(null); setQuedan(0);
+    clasificarTodo({ account, extras, tab }, filasParaClasificar(rowsSheet), (acc, n) => { if (!cancelled) { setClasif(acc); setQuedan(n); } })
+      .then((j) => { if (cancelled) return; setClasif(j); if (onClasif) onClasif({ key: periodKey, data: j }); })
       .catch((e) => { if (!cancelled) setErr(e.message); })
-      .finally(() => { if (!cancelled) setLoading(false); });
+      .finally(() => { if (!cancelled) { setLoading(false); setQuedan(0); } });
     return () => { cancelled = true; };
   }, [periodKey, rowsSheet.length, ver]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Reintento manual: solo los pendientes y los que Claude falló.
+  const reintentar = async () => {
+    const fps = new Set(Object.entries(niv).filter(([, c]) => c.fuente === "pendiente" || (c.fuente === "nd" && c.motivo === "claude_fallo")).map(([fp]) => fp));
+    const rows = filasParaClasificar(rowsSheet).filter((r) => fps.has(r.fingerprint));
+    if (!rows.length) return;
+    setLoading(true); setErr("");
+    try {
+      const j = await clasificarTodo({ account, extras, tab }, rows, (acc, n) => setQuedan(n));
+      setClasif((p) => { const m = { ...p, ...j, niveles: { ...(p ? p.niveles : {}), ...j.niveles } }; if (onClasif) onClasif({ key: periodKey, data: m }); return m; });
+    } catch (e) { setErr(e.message); } finally { setLoading(false); setQuedan(0); }
+  };
 
   // Filas enriquecidas + matriz
   const niv = (clasif && clasif.niveles) || {};
@@ -1319,9 +1347,14 @@ function Angulos({ withV, u, modo = "ventas", account, extras = [], tab, account
     return o;
   }, [filas, withV]);
   const spendCuenta = withV.reduce((s, r) => s + r.spend, 0); // para el % del desglose "sin nivel" (incluye lo sin Sheet)
+  // Spend por columna (etapa): piso de celda (≥5% de su columna) y confianza (≥10%).
+  const colSpend = useMemo(() => { const o = {}; for (const e of ETAPAS) o[e] = filas.reduce((s, r) => { const m = enEtapa(r, e); return s + (m ? m.spend : 0); }, 0); return o; }, [filas]);
   // Celda nivel × etapa: reparte cada creativo por CONJUNTO. "creativos" = cuántos tuvieron spend acá.
   // El hook/hold de un creativo EN la celda sale de sus conjuntos de esa etapa; los "sin
   // reproducciones" se listan pero no entran a las medianas ni al veredicto de la celda.
+  // PISO para tener veredicto: ≥3 creativos Y ≥5% del spend de su columna; debajo → "sin data".
+  // Confianza: alta (≥6 creativos y ≥10% de la columna) · media (cumple el piso) · baja (no cumple).
+  // La columna TOTAL no juzga: solo spend, % y cantidad.
   const celda = (nivel, etapa) => {
     const rs = [];
     let spend = 0, rev = 0, ventas = 0, conv = 0;
@@ -1338,15 +1371,18 @@ function Angulos({ withV, u, modo = "ventas", account, extras = [], tab, account
     const roas = spend ? rev / spend : 0, cpa = ventas ? spend / ventas : null, costoConv = conv ? spend / conv : null;
     const ok = rs.filter((r) => !r.norepro);
     const hook = mediana(ok.map((r) => r.cellHook)), hold = mediana(ok.map((r) => r.cellHold));
+    const col = colSpend[etapa] || 0;
+    const piso = rs.length >= 3 && col > 0 && spend >= col * 0.05;
+    const confianza = !piso ? "baja" : (rs.length >= 6 && spend >= col * 0.10 ? "alta" : "media");
     let estado;
     if (!rs.length) estado = "sin_probar";
     else if (nivel === "nd" || etapa === "total") estado = "neutra";
-    else if (spend < u.pisoSpend || rs.length < 2) estado = "sin_data";
+    else if (!piso || spend < u.pisoSpend) estado = "sin_data";
     else if (etapa === "frio") estado = medHook == null || hook == null ? "neutra" : hook >= medHook * 1.15 ? "ganadora" : hook <= medHook * 0.85 ? "perdedora" : "neutra"; // frío: SOLO hook rate (sin los "sin reproducciones")
     else { const v = msg ? costoConv : roas; if (medVenta == null || v == null) estado = "neutra"; else if (msg) estado = v <= medVenta * 0.85 ? "ganadora" : v >= medVenta * 1.15 ? "perdedora" : "neutra"; else estado = v >= medVenta * 1.15 ? "ganadora" : v <= medVenta * 0.85 ? "perdedora" : "neutra"; }
-    return { nivel, etapa, rows: rs.sort((a, b) => b.cellSpend - a.cellSpend), n: rs.length, spend, pct: totalSpend ? spend / totalSpend : 0, roas, cpa, costoConv, hook, hold, estado, norepro: rs.length - ok.length };
+    return { nivel, etapa, rows: rs.sort((a, b) => b.cellSpend - a.cellSpend), n: rs.length, spend, pct: totalSpend ? spend / totalSpend : 0, pctCol: col ? spend / col : 0, roas, cpa, costoConv, hook, hold, estado, confianza, norepro: rs.length - ok.length };
   };
-  const matriz = useMemo(() => { const m = {}; for (const n of NIV_ORDEN) { m[n] = {}; for (const e of ETAPAS) m[n][e] = celda(n, e); } return m; }, [filas, u.pisoSpend, medVenta, medHook, msg, totalSpend]); // eslint-disable-line react-hooks/exhaustive-deps
+  const matriz = useMemo(() => { const m = {}; for (const n of NIV_ORDEN) { m[n] = {}; for (const e of ETAPAS) m[n][e] = celda(n, e); } return m; }, [filas, u.pisoSpend, medVenta, medHook, msg, totalSpend, colSpend]); // eslint-disable-line react-hooks/exhaustive-deps
   const etapaTot = (e) => NIV_ORDEN.reduce((s, n) => s + matriz[n][e].spend, 0);
 
   // LECTURA determinista (plantillas + números, sin IA)
@@ -1419,31 +1455,36 @@ function Angulos({ withV, u, modo = "ventas", account, extras = [], tab, account
       {dias != null && dias < 60 && <div className="cwarn">⚠ Con menos de 60 días la matriz queda casi vacía. Recomendado: <b>últimos 90 días</b>.</div>}
       <section className="sect">
         <div className="secthead"><span className="sverb" style={{ background: "#1E1812", color: "#F4C24A" }}><span className="sq" style={{ background: "#F4C24A" }} />◈</span><span className="stitle">MAPA · NIVEL DE CONCIENCIA × ETAPA</span>
-          <span className="sright">{loading ? "clasificando…" : clasif ? <>{filas.length} creativos · {Object.values(niv).filter((c) => c.fuente === "regla").length} por regla · {Object.values(niv).filter((c) => c.fuente === "claude").length} por Claude · {Object.values(niv).filter((c) => c.fuente === "override").length} manual{clasif.cache ? "" : <span className="ctip" title="Sin Upstash la clasificación por Claude no se guarda: se repite en cada carga.">· sin cache ⓘ</span>}</> : ""}</span></div>
+          <span className="sright">{loading ? ("clasificando…" + (quedan ? " quedan " + quedan : "")) : clasif ? <>{filas.length} creativos · {Object.values(niv).filter((c) => c.fuente === "regla").length} por regla · {Object.values(niv).filter((c) => c.fuente === "claude").length} por Claude · {Object.values(niv).filter((c) => c.fuente === "override").length} manual{clasif.cache ? "" : <span className="ctip" title="Sin Upstash la clasificación por Claude no se guarda: se repite en cada carga.">· sin cache ⓘ</span>}</> : ""}</span></div>
         {Object.keys(ndInfo).length > 0 && (
           <div className="cnd">
             <b>SIN NIVEL ({short(Object.values(ndInfo).reduce((s, x) => s + x.spend, 0))} · {Math.round(Object.values(ndInfo).reduce((s, x) => s + x.spend, 0) / (spendCuenta || 1) * 100)}% del spend de la cuenta)</b>
             {ndInfo.sin_sheet && <span>· sin fila en el Sheet (fuera de la matriz): {short(ndInfo.sin_sheet.spend)} ({ndInfo.sin_sheet.n}) → catálogos o videos sin procesar en la planilla</span>}
-            {ndInfo.claude && <span>· Claude no respondió: {short(ndInfo.claude.spend)} ({ndInfo.claude.n}) → recargar la pestaña reintenta</span>}
+            {ndInfo.claude && <span>· Claude no respondió: {short(ndInfo.claude.spend)} ({ndInfo.claude.n})</span>}
+            {(ndInfo.claude || ndInfo.pendiente) && !loading && <button className="cretry" onClick={reintentar}>↻ reintentar {(ndInfo.claude?.n || 0) + (ndInfo.pendiente?.n || 0)}</button>}
             {ndInfo.regla && <span>· regla sin match{clasif && clasif.claude ? "" : " (sin Claude)"}: {short(ndInfo.regla.spend)} ({ndInfo.regla.n}) → override manual en la celda nd</span>}
-            {ndInfo.pendiente && <span>· clasificando: {short(ndInfo.pendiente.spend)} ({ndInfo.pendiente.n})</span>}
+            {ndInfo.pendiente && <span>· pendiente{loading ? " (clasificando)" : " (no se llegó a clasificar)"}: {short(ndInfo.pendiente.spend)} ({ndInfo.pendiente.n})</span>}
           </div>
         )}
         {err && <div className="generr">{err}</div>}
-        <div className="thinnote">Filas: nivel de conciencia del GANCHO (5 producto+oferta → 1 inconsciente). Columnas: etapa de la audiencia donde corrió. En <b>frío</b> la celda se juzga por hook rate vs la mediana ({pctf(medHook)}); en <b>medio/caliente</b> por {msg ? "costo/conv" : "ROAS"} vs la mediana ({msg ? (medVenta ? money(medVenta) : "—") : (medVenta != null ? medVenta.toFixed(1) + "x" : "—")}), ±15%. Sin data = menos de 2 creativos o spend bajo el piso. Cada creativo se reparte por CONJUNTO (su audiencia real), así que puede estar en varias columnas. Hold mediana de la vista: {pctf(medHold, 0)}. Videos "⚠ sin reproducciones" (más de 5.000 impresiones, menos de 2% de 3 s) quedan fuera de las medianas.</div>
+        <div className="thinnote">Filas: nivel de conciencia del GANCHO (5 producto+oferta → 1 inconsciente). Columnas: etapa de la audiencia donde corrió. En <b>frío</b> la celda se juzga por hook rate vs la mediana ({pctf(medHook)}); en <b>medio/caliente</b> por {msg ? "costo/conv" : "ROAS"} vs la mediana ({msg ? (medVenta ? money(medVenta) : "—") : (medVenta != null ? medVenta.toFixed(1) + "x" : "—")}), ±15%. Veredicto solo con ≥3 creativos y ≥5% del spend de la columna (confianza alta: ≥6 y ≥10%); debajo, sin data. TOTAL no juzga. Cada creativo se reparte por CONJUNTO (su audiencia real), así que puede estar en varias columnas. Hold mediana de la vista: {pctf(medHold, 0)}. Videos "⚠ sin reproducciones" (más de 5.000 impresiones, menos de 2% de 3 s) quedan fuera de las medianas.</div>
         <div className="cmatrixwrap"><table className="cmatrix">
           <thead><tr><th className="cnivel">NIVEL</th>{ETAPAS.map((e) => <th key={e}>{ETAPA_LABEL[e]}</th>)}</tr></thead>
           <tbody>{NIV_ORDEN.map((n) => (
             <tr key={n}><td className="cnivel"><b>{n === "nd" ? "nd" : n}</b> <span>{NIV_LABEL[n]}</span></td>
               {ETAPAS.map((e) => { const c = matriz[n][e]; const st = CELDA[c.estado]; const on = sel && sel.nivel === n && sel.etapa === e; return (
                 <td key={e} className={"ccell" + (c.n ? " clickable" : "") + (on ? " on" : "") + (c.estado === "sin_probar" ? " empty" : "")} style={{ background: st.bg, "--cc": st.color }} onClick={c.n ? () => setSel(on ? null : { nivel: n, etapa: e }) : undefined}>
-                  {c.n ? <>
+                  {c.n ? (e === "total" ? <>
                     <div className="ccspend">{short(c.spend)} <small>{Math.round(c.pct * 100)}%</small></div>
+                    <div className="ccsub">{c.n} creativo{c.n !== 1 ? "s" : ""}</div>
+                  </> : <>
+                    <div className="ccspend">{short(c.spend)} <small>{Math.round(c.pct * 100)}% · {Math.round(c.pctCol * 100)}% col.</small></div>
                     <div className="ccmain" style={{ color: st.color }}>{e === "frio" ? "hook " + pctf(c.hook) : fmtVenta(c)}</div>
                     <div className="ccsub">{e === "frio" ? "hold " + pctf(c.hold, 0) : (msg ? "hook " + pctf(c.hook) : "CPA " + (c.cpa ? money(c.cpa) : "—"))} · {c.n} creat.</div>
-                    {st.lab && <div className="cclab" style={{ color: st.color }}>{st.lab}</div>}
+                    {st.lab && <div className="cclab" style={{ color: st.color }}>{st.lab}{n !== "nd" && (c.estado === "ganadora" || c.estado === "perdedora") ? <span className="ccconf"> · conf. {c.confianza}</span> : null}</div>}
+                    {c.estado === "sin_data" && <div className="ccconf">{c.n < 3 ? "menos de 3 creativos" : c.pctCol < 0.05 ? "menos de 5% de la columna" : "spend bajo el piso"} · conf. baja</div>}
                     {c.norepro > 0 && <div className="ccnr">⚠ {c.norepro} sin repro.</div>}
-                  </> : <div className="ccempty">sin probar</div>}
+                  </>) : <div className="ccempty">sin probar</div>}
                 </td>); })}
             </tr>))}
             <tr className="ctot"><td className="cnivel"><span>spend por etapa</span></td>{ETAPAS.map((e) => <td key={e} className="ctotcell mono">{short(etapaTot(e))} <small>{Math.round(etapaTot(e) / (totalSpend || 1) * 100)}%</small></td>)}</tr>
@@ -2397,8 +2438,13 @@ function Item({ r, done, toggle, reason, act, c }) {
 }
 
 // ─────────── Vista: PANEL DE CREATIVOS (Parte 1) ───────────
-function Panel({ rows, u = {}, stats, sort, setSortKey, modo = "ventas" }) {
+function Panel({ rows: rowsAll, u = {}, stats, sort, setSortKey, modo = "ventas" }) {
   const msg = modo === "mensajes";
+  // Filtro "⚠ sin reproducciones": videos que Meta sirve pero casi no reproduce (>5.000 impresiones,
+  // <2% de 3 s). Tildado muestra SOLO esos, para revisarlos/re-subirlos.
+  const [soloNoRepro, setSoloNoRepro] = useState(false);
+  const nNoRepro = rowsAll.filter(sinRepro).length;
+  const rows = soloNoRepro ? rowsAll.filter(sinRepro) : rowsAll;
   const mix = new Set(rows.map((r) => r.plat || "meta")).size > 1; // vista combinada → badge por fila
   return (
     <>
@@ -2414,6 +2460,7 @@ function Panel({ rows, u = {}, stats, sort, setSortKey, modo = "ventas" }) {
         <div className="kpi chips">{Object.entries(stats.counts).map(([k, n]) => (<div className="chip" key={k} style={{ background: BUCKETS[k].bg, color: BUCKETS[k].color }}><b>{n}</b> {k}</div>))}</div>
       </section>
       <section className="tablewrap">
+        {nNoRepro > 0 && <label className="dpachk norepchk" title="Videos con más de 5.000 impresiones y menos de 2% de reproducciones de 3 s: Meta los sirve pero no los reproduce. Revisalos o re-subilos."><input type="checkbox" checked={soloNoRepro} onChange={(e) => setSoloNoRepro(e.target.checked)} />⚠ solo sin reproducciones ({nNoRepro})</label>}
         <table>
           <thead><tr>
             <Th label="Creativo" k="nombre" sort={sort} on={setSortKey} align="left" /><Th label="Ángulo (prim/sec · split)" align="left" /><Th label="Aud." align="left" />
@@ -2647,9 +2694,9 @@ function Generar({ rows = [], accountName = "", prefill = null, account, extras 
     let data = conciencia && conciencia.key === periodKey ? conciencia.data : null;
     if (!data) {
       setCtxNota("Clasificando el nivel de conciencia de los creativos…");
-      const body = { account, extras, tab, rows: rowsSheet.map((r) => { const o = { fingerprint: fpOf(r) }; for (const k of CONC_CAMPOS) o[k] = r.sheet[k]; return o; }) };
-      const j = await (await fetch("/api/conciencia/clasificar", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })).json();
-      if (j.error) { setCtxNota("No se pudo clasificar (" + j.error + "): ángulos sin inventario de motivadores."); return ""; }
+      let j;
+      try { j = await clasificarTodo({ account, extras, tab }, filasParaClasificar(rowsSheet), (acc, n) => setCtxNota("Clasificando el nivel de conciencia de los creativos… quedan " + n)); }
+      catch (e) { setCtxNota("No se pudo clasificar (" + e.message + "): ángulos sin inventario de motivadores."); return ""; }
       data = j; if (onClasif) onClasif({ key: periodKey, data: j });
     }
     const msg = modoApp === "mensajes";
@@ -2993,6 +3040,8 @@ tbody tr{border-bottom:1px solid var(--line);box-shadow:inset 5px 0 0 var(--bar)
 tbody tr:hover{background:#EFE6D2;}tbody tr:last-child{border-bottom:none;}
 td{padding:11px 12px;vertical-align:middle;}.num{text-align:right;}.name{font-weight:700;}
 .fmt{font-size:9px;color:var(--soft);border:1px solid var(--line);border-radius:3px;padding:1px 5px;margin-left:6px;font-family:'Space Mono',monospace;letter-spacing:1px;}
+.ccconf{font-size:9px;color:var(--soft);font-weight:400;text-transform:none;letter-spacing:0;}.cretry{background:#F4C24A;border:1px solid var(--ink);border-radius:4px;padding:2px 8px;font-family:'Space Mono',monospace;font-size:10px;cursor:pointer;font-weight:700;}
+.norepchk{margin:0 0 8px;display:inline-flex;align-items:center;gap:6px;font-size:11px;color:#C5362B;cursor:pointer;}
 .ctdesc{font-size:11px;color:var(--soft);margin-top:4px;}.ctdesc summary{cursor:pointer;font-family:'Space Mono',monospace;font-size:9.5px;letter-spacing:.5px;}.ctdesc div{margin:2px 0 0 8px;}.outang .outtext{display:block;line-height:1.5;}
 .norepro{font-size:9px;color:#C5362B;border:1px solid #C5362B;border-radius:3px;padding:1px 5px;margin-left:6px;font-family:'Space Mono',monospace;letter-spacing:.5px;white-space:nowrap;}
 .cnd{font-size:11.5px;color:#7A5410;background:#F1E4C4;border:1px solid #C2861F;border-radius:6px;padding:6px 10px;margin:8px 0;display:flex;flex-wrap:wrap;gap:6px 10px;}.cnd b{font-family:'Space Mono',monospace;font-size:10px;letter-spacing:1px;}

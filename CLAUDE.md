@@ -134,7 +134,11 @@ respuestas concisas.
   Claude (tandas de 20, rúbrica textual, `razon` antes de `nivel`, cache `nusa:nivel:<tab>:<fp>`
   sin TTL + memoria). Desvíos calibrados (Juanita/Shark, sep 2026): el regex de 5 no aplica en
   Comparativo/Testimonial (precio = objeción), y el 4 por ángulo solo no aplica sobre categorías
-  de nivel 1 (va a Claude). Sin API key o sin Upstash degrada. Lo consumen las rutas
+  de nivel 1 (va a Claude). Sin API key o sin Upstash degrada. `classifyRows(rows, tab,
+  {maxBatches:2})`: hasta 2 tandas de 20 por llamada y devuelve `pendientes` (fuente "pendiente");
+  el front (`clasificarTodo`) itera hasta cubrir todo. Una tanda que falla se reintenta partiéndose
+  a la mitad; si igual falla → fuente "nd" + motivo `claude_fallo` (botón ↻ reintentar); sin API
+  key → motivo `sin_claude`. Lo consumen las rutas
   `app/api/conciencia/{clasificar,override,proximo-test}` (auth compartida en `_auth.js`:
   sesión + `canSeeAccount` de account+extras + `tab` contra `sess.tabs`) y la pestaña **ÁNGULOS**
   de page.jsx (`Angulos`: matriz nivel × etapa con estado de celda — frío SOLO por hook rate,
@@ -145,7 +149,11 @@ respuestas concisas.
   Solo entran creativos CON fila en el Sheet; lo sin Sheet (catálogos) va al desglose "sin nivel"
   del header. Videos "⚠ sin reproducciones" (`sinRepro`: formato de video, >5.000 impresiones,
   <2% de 3 s — Meta no los cuenta como video) se marcan (también en el PANEL) y quedan fuera de
-  las medianas de hook/hold y del veredicto en frío. **`contextoAngulos(filas, u, msg)`** arma el
+  las medianas de hook/hold y del veredicto en frío (investigado: son `object_type VIDEO` con
+  `video_id`, pero `video_play_actions` ~0,3% en todas las ubicaciones → problema del creativo;
+  filtro en el PANEL y columna `video_valido` en el CSV). **Piso de celda**: veredicto solo con ≥3
+  creativos y ≥5% del spend de su columna (`colSpend`), confianza alta ≥6 y ≥10%; TOTAL no juzga.
+  **`contextoAngulos(filas, u, msg)`** arma el
   contexto que comparten PRÓXIMO TEST y GENERAR → Ángulos nuevos: sin los "sin reproducciones",
   inventario completo de motivadores, "voz" (8 mejores ganchos por hook rate en frío + 5 mejores
   por venta en caliente) y motivadores/formatos por celda. `/api/conciencia/proximo-test` valida
@@ -326,7 +334,11 @@ pushear a `main` sin romper prod.
   (`lib/alertas.js` + `/api/alertas` + cron en `vercel.json` 11:00 UTC). In-app: banner al PIE
   de la página (solo admin), filtrado a la cuenta seleccionada — cada alerta lleva `id` (cuenta
   de ads) y/o `store`; sin ambos es global (ej. token caído) y se ve en cualquier cuenta. El
-  MAIL sigue siendo el digest de TODOS los clientes. Sin Resend quedan solo in-app; sin Upstash
+  MAIL sigue siendo el digest de TODOS los clientes. **Salud del cron**: Vercel manda
+  `Authorization: Bearer CRON_SECRET` SOLO si la env var existe (sin ella el cron caía al 401 en
+  silencio); la ruta reconoce el user-agent `vercel-cron`, registra cada intento en
+  `nusa:alertas:cron` (`registrarCorrida`) y `alertaCronCaido` inyecta una alerta global crítica
+  si el último chequeo tiene >48 h, con la causa. GET devuelve `cron: {secret, ultimo_intento}`. Sin Resend quedan solo in-app; sin Upstash
   no se persisten (solo "chequear ahora" en vivo).
 - `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN` — historiales/conversaciones server-side
   (los inyecta sola la integración Upstash del Marketplace de Vercel; opcional, sin esto queda

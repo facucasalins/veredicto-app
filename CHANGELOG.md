@@ -4,6 +4,30 @@ Registro de cambios por versión. **V 1.N = número del PR mergeado** — es el 
 app muestra en el header ("V 1.N ▮▮▮"), así se confirma de un vistazo qué versión corre en prod.
 Regla de la casa: cada PR suma su entrada acá ANTES de mergearse.
 
+## V 1.34 — ÁNGULOS: saneamiento (PR A) — batch completo, piso de celda, cron de alertas, videos sin reproducciones
+- **Clasificación en rondas**: `/api/conciencia/clasificar` procesa hasta 2 tandas de 20 por
+  llamada (no pasa el timeout del serverless) y devuelve `pendientes`; el front vuelve a pedir
+  solo esos hasta cubrir todo (Juanita 90 d: 154 creativos en 2 rondas). Una tanda que falla se
+  reintenta 2 veces partiéndose a la mitad (un creativo que rompe el JSON ya no tira 20). Lo que
+  no llegó queda **"pendiente"** (no "nd") y lo que Claude falló, "Claude no respondió", ambos
+  con botón **↻ reintentar** en el header. "regla sin match" queda solo para cuando no hay API key.
+- **Piso de celda**: veredicto ganadora/perdedora solo con ≥3 creativos Y ≥5% del spend de su
+  columna; debajo, "sin data" con el motivo. Etiqueta de **confianza** junto al veredicto: alta
+  (≥6 creativos y ≥10% de la columna) · media (cumple el piso) · baja (sin veredicto).
+- **Columna TOTAL**: solo spend, % y cantidad de creativos (sin ROAS ni hook).
+- **Cron de alertas** (la banda decía "chequeo 27/7"): causa — Vercel manda el Bearer del cron
+  SOLO si `CRON_SECRET` está seteada; sin ella el request caía al 401 de sesión en silencio. Ahora
+  la ruta reconoce el user-agent `vercel-cron`, registra cada intento en Upstash
+  (`nusa:alertas:cron`, ok/error) y responde 500 con la causa. **Alerta nueva in-app**: "Cron de
+  alertas sin correr hace más de 48 h" (global, crítica) con el diagnóstico (falta CRON_SECRET /
+  último intento falló / nunca llegó) y qué tocar en Vercel. GET devuelve `cron: {secret, ultimo_intento}`.
+  **Acción manual pendiente en Vercel**: cargar `CRON_SECRET` y confirmar el cron en Settings → Cron Jobs.
+- **Videos sin reproducciones**: filtro "⚠ solo sin reproducciones (N)" en el PANEL y columna
+  `video_valido` (true/false; vacío en no-video) en el CSV por anuncio. Investigación con la API:
+  los 3 anuncios marcados son `object_type VIDEO` con `video_id` (igual que los sanos), pero
+  `video_play_actions` da ~0,3% de las impresiones en TODAS las ubicaciones (un sano da ~95%).
+  Meta los sirve como video y no los reproduce: problema del creativo, no del placement → re-subir.
+
 ## V 1.33 — Pestaña ÁNGULOS (nivel de conciencia × etapa × performance)
 - Nueva pestaña **ÁNGULOS** (entre EMBUDO y PANEL): clasifica cada creativo con Sheet en un
   **nivel de conciencia** (Schwartz, juzgado SOLO por el gancho: 5 producto+oferta · 4 producto ·
@@ -57,15 +81,6 @@ Regla de la casa: cada PR suma su entrada acá ANTES de mergearse.
 - Calibrado contra Juanita Shoes (30 días: 17/17 esperados) y Shark (10/11; FitTecnico queda en 3
   por rúbrica). Dos desvíos documentados de las reglas del spec: precio dentro de un Comparativo
   no es nivel 5, y ángulo Social_Proof sobre Entretenimiento va a Claude en vez de a 4.
-## V 1.31 — "▶ ver video": abrir el anuncio en una pestaña nueva
-- Chip **▶ ver video** al lado del nombre del creativo en el TOP ADS DEL MES, en el desplegable
-  por creativo de TOP PERFORMERS y en la tabla del PANEL. Abre en pestaña nueva la vista previa
-  oficial del anuncio (el video se reproduce ahí), sin buscarlo a mano en el Administrador.
-- Cómo: cada creativo lleva `adId` (el anuncio con más spend del grupo); `/api/video` resuelve al
-  clic `/{ad}/previews` de Meta y redirige (302). El link de Meta vence a las ~24 h, por eso no se
-  guarda. La URL directa del archivo (`video.source`) NO está permitida para el token de Sistema.
-  Fallback: el post (`effective_object_story_id`) y, último, el anuncio en el Administrador.
-- Solo Meta: en Google/TikTok el chip no aparece. Verifica sesión y `canSeeAccount`.
 ## V 1.32 — ⬇ CSV: descargar los resultados del período
 - Selector **⬇ CSV…** al lado del período (header): baja un archivo con los resultados de la
   cuenta en el rango elegido (presets o fechas personalizadas) **por anuncio** (con su campaña y
@@ -91,6 +106,15 @@ Regla de la casa: cada PR suma su entrada acá ANTES de mergearse.
 - Vista combinada: el CSV incluye TODAS las cuentas de la vista (Google/TikTok con su
   `plataforma` y `moneda`), sufijo `_combinado` en el nombre del archivo.
 
+## V 1.31 — "▶ ver video": abrir el anuncio en una pestaña nueva
+- Chip **▶ ver video** al lado del nombre del creativo en el TOP ADS DEL MES, en el desplegable
+  por creativo de TOP PERFORMERS y en la tabla del PANEL. Abre en pestaña nueva la vista previa
+  oficial del anuncio (el video se reproduce ahí), sin buscarlo a mano en el Administrador.
+- Cómo: cada creativo lleva `adId` (el anuncio con más spend del grupo); `/api/video` resuelve al
+  clic `/{ad}/previews` de Meta y redirige (302). El link de Meta vence a las ~24 h, por eso no se
+  guarda. La URL directa del archivo (`video.source`) NO está permitida para el token de Sistema.
+  Fallback: el post (`effective_object_story_id`) y, último, el anuncio en el Administrador.
+- Solo Meta: en Google/TikTok el chip no aparece. Verifica sesión y `canSeeAccount`.
 ## V 1.30 — Tienda Nube: un solo barrido, cache y sin datos silenciosamente incompletos
 - **Causa raíz de la lentitud y de "no me carga nuevos vs recurrentes"**: la banda hacía TRES
   barridos completos de `/orders` a la vez (summary en serie, daily y tendencia en paralelo, ×2 con
