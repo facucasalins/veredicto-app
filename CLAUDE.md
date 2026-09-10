@@ -119,9 +119,25 @@ respuestas concisas.
   `/api/ga4` (degrada con `{off:true}`) → banda `Ga4Band` en el front + `trafico_sitio_ga4` en el
   snapshot del cerebro.
 - `lib/store.js` — storage server-side en **Upstash Redis** (REST, sin dependencias): `storeEnabled()`,
-  `kvGet(key)`, `kvSet(key, value)`. Para historiales/conversaciones compartidos. Sin env vars degrada
+  `kvGet(key)`, `kvSet(key, value, ttlSec?)`, `kvDel(key)`, `kvMget(keys)` (un request). Para historiales/conversaciones compartidos. Sin env vars degrada
   (el front sigue en localStorage). Lo consume `/api/history` (GET/POST, scopeado por sesión, claves
-  `nusa:<kind>:<account>`, kinds: `hist_an`/`hist_plan`/`chat`).
+  `nusa:<kind>:<account>`, kinds: `hist_an`/`hist_plan`/`hist_test`/`chat`).
+- `lib/conciencia.js` — **nivel de conciencia (Schwartz)** de cada creativo, juzgado SOLO por el
+  gancho: 5 producto+oferta · 4 producto · 3 solución · 2 problema · 1 inconsciente.
+  `classifyRows(rows, tab)` → `{niveles: {fingerprint → {nivel, fuente, motivador, motivadorTipo,
+  confianza, razon?}}, cache, claude}`. Tres fuentes en orden: override manual (Upstash
+  `nusa:nivel_override:<tab>:<fp>`) > `reglas()` duras sobre el Sheet (regex de oferta en
+  `texto_gancho`, cta+oferta, Urgencia+Escasez → 5; Lanzamiento/Comparativo/Testimonial o ángulo
+  Novedad/Social_Proof/Autoridad → 4; Aspiracional/Storytelling/Entretenimiento sin oferta → 1) >
+  Claude (tandas de 20, rúbrica textual, `razon` antes de `nivel`, cache `nusa:nivel:<tab>:<fp>`
+  sin TTL + memoria). Desvíos calibrados (Juanita/Shark, sep 2026): el regex de 5 no aplica en
+  Comparativo/Testimonial (precio = objeción), y el 4 por ángulo solo no aplica sobre categorías
+  de nivel 1 (va a Claude). Sin API key o sin Upstash degrada. Lo consumen las rutas
+  `app/api/conciencia/{clasificar,override,proximo-test}` (auth compartida en `_auth.js`:
+  sesión + `canSeeAccount` de account+extras + `tab` contra `sess.tabs`) y la pestaña **ÁNGULOS**
+  de page.jsx (`Angulos`: matriz nivel × etapa con estado de celda — frío SOLO por hook rate,
+  medio/caliente por ROAS o costo/conv ±15% vs mediana —, lectura determinista, motivadores
+  probados, próximo test con "Armar brief" → `prefill` de Generar; historial `hist_test`).
 - `lib/fx.js` — cotización del **dólar oficial** (Argentina) para no mezclar monedas cuando la cuenta de
   Meta está en USD. `getDolarOficial()` (PROMEDIO de compra y venta = medio del spread, cache en memoria
   ~1h) y `convertMonto(monto, from, to)` (solo ARS↔USD). Fuente: dolarapi.com, fallback criptoya.com.
@@ -134,6 +150,9 @@ respuestas concisas.
   **MEDIR: Ventas | Mensajes** (`modo`) que filtra y cambia la métrica de toda la app, y toggle
   **MONEDA CUENTA: Pesos | USD** (`accCur`, auto-detectado del `currency` de Meta, override manual).
   NO reescribir entero; editar quirúrgico. `money()` muestra 2 decimales en montos < 100 no enteros (USD).
+- `app/api/conciencia/*` — `clasificar` (POST rows con campos del Sheet → niveles), `override`
+  (POST/DELETE, requiere Upstash → 409 si no), `proximo-test` (POST matriz + motivadores + receta →
+  3 hipótesis JSON de Claude, mode-aware). Ver `lib/conciencia.js`.
 - `app/api/*` — `accounts` (filtra por sesión), `ads` (insights + targeting + estado en paralelo,
   cruza Sheet, arma tipoMap), `login`, `logout`, `sheets/tabs` (scopeada por `tabs` de sesión),
   `tiendanube/{stores,summary}` (stores scopeadas por cuenta), `copy` (generador), **`analyze`**

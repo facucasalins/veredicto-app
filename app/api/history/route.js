@@ -11,7 +11,7 @@ export const dynamic = "force-dynamic";
 
 // kind → tope de items. En hist_* lo más nuevo va PRIMERO (slice del frente); en chat los
 // mensajes van en orden y lo más nuevo está al FINAL (slice de la cola).
-const KINDS = { hist_an: 15, hist_plan: 15, chat: 30 };
+const KINDS = { hist_an: 15, hist_plan: 15, chat: 30, hist_test: 15 };
 const capear = (kind, items) => kind === "chat" ? items.slice(-KINDS[kind]) : items.slice(0, KINDS[kind]);
 
 async function auth(account) {

@@ -4,6 +4,34 @@ Registro de cambios por versión. **V 1.N = número del PR mergeado** — es el 
 app muestra en el header ("V 1.N ▮▮▮"), así se confirma de un vistazo qué versión corre en prod.
 Regla de la casa: cada PR suma su entrada acá ANTES de mergearse.
 
+## V 1.33 — Pestaña ÁNGULOS (nivel de conciencia × etapa × performance)
+- Nueva pestaña **ÁNGULOS** (entre EMBUDO y PANEL): clasifica cada creativo con Sheet en un
+  **nivel de conciencia** (Schwartz, juzgado SOLO por el gancho: 5 producto+oferta · 4 producto ·
+  3 solución · 2 problema · 1 inconsciente) y lo cruza con la etapa de su audiencia (frío/medio/
+  caliente = `rolEmbudo`) y su performance.
+- **Clasificación** (`lib/conciencia.js` + `/api/conciencia/clasificar`), tres fuentes en orden:
+  override manual (Upstash) > reglas duras sobre el Sheet (sin IA) > Claude en tandas de 20 con
+  rúbrica y `razon` antes del `nivel` (cache en Upstash sin TTL + memoria). Sin API key o sin
+  Upstash degrada (reglas solas; sin cache se avisa en el header del mapa).
+- **MAPA**: matriz niveles × etapa con spend, % del spend, ROAS/CPA (mensajes: costo/conv), hook y
+  hold rate medianos y cantidad de creativos. Estado de celda: sin probar / sin data / ganadora /
+  perdedora — en **frío** SOLO por hook rate vs la mediana (±15%), nunca por ROAS; en medio y
+  caliente por ROAS (o costo/conv). Click en la celda → lista de creativos con select de
+  **override** de nivel (guarda vía `/api/conciencia/override`, se refleja al instante).
+- **LECTURA**: 3-5 bullets deterministas (plantillas + números, sin IA). **MOTIVADORES PROBADOS**:
+  inventario tipo → motivador con creativos, spend, ROAS, hook mediano y niveles.
+- **PRÓXIMO TEST** (`/api/conciencia/proximo-test`): 3 hipótesis de Claude citando la celda que las
+  justifica (prioriza celdas sin probar en frío; nunca repite un ganador; prohibido juzgar 1-3 por
+  ROAS). "Armar brief" salta a GENERAR con tipo hooks + modo Explorar + el contexto precargado
+  (`prefill` en Generar). Historial `hist_test` con `useHistSync`.
+- Banda amarilla si el período es < 60 días. Sin planilla elegida: "Elegí una planilla". Vista
+  combinada: Meta + TikTok (Google afuera).
+- Soporte: `gancho_analisis` en el cruce del Sheet, `thruplay` por creativo en `buildRows` (hold
+  rate), `kvDel`/`kvMget` en `lib/store.js`, kind `hist_test` en `/api/history`.
+- Calibrado contra Juanita Shoes (30 días: 17/17 esperados) y Shark (10/11; FitTecnico queda en 3
+  por rúbrica). Dos desvíos documentados de las reglas del spec: precio dentro de un Comparativo
+  no es nivel 5, y ángulo Social_Proof sobre Entretenimiento va a Claude en vez de a 4.
+
 ## V 1.30 — Tienda Nube: un solo barrido, cache y sin datos silenciosamente incompletos
 - **Causa raíz de la lentitud y de "no me carga nuevos vs recurrentes"**: la banda hacía TRES
   barridos completos de `/orders` a la vez (summary en serie, daily y tendencia en paralelo, ×2 con
