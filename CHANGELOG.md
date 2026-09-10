@@ -43,6 +43,15 @@ Regla de la casa: cada PR suma su entrada acá ANTES de mergearse.
 - Calibrado contra Juanita Shoes (30 días: 17/17 esperados) y Shark (10/11; FitTecnico queda en 3
   por rúbrica). Dos desvíos documentados de las reglas del spec: precio dentro de un Comparativo
   no es nivel 5, y ángulo Social_Proof sobre Entretenimiento va a Claude en vez de a 4.
+## V 1.31 — "▶ ver video": abrir el anuncio en una pestaña nueva
+- Chip **▶ ver video** al lado del nombre del creativo en el TOP ADS DEL MES, en el desplegable
+  por creativo de TOP PERFORMERS y en la tabla del PANEL. Abre en pestaña nueva la vista previa
+  oficial del anuncio (el video se reproduce ahí), sin buscarlo a mano en el Administrador.
+- Cómo: cada creativo lleva `adId` (el anuncio con más spend del grupo); `/api/video` resuelve al
+  clic `/{ad}/previews` de Meta y redirige (302). El link de Meta vence a las ~24 h, por eso no se
+  guarda. La URL directa del archivo (`video.source`) NO está permitida para el token de Sistema.
+  Fallback: el post (`effective_object_story_id`) y, último, el anuncio en el Administrador.
+- Solo Meta: en Google/TikTok el chip no aparece. Verifica sesión y `canSeeAccount`.
 
 ## V 1.30 — Tienda Nube: un solo barrido, cache y sin datos silenciosamente incompletos
 - **Causa raíz de la lentitud y de "no me carga nuevos vs recurrentes"**: la banda hacía TRES

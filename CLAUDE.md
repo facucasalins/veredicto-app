@@ -159,6 +159,10 @@ respuestas concisas.
 - `app/api/conciencia/*` — `clasificar` (POST rows con campos del Sheet → niveles), `override`
   (POST/DELETE, requiere Upstash → 409 si no), `proximo-test` (POST matriz + motivadores + receta →
   3 hipótesis JSON de Claude, mode-aware). Ver `lib/conciencia.js`.
+- `app/api/video` — "▶ ver video": `?account=&ad=` → 302 a la vista previa oficial del anuncio
+  (`getAdPreviewUrl` en `lib/meta.js`: `/{ad}/previews` → src del iframe, abre sin login; fallback
+  post → Administrador). Cada fila de `buildRows` lleva `adId` (anuncio de más spend del creativo).
+  Solo Meta; el link vence a las ~24 h así que se resuelve al clic.
 - `app/api/*` — `accounts` (filtra por sesión), `ads` (insights + targeting + estado en paralelo,
   cruza Sheet, arma tipoMap), `login`, `logout`, `sheets/tabs` (scopeada por `tabs` de sesión),
   `tiendanube/{stores,summary}` (stores scopeadas por cuenta), `copy` (generador), **`analyze`**
