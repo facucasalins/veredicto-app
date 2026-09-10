@@ -19,7 +19,9 @@ respuestas concisas.
   modo Tienda Nube), **`getAdsetTargeting(account)`** (targeting REAL de cada adset + objetivo
   declarado `optimization_goal`/`promoted_object`, 1 call paginada),
   **`getAdStatuses(account)`** (estado de entrega por ad mirando la CADENA completa: pide el
-  effective_status del ad + del adset + de la campaña y devuelve `"ACTIVE"` solo si todo entrega; si
+  effective_status del ad + del adset + de la campaña y devuelve `"ACTIVE"` solo si todo entrega —
+  pidiendo TODOS los `effective_status`, porque el edge `/ads` excluye ARCHIVED por default y los
+  anuncios archivados con spend quedaban sin estado; si
   el conjunto o la campaña de arriba están apagados devuelve `ADSET_PAUSED`/`CAMPAIGN_PAUSED`, porque
   el effective_status del ad solo no siempre refleja al padre) y **`getAdsetBudgets(account)`**
   (budget real por adset/campaña; detecta ABO vs CBO; para el Plan). `getAds` extrae `ventas` (compras)
