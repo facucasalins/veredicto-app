@@ -17,6 +17,17 @@ Regla de la casa: cada PR suma su entrada acá ANTES de mergearse.
   cuenta (columna `moneda`), como el Administrador. Meta, TikTok y Google (misma forma de fila).
 - `/api/export` (`lib/export.js`): sesión + `canSeeAccount`, `Content-Disposition` para que el
   browser lo baje directo. `getAds` de Meta ahora trae `campaign_id`.
+- Por anuncio suma la **nomenclatura** (fingerprint = el `HH.MM.SS`, fecha, concepto, ángulo,
+  formato — con `parseName`, el mismo parser del panel; vacías en Google/catálogos) y la
+  **etapa de embudo** (frio | medio | caliente, misma regla que `audPos`; también por conjunto).
+- Video: `video_p50`, `video_tiempo_promedio_s`, `hook_rate_%` (3s ÷ impresiones) y `hold_rate_%`
+  (ThruPlay ÷ 3s). Campos nuevos en `getAds` de Meta.
+- **Estado siempre con valor** (activo | pausado | archivado | sin_dato). Causa del vacío: el edge
+  `/ads` de Meta EXCLUYE los archivados por default (117 de 436 anuncios con spend en 30 días eran
+  ARCHIVED). `getAdStatuses` ahora pide todos los estados → también el panel deja de tratarlos
+  como "sin dato".
+- Vista combinada: el CSV incluye TODAS las cuentas de la vista (Google/TikTok con su
+  `plataforma` y `moneda`), sufijo `_combinado` en el nombre del archivo.
 
 ## V 1.30 — Tienda Nube: un solo barrido, cache y sin datos silenciosamente incompletos
 - **Causa raíz de la lentitud y de "no me carga nuevos vs recurrentes"**: la banda hacía TRES

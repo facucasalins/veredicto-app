@@ -138,7 +138,9 @@ respuestas concisas.
   conjunto|campana` → descarga (Content-Disposition) de los resultados del período: misma data que
   `/api/ads` (insights + estado + audiencia real + tipo) sin Sheet ni nomenclatura, por anuncio o
   agregada por conjunto/campaña (ROAS recompuesto desde spend×roas). Excel es-AR (`;`, coma
-  decimal, BOM). Montos en moneda de la cuenta. Meta/TikTok/Google.
+  decimal, BOM). Montos en moneda de la cuenta. Meta/TikTok/Google; `accounts=` → todas las cuentas
+  de la vista en un archivo (`_combinado`). Por anuncio: nomenclatura (`parseName`), etapa de embudo
+  (`audEmbudoPos`), video p50/tiempo promedio/hook rate/hold rate, estado SIEMPRE con valor.
 - `app/api/*` — `accounts` (filtra por sesión), `ads` (insights + targeting + estado en paralelo,
   cruza Sheet, arma tipoMap), `login`, `logout`, `sheets/tabs` (scopeada por `tabs` de sesión),
   `tiendanube/{stores,summary}` (stores scopeadas por cuenta), `copy` (generador), **`analyze`**
