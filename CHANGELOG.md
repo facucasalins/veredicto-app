@@ -28,6 +28,18 @@ Regla de la casa: cada PR suma su entrada acá ANTES de mergearse.
   combinada: Meta + TikTok (Google afuera).
 - Soporte: `gancho_analisis` en el cruce del Sheet, `thruplay` por creativo en `buildRows` (hold
   rate), `kvDel`/`kvMget` en `lib/store.js`, kind `hist_test` en `/api/history`.
+- **Matriz por CONJUNTO, no por audiencia dominante**: cada creativo reparte su spend entre sus
+  conjuntos (`breakdown`, que ahora trae impresiones, video 3 s y ThruPlay por conjunto) según la
+  audiencia real de cada uno — un creativo en Advantage+ y en RMKT aporta a frío Y a caliente.
+  "Creativos" de la celda = cuántos tuvieron spend ahí; hook/hold de la celda salen de los
+  conjuntos de esa etapa. Fila de totales por etapa al pie. Verificado (Juanita 30 d): frío ~$944k,
+  medio ~$300k, caliente ~$1,9M, nivel 5 × frío ~$574k con 27 creativos.
+- **"⚠ sin reproducciones"**: videos con más de 5.000 impresiones y menos de 2% de hook rate (Meta
+  no los cuenta como video, bug conocido) se marcan en la celda y en el PANEL, y quedan FUERA de las
+  medianas de hook/hold (celda y vista) y del veredicto ganadora/perdedora en frío.
+- **Desglose "sin nivel"** en el header: cuánto spend quedó sin nivel y por qué — sin fila en el
+  Sheet (fuera de la matriz; típico catálogos DPA), Claude no respondió, regla sin match — con
+  la acción para corregirlo.
 - Calibrado contra Juanita Shoes (30 días: 17/17 esperados) y Shark (10/11; FitTecnico queda en 3
   por rúbrica). Dos desvíos documentados de las reglas del spec: precio dentro de un Comparativo
   no es nivel 5, y ángulo Social_Proof sobre Entretenimiento va a Claude en vez de a 4.

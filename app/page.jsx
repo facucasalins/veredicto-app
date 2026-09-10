@@ -88,6 +88,11 @@ const tf = (r) => { const m = String(r?.id || "").match(/\((\d{1,2}\.\d{2}\.\d{2
 const TF = ({ r }) => tf(r) ? <span className="tf">{tf(r)}</span> : null;
 // Tag de estado: solo aparece si SABEMOS que el creativo está pausado (activa === false).
 const Paused = ({ r }) => r && r.activa === false ? <span className="pausedtag">⏸ PAUSADA</span> : null;
+// Video que Meta NO está contando como video (bug conocido): muchas impresiones y casi cero
+// reproducciones de 3 s. Solo formatos de video. Se marca y se EXCLUYE de las medianas de hook/hold.
+const VIDEO_FMTS = ["VID", "REEL", "STORY"];
+const sinRepro = (r) => !!r && VIDEO_FMTS.includes(String(r.fmt || "").toUpperCase()) && (r.impresiones || 0) > 5000 && (r.video3s || 0) / r.impresiones < 0.02;
+const SinRepro = ({ r }) => sinRepro(r) ? <span className="norepro" title="Más de 5.000 impresiones y menos de 2% de reproducciones de 3 s: Meta no lo está contando como video. Excluido de las medianas de hook/hold.">⚠ sin reproducciones</span> : null;
 // Clasificación de calidad de Meta (vs competencia por la misma audiencia). Solo aparece si Meta
 // la informó (≥500 impresiones); diagnóstico de creativo. Valor titular = ponderado por spend.
 const QUAL = {
@@ -1181,7 +1186,11 @@ const CELDA = {
   sin_probar: { color: "#A99E8A", bg: "transparent", lab: "sin probar" },
 };
 const mediana = (arr) => { const a = arr.filter((x) => x != null && isFinite(x)).sort((x, y) => x - y); if (!a.length) return null; const m = a.length >> 1; return a.length % 2 ? a[m] : (a[m - 1] + a[m]) / 2; };
-const etapaDe = (r) => { const rol = rolEmbudo(r); return rol === "remate" ? "caliente" : rol || "nd"; };
+// Etapa por CONJUNTO (audiencia real del adset): Hot/Tibio → caliente, Lookalike → medio,
+// Advantage+/Amplio/Intereses → frío, sin señal (Mensajería, nd) → nd. La matriz reparte el spend
+// de cada creativo entre sus conjuntos — un creativo que corrió en Advantage+ y en RMKT aporta a
+// frío Y a caliente, no a su audiencia dominante.
+const etapaAud = (aud) => { const p = AUD_POS(aud); return p == null ? "nd" : p >= 1.5 ? "caliente" : p >= 1 ? "medio" : "frio"; };
 const hookRate = (r) => (r.impresiones ? r.video3s / r.impresiones : null);
 const holdRate = (r) => (r.video3s ? (r.thruplay || 0) / r.video3s : null);
 const pctf = (x, d = 1) => (x == null ? "—" : (x * 100).toFixed(d) + "%");
@@ -1199,7 +1208,7 @@ function Angulos({ withV, u, modo = "ventas", account, extras = [], tab, account
   const [tLoading, setTLoading] = useState(false);
   const [tErr, setTErr] = useState("");
   const [hist, saveHist] = useHistSync("hist_test", account);
-  const rowsSheet = useMemo(() => withV.filter((r) => r.sheet), [withV]);
+  const rowsSheet = useMemo(() => withV.filter((r) => r.sheet), [withV]); // solo estas se clasifican (el nivel sale del gancho)
   const dias = diasPeriodo(preset, cSince, cUntil);
   const periodKey = [account, ...extras].join(",") + "|" + tab + "|" + preset + "|" + cSince + "|" + cUntil;
 
@@ -1219,27 +1228,61 @@ function Angulos({ withV, u, modo = "ventas", account, extras = [], tab, account
 
   // Filas enriquecidas + matriz
   const niv = (clasif && clasif.niveles) || {};
-  const filas = useMemo(() => rowsSheet.map((r) => { const c = niv[fpOf(r)] || null; return { ...r, fp: fpOf(r), c, nivel: c && c.nivel ? c.nivel : "nd", etapa: etapaDe(r), hook: hookRate(r), hold: holdRate(r) }; }), [rowsSheet, niv]);
+  // La matriz trabaja sobre los creativos CON fila en el Sheet (el nivel sale del gancho, que vive
+  // ahí). Los que no tienen fila (típico: catálogos DPA, que además concentran mucho spend en
+  // retargeting) NO entran a la matriz — se reportan en el desglose "sin nivel" del header para
+  // que se vea cuánta plata queda afuera y por qué. Cada fila lleva sus PARTES por conjunto (etapa
+  // real + spend/revenue/ventas/video de ese conjunto).
+  const filas = useMemo(() => rowsSheet.map((r) => {
+    const fp = fpOf(r); const c = niv[fp] || null;
+    const nivel = c && c.nivel ? c.nivel : "nd";
+    const motivo = nivel !== "nd" ? null : (c ? (clasif && clasif.claude ? "claude" : "regla") : (loading ? "pendiente" : "regla"));
+    const partes = (r.breakdown || []).map((b) => ({ etapa: etapaAud(b.aud), aud: b.aud, adset: b.adset, spend: b.spend || 0, rev: (b.spend || 0) * (b.roas || 0), ventas: b.ventas || 0, conv: b.conversaciones || 0, imp: b.impresiones || 0, v3: b.video3s || 0, tp: b.thruplay || 0 }));
+    return { ...r, fp, c, nivel, motivo, partes, hook: hookRate(r), hold: holdRate(r), norepro: sinRepro(r) };
+  }), [rowsSheet, niv, clasif, loading]);
   const totalSpend = filas.reduce((s, r) => s + r.spend, 0);
   const metricaVenta = (r) => (msg ? (r.conversaciones ? r.costoConv : null) : r.roas);
   const medVenta = useMemo(() => mediana(filas.filter((r) => r.spend >= u.pisoSpend).map(metricaVenta)), [filas, u.pisoSpend, msg]); // eslint-disable-line react-hooks/exhaustive-deps
-  const medHook = useMemo(() => mediana(filas.filter((r) => r.spend >= u.pisoSpend).map((r) => r.hook)), [filas, u.pisoSpend]);
+  // medianas de video de la VISTA: sin los "sin reproducciones" (Meta no los cuenta como video)
+  const medHook = useMemo(() => mediana(filas.filter((r) => r.spend >= u.pisoSpend && !r.norepro).map((r) => r.hook)), [filas, u.pisoSpend]);
+  const medHold = useMemo(() => mediana(filas.filter((r) => r.spend >= u.pisoSpend && !r.norepro).map((r) => r.hold)), [filas, u.pisoSpend]);
+  // spend que quedó sin nivel, por motivo (para corregirlo: cargar el Sheet, reintentar Claude, ajustar reglas)
+  const ndInfo = useMemo(() => {
+    const o = {};
+    for (const r of withV) if (!r.sheet && r.spend > 0) { (o.sin_sheet || (o.sin_sheet = { n: 0, spend: 0 })).n += 1; o.sin_sheet.spend += r.spend; }
+    for (const r of filas) { if (r.nivel !== "nd") continue; const k = r.motivo || "regla"; (o[k] || (o[k] = { n: 0, spend: 0 })).n += 1; o[k].spend += r.spend; }
+    return o;
+  }, [filas, withV]);
+  const spendCuenta = withV.reduce((s, r) => s + r.spend, 0); // para el % del desglose "sin nivel" (incluye lo sin Sheet)
+  // Celda nivel × etapa: reparte cada creativo por CONJUNTO. "creativos" = cuántos tuvieron spend acá.
+  // El hook/hold de un creativo EN la celda sale de sus conjuntos de esa etapa; los "sin
+  // reproducciones" se listan pero no entran a las medianas ni al veredicto de la celda.
   const celda = (nivel, etapa) => {
-    const rs = filas.filter((r) => r.nivel === nivel && (etapa === "total" || r.etapa === etapa));
-    const spend = rs.reduce((s, r) => s + r.spend, 0);
-    const rev = rs.reduce((s, r) => s + r.spend * (r.roas || 0), 0);
-    const ventas = rs.reduce((s, r) => s + (r.ventas || 0), 0);
-    const conv = rs.reduce((s, r) => s + (r.conversaciones || 0), 0);
+    const rs = [];
+    let spend = 0, rev = 0, ventas = 0, conv = 0;
+    for (const r of filas) {
+      if (r.nivel !== nivel) continue;
+      const ps = etapa === "total" ? r.partes : r.partes.filter((p) => p.etapa === etapa);
+      const sp = ps.reduce((s, p) => s + p.spend, 0);
+      if (sp <= 0) continue;
+      const imp = ps.reduce((s, p) => s + p.imp, 0), v3 = ps.reduce((s, p) => s + p.v3, 0), tp = ps.reduce((s, p) => s + p.tp, 0);
+      const cv = ps.reduce((s, p) => s + p.conv, 0), vt = ps.reduce((s, p) => s + p.ventas, 0), rv = ps.reduce((s, p) => s + p.rev, 0);
+      rs.push({ ...r, cellSpend: sp, cellRoas: sp ? rv / sp : 0, cellCosto: cv ? sp / cv : null, cellHook: imp ? v3 / imp : null, cellHold: v3 ? tp / v3 : null, cellAuds: [...new Set(ps.map((p) => p.aud).filter(Boolean))] });
+      spend += sp; rev += rv; ventas += vt; conv += cv;
+    }
     const roas = spend ? rev / spend : 0, cpa = ventas ? spend / ventas : null, costoConv = conv ? spend / conv : null;
-    const hook = mediana(rs.map((r) => r.hook)), hold = mediana(rs.map((r) => r.hold));
+    const ok = rs.filter((r) => !r.norepro);
+    const hook = mediana(ok.map((r) => r.cellHook)), hold = mediana(ok.map((r) => r.cellHold));
     let estado;
     if (!rs.length) estado = "sin_probar";
-    else if (spend < u.pisoSpend || rs.length < 2 || nivel === "nd" || etapa === "total") estado = rs.length && nivel !== "nd" && etapa === "total" ? "neutra" : (nivel === "nd" ? "neutra" : "sin_data");
-    else if (etapa === "frio") estado = medHook == null || hook == null ? "neutra" : hook >= medHook * 1.15 ? "ganadora" : hook <= medHook * 0.85 ? "perdedora" : "neutra"; // frío: SOLO hook rate
+    else if (nivel === "nd" || etapa === "total") estado = "neutra";
+    else if (spend < u.pisoSpend || rs.length < 2) estado = "sin_data";
+    else if (etapa === "frio") estado = medHook == null || hook == null ? "neutra" : hook >= medHook * 1.15 ? "ganadora" : hook <= medHook * 0.85 ? "perdedora" : "neutra"; // frío: SOLO hook rate (sin los "sin reproducciones")
     else { const v = msg ? costoConv : roas; if (medVenta == null || v == null) estado = "neutra"; else if (msg) estado = v <= medVenta * 0.85 ? "ganadora" : v >= medVenta * 1.15 ? "perdedora" : "neutra"; else estado = v >= medVenta * 1.15 ? "ganadora" : v <= medVenta * 0.85 ? "perdedora" : "neutra"; }
-    return { nivel, etapa, rows: rs, n: rs.length, spend, pct: totalSpend ? spend / totalSpend : 0, roas, cpa, costoConv, hook, hold, estado };
+    return { nivel, etapa, rows: rs.sort((a, b) => b.cellSpend - a.cellSpend), n: rs.length, spend, pct: totalSpend ? spend / totalSpend : 0, roas, cpa, costoConv, hook, hold, estado, norepro: rs.length - ok.length };
   };
   const matriz = useMemo(() => { const m = {}; for (const n of NIV_ORDEN) { m[n] = {}; for (const e of ETAPAS) m[n][e] = celda(n, e); } return m; }, [filas, u.pisoSpend, medVenta, medHook, msg, totalSpend]); // eslint-disable-line react-hooks/exhaustive-deps
+  const etapaTot = (e) => NIV_ORDEN.reduce((s, n) => s + matriz[n][e].spend, 0);
 
   // LECTURA determinista (plantillas + números, sin IA)
   const lectura = useMemo(() => {
@@ -1262,7 +1305,7 @@ function Angulos({ withV, u, modo = "ventas", account, extras = [], tab, account
     if (perd.length) out.push(`celda${perd.length > 1 ? "s" : ""} perdedora${perd.length > 1 ? "s" : ""} por ${msg ? "costo/conv" : "ROAS"}: ${perd.join(", ")}`);
     const ganFrio = [5, 4, 3, 2, 1].filter((n) => matriz[n].frio.estado === "ganadora");
     if (ganFrio.length) out.push(`en frío engancha mejor el nivel ${ganFrio.join(" y ")} (hook rate sobre la mediana ${pctf(medHook)})`);
-    const nd = matriz.nd.total.n; if (nd) out.push(`${nd} creativo${nd > 1 ? "s" : ""} sin clasificar`);
+    const nd = matriz.nd.total; if (nd.n) out.push(`${nd.n} creativo${nd.n > 1 ? "s" : ""} sin clasificar (${Math.round(nd.pct * 100)}% del spend)`);
     return out.slice(0, 5);
   }, [matriz, filas, totalSpend, u.pisoSpend, msg, medHook]);
 
@@ -1296,7 +1339,7 @@ function Angulos({ withV, u, modo = "ventas", account, extras = [], tab, account
     const mx = {}; for (const n of NIV_ORDEN) { mx[n] = {}; for (const e of ETAPAS) { const c = matriz[n][e]; mx[n][e] = { estado: c.estado, creativos: c.n, spend: Math.round(c.spend), pct_spend: Math.round(c.pct * 100), ...(msg ? { costo_conv: c.costoConv && Math.round(c.costoConv) } : { roas: +c.roas.toFixed(2), cpa: c.cpa && Math.round(c.cpa) }), hook_rate: c.hook != null ? +(c.hook * 100).toFixed(1) : null, hold_rate: c.hold != null ? +(c.hold * 100).toFixed(1) : null }; } }
     const body = { account, extras, tab, modo, accountName, marca: modaSheet("marca"), publico: modaSheet("publico"), periodo: dias ? dias + " días" : preset, umbral: u, receta, lectura,
       matriz: mx, motivadores: motivadores.slice(0, 20).map((m) => ({ tipo: m.tipo, motivador: m.motivador, creativos: m.n, spend: Math.round(m.spend), ...(msg ? { costo_conv: m.costoConv && Math.round(m.costoConv) } : { roas: +m.roas.toFixed(2) }), hook_rate: m.hook != null ? +(m.hook * 100).toFixed(1) : null, niveles: m.niveles })),
-      referencias: { mediana_hook_rate: medHook != null ? +(medHook * 100).toFixed(1) : null, mediana_hold_rate: (() => { const h = mediana(filas.map((r) => r.hold)); return h != null ? +(h * 100).toFixed(1) : null; })(), ...(msg ? { mediana_costo_conv: medVenta && Math.round(medVenta) } : { mediana_roas: medVenta }) } };
+      referencias: { mediana_hook_rate: medHook != null ? +(medHook * 100).toFixed(1) : null, mediana_hold_rate: medHold != null ? +(medHold * 100).toFixed(1) : null, ...(msg ? { mediana_costo_conv: medVenta && Math.round(medVenta) } : { mediana_roas: medVenta }) } };
     try {
       const r = await fetch("/api/conciencia/proximo-test", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
       const j = await r.json(); if (j.error) throw new Error(j.error);
@@ -1315,8 +1358,17 @@ function Angulos({ withV, u, modo = "ventas", account, extras = [], tab, account
       <section className="sect">
         <div className="secthead"><span className="sverb" style={{ background: "#1E1812", color: "#F4C24A" }}><span className="sq" style={{ background: "#F4C24A" }} />◈</span><span className="stitle">MAPA · NIVEL DE CONCIENCIA × ETAPA</span>
           <span className="sright">{loading ? "clasificando…" : clasif ? <>{filas.length} creativos · {Object.values(niv).filter((c) => c.fuente === "regla").length} por regla · {Object.values(niv).filter((c) => c.fuente === "claude").length} por Claude · {Object.values(niv).filter((c) => c.fuente === "override").length} manual{clasif.cache ? "" : <span className="ctip" title="Sin Upstash la clasificación por Claude no se guarda: se repite en cada carga.">· sin cache ⓘ</span>}</> : ""}</span></div>
+        {Object.keys(ndInfo).length > 0 && (
+          <div className="cnd">
+            <b>SIN NIVEL ({short(Object.values(ndInfo).reduce((s, x) => s + x.spend, 0))} · {Math.round(Object.values(ndInfo).reduce((s, x) => s + x.spend, 0) / (spendCuenta || 1) * 100)}% del spend de la cuenta)</b>
+            {ndInfo.sin_sheet && <span>· sin fila en el Sheet (fuera de la matriz): {short(ndInfo.sin_sheet.spend)} ({ndInfo.sin_sheet.n}) → catálogos o videos sin procesar en la planilla</span>}
+            {ndInfo.claude && <span>· Claude no respondió: {short(ndInfo.claude.spend)} ({ndInfo.claude.n}) → recargar la pestaña reintenta</span>}
+            {ndInfo.regla && <span>· regla sin match{clasif && clasif.claude ? "" : " (sin Claude)"}: {short(ndInfo.regla.spend)} ({ndInfo.regla.n}) → override manual en la celda nd</span>}
+            {ndInfo.pendiente && <span>· clasificando: {short(ndInfo.pendiente.spend)} ({ndInfo.pendiente.n})</span>}
+          </div>
+        )}
         {err && <div className="generr">{err}</div>}
-        <div className="thinnote">Filas: nivel de conciencia del GANCHO (5 producto+oferta → 1 inconsciente). Columnas: etapa de la audiencia donde corrió. En <b>frío</b> la celda se juzga por hook rate vs la mediana ({pctf(medHook)}); en <b>medio/caliente</b> por {msg ? "costo/conv" : "ROAS"} vs la mediana ({msg ? (medVenta ? money(medVenta) : "—") : (medVenta != null ? medVenta.toFixed(1) + "x" : "—")}), ±15%. Sin data = menos de 2 creativos o spend bajo el piso.</div>
+        <div className="thinnote">Filas: nivel de conciencia del GANCHO (5 producto+oferta → 1 inconsciente). Columnas: etapa de la audiencia donde corrió. En <b>frío</b> la celda se juzga por hook rate vs la mediana ({pctf(medHook)}); en <b>medio/caliente</b> por {msg ? "costo/conv" : "ROAS"} vs la mediana ({msg ? (medVenta ? money(medVenta) : "—") : (medVenta != null ? medVenta.toFixed(1) + "x" : "—")}), ±15%. Sin data = menos de 2 creativos o spend bajo el piso. Cada creativo se reparte por CONJUNTO (su audiencia real), así que puede estar en varias columnas. Hold mediana de la vista: {pctf(medHold, 0)}. Videos "⚠ sin reproducciones" (más de 5.000 impresiones, menos de 2% de 3 s) quedan fuera de las medianas.</div>
         <div className="cmatrixwrap"><table className="cmatrix">
           <thead><tr><th className="cnivel">NIVEL</th>{ETAPAS.map((e) => <th key={e}>{ETAPA_LABEL[e]}</th>)}</tr></thead>
           <tbody>{NIV_ORDEN.map((n) => (
@@ -1328,19 +1380,22 @@ function Angulos({ withV, u, modo = "ventas", account, extras = [], tab, account
                     <div className="ccmain" style={{ color: st.color }}>{e === "frio" ? "hook " + pctf(c.hook) : fmtVenta(c)}</div>
                     <div className="ccsub">{e === "frio" ? "hold " + pctf(c.hold, 0) : (msg ? "hook " + pctf(c.hook) : "CPA " + (c.cpa ? money(c.cpa) : "—"))} · {c.n} creat.</div>
                     {st.lab && <div className="cclab" style={{ color: st.color }}>{st.lab}</div>}
+                    {c.norepro > 0 && <div className="ccnr">⚠ {c.norepro} sin repro.</div>}
                   </> : <div className="ccempty">sin probar</div>}
                 </td>); })}
-            </tr>))}</tbody>
+            </tr>))}
+            <tr className="ctot"><td className="cnivel"><span>spend por etapa</span></td>{ETAPAS.map((e) => <td key={e} className="ctotcell mono">{short(etapaTot(e))} <small>{Math.round(etapaTot(e) / (totalSpend || 1) * 100)}%</small></td>)}</tr>
+          </tbody>
         </table></div>
         {celdaSel && (
           <div className="cdetail">
             <div className="cdhead">Nivel {celdaSel.nivel} · {ETAPA_LABEL[celdaSel.etapa]} · {celdaSel.n} creativo{celdaSel.n !== 1 ? "s" : ""} · {short(celdaSel.spend)} <button className="cdx" onClick={() => setSel(null)}>✕</button></div>
-            {[...celdaSel.rows].sort((a, b) => b.spend - a.spend).map((r) => (
+            {celdaSel.rows.map((r) => (
               <div className="cdrow" key={r.id}>
-                <span className="cdname">{r.nombre} <TF r={r} /><Paused r={r} /></span>
-                <span className="cdniv">nivel <select value={r.c && r.c.fuente === "override" ? r.nivel : ""} onChange={(e) => setOverride(r.fp, e.target.value)} title="Override manual del nivel (se guarda para esta planilla)"><option value="">{r.nivel} · {r.c ? r.c.fuente : "nd"}</option>{[5, 4, 3, 2, 1].map((n) => <option key={n} value={n}>{n} · manual</option>)}</select></span>
+                <span className="cdname">{r.nombre} <TF r={r} /><Paused r={r} /><SinRepro r={r} />{r.cellAuds.length ? <small className="cdaud">{r.cellAuds.join(" · ")}</small> : null}</span>
+                <span className="cdniv">{true ? <>nivel <select value={r.c && r.c.fuente === "override" ? r.nivel : ""} onChange={(e) => setOverride(r.fp, e.target.value)} title="Override manual del nivel (se guarda para esta planilla)"><option value="">{r.nivel} · {r.c ? r.c.fuente : "nd"}</option>{[5, 4, 3, 2, 1].map((n) => <option key={n} value={n}>{n} · manual</option>)}</select></> : <small>sin fila en el Sheet</small>}</span>
                 <span className="cdmot">{r.c && r.c.motivador ? <><i>{r.c.motivadorTipo}</i> {r.c.motivador}</> : "—"}</span>
-                <span className="cdmeta mono">{short(r.spend)} · {msg ? (r.conversaciones ? money(r.costoConv) + "/conv" : "0 conv") : r.roas.toFixed(1) + "x"} · hook {pctf(r.hook)} · hold {pctf(r.hold, 0)}</span>
+                <span className="cdmeta mono">{short(r.cellSpend)}{celdaSel.etapa !== "total" && r.cellSpend < r.spend ? " de " + short(r.spend) : ""} · {msg ? (r.cellCosto ? money(r.cellCosto) + "/conv" : "0 conv") : r.cellRoas.toFixed(1) + "x"} · hook {pctf(r.cellHook)} · hold {pctf(r.cellHold, 0)}</span>
               </div>))}
           </div>
         )}
@@ -2303,7 +2358,7 @@ function Panel({ rows, u = {}, stats, sort, setSortKey, modo = "ventas" }) {
           <tbody>
             {rows.map((r) => { const b = BUCKETS[r.v]; return (
               <tr key={r.id} style={{ "--bar": b.color }}>
-                <td className="name">{mix && <PlatTag p={r.plat} />}{r.nombre} <span className="fmt">{r.fmt}</span><TF r={r} /><Paused r={r} /><RolTag r={r} /><Calidad v={r.calidad} mix={r.calidadMix} /></td>
+                <td className="name">{mix && <PlatTag p={r.plat} />}{r.nombre} <span className="fmt">{r.fmt}</span><TF r={r} /><Paused r={r} /><SinRepro r={r} /><RolTag r={r} /><Calidad v={r.calidad} mix={r.calidadMix} /></td>
                 <td className="ang">{r.ang}{r.sec !== "—" ? <span className="sec"> / {r.sec}</span> : null}<span className="split">{r.split}</span></td>
                 <td className="aud">{r.aud}</td><td className="mono num">{money(r.spend)}</td>{msg ? <><td className="mono num strong">{nf.format(r.conversaciones)}</td><td className="mono num">{money(r.costoConv)}</td></> : <><td className="mono num strong">{r.roas.toFixed(1)}x</td><td className="mono num">{money(r.cpa)}</td></>}
                 <td><span className="badge" style={{ background: b.bg, color: b.color }}><span className="sq" style={{ background: b.color }} />{r.v}</span></td>
@@ -2834,6 +2889,9 @@ tbody tr{border-bottom:1px solid var(--line);box-shadow:inset 5px 0 0 var(--bar)
 tbody tr:hover{background:#EFE6D2;}tbody tr:last-child{border-bottom:none;}
 td{padding:11px 12px;vertical-align:middle;}.num{text-align:right;}.name{font-weight:700;}
 .fmt{font-size:9px;color:var(--soft);border:1px solid var(--line);border-radius:3px;padding:1px 5px;margin-left:6px;font-family:'Space Mono',monospace;letter-spacing:1px;}
+.norepro{font-size:9px;color:#C5362B;border:1px solid #C5362B;border-radius:3px;padding:1px 5px;margin-left:6px;font-family:'Space Mono',monospace;letter-spacing:.5px;white-space:nowrap;}
+.cnd{font-size:11.5px;color:#7A5410;background:#F1E4C4;border:1px solid #C2861F;border-radius:6px;padding:6px 10px;margin:8px 0;display:flex;flex-wrap:wrap;gap:6px 10px;}.cnd b{font-family:'Space Mono',monospace;font-size:10px;letter-spacing:1px;}
+.ctot td{border-top:2px solid var(--ink);padding-top:6px;}.ctotcell{text-align:center;font-size:12px;color:var(--ink);}.ctotcell small{color:var(--soft);}.ccnr{font-size:9.5px;color:#C5362B;margin-top:2px;}.cdaud{display:block;font-weight:400;color:var(--soft);font-size:10px;}
 .cwarn{background:#F1E4C4;color:#7A5410;border:2px solid #C2861F;border-radius:8px;padding:10px 14px;font-size:12.5px;margin:0 0 14px;}
 .sright{margin-left:auto;font-size:11px;color:var(--soft);font-family:'Space Mono',monospace;}.ctip{cursor:help;}
 .cmatrixwrap{overflow-x:auto;}.cmatrix{width:100%;border-collapse:separate;border-spacing:4px;table-layout:fixed;}

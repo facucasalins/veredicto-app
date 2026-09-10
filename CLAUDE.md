@@ -138,6 +138,12 @@ respuestas concisas.
   de page.jsx (`Angulos`: matriz nivel × etapa con estado de celda — frío SOLO por hook rate,
   medio/caliente por ROAS o costo/conv ±15% vs mediana —, lectura determinista, motivadores
   probados, próximo test con "Armar brief" → `prefill` de Generar; historial `hist_test`).
+  La matriz reparte cada creativo POR CONJUNTO (`breakdown`, con `impresiones`/`video3s`/`thruplay`
+  por conjunto) según la audiencia real (`etapaAud` = `AUD_POS`): no por su audiencia dominante.
+  Solo entran creativos CON fila en el Sheet; lo sin Sheet (catálogos) va al desglose "sin nivel"
+  del header. Videos "⚠ sin reproducciones" (`sinRepro`: formato de video, >5.000 impresiones,
+  <2% de 3 s — Meta no los cuenta como video) se marcan (también en el PANEL) y quedan fuera de
+  las medianas de hook/hold y del veredicto en frío.
 - `lib/fx.js` — cotización del **dólar oficial** (Argentina) para no mezclar monedas cuando la cuenta de
   Meta está en USD. `getDolarOficial()` (PROMEDIO de compra y venta = medio del spread, cache en memoria
   ~1h) y `convertMonto(monto, from, to)` (solo ARS↔USD). Fuente: dolarapi.com, fallback criptoya.com.
