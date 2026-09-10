@@ -66,6 +66,30 @@ Regla de la casa: cada PR suma su entrada acá ANTES de mergearse.
   guarda. La URL directa del archivo (`video.source`) NO está permitida para el token de Sistema.
   Fallback: el post (`effective_object_story_id`) y, último, el anuncio en el Administrador.
 - Solo Meta: en Google/TikTok el chip no aparece. Verifica sesión y `canSeeAccount`.
+## V 1.32 — ⬇ CSV: descargar los resultados del período
+- Selector **⬇ CSV…** al lado del período (header): baja un archivo con los resultados de la
+  cuenta en el rango elegido (presets o fechas personalizadas) **por anuncio** (con su campaña y
+  conjunto), **por conjunto** o **por campaña**. En la vista combinada, una opción por cuenta.
+- Columnas: campaña/conjunto/anuncio con sus ids, estado, audiencia real, tipo (ventas/mensajes),
+  spend, impresiones, clics, CTR, CPM, CPC, ventas, facturación atribuida, ROAS, CPA,
+  conversaciones, costo/conv, embudo (LPV, VC, ATC, checkout), video (3s, ThruPlay, 100%). Por
+  anuncio suma alcance, frecuencia y las clasificaciones de calidad de Meta. ROAS agregado
+  recompuesto desde la facturación (no promedio simple). Orden: más spend primero.
+- Formato Excel es-AR: separador `;`, decimales con coma, BOM UTF-8. Montos en la moneda de la
+  cuenta (columna `moneda`), como el Administrador. Meta, TikTok y Google (misma forma de fila).
+- `/api/export` (`lib/export.js`): sesión + `canSeeAccount`, `Content-Disposition` para que el
+  browser lo baje directo. `getAds` de Meta ahora trae `campaign_id`.
+- Por anuncio suma la **nomenclatura** (fingerprint = el `HH.MM.SS`, fecha, concepto, ángulo,
+  formato — con `parseName`, el mismo parser del panel; vacías en Google/catálogos) y la
+  **etapa de embudo** (frio | medio | caliente, misma regla que `audPos`; también por conjunto).
+- Video: `video_p50`, `video_tiempo_promedio_s`, `hook_rate_%` (3s ÷ impresiones) y `hold_rate_%`
+  (ThruPlay ÷ 3s). Campos nuevos en `getAds` de Meta.
+- **Estado siempre con valor** (activo | pausado | archivado | sin_dato). Causa del vacío: el edge
+  `/ads` de Meta EXCLUYE los archivados por default (117 de 436 anuncios con spend en 30 días eran
+  ARCHIVED). `getAdStatuses` ahora pide todos los estados → también el panel deja de tratarlos
+  como "sin dato".
+- Vista combinada: el CSV incluye TODAS las cuentas de la vista (Google/TikTok con su
+  `plataforma` y `moneda`), sufijo `_combinado` en el nombre del archivo.
 
 ## V 1.30 — Tienda Nube: un solo barrido, cache y sin datos silenciosamente incompletos
 - **Causa raíz de la lentitud y de "no me carga nuevos vs recurrentes"**: la banda hacía TRES

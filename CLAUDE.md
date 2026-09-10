@@ -19,7 +19,9 @@ respuestas concisas.
   modo Tienda Nube), **`getAdsetTargeting(account)`** (targeting REAL de cada adset + objetivo
   declarado `optimization_goal`/`promoted_object`, 1 call paginada),
   **`getAdStatuses(account)`** (estado de entrega por ad mirando la CADENA completa: pide el
-  effective_status del ad + del adset + de la campaña y devuelve `"ACTIVE"` solo si todo entrega; si
+  effective_status del ad + del adset + de la campaña y devuelve `"ACTIVE"` solo si todo entrega —
+  pidiendo TODOS los `effective_status`, porque el edge `/ads` excluye ARCHIVED por default y los
+  anuncios archivados con spend quedaban sin estado; si
   el conjunto o la campaña de arriba están apagados devuelve `ADSET_PAUSED`/`CAMPAIGN_PAUSED`, porque
   el effective_status del ad solo no siempre refleja al padre) y **`getAdsetBudgets(account)`**
   (budget real por adset/campaña; detecta ABO vs CBO; para el Plan). `getAds` extrae `ventas` (compras)
@@ -170,6 +172,13 @@ respuestas concisas.
   (`getAdPreviewUrl` en `lib/meta.js`: `/{ad}/previews` → src del iframe, abre sin login; fallback
   post → Administrador). Cada fila de `buildRows` lleva `adId` (anuncio de más spend del creativo).
   Solo Meta; el link vence a las ~24 h así que se resuelve al clic.
+- `app/api/export` + `lib/export.js` — "⬇ CSV": `?account=&preset=|since=&until=&nivel=anuncio|
+  conjunto|campana` → descarga (Content-Disposition) de los resultados del período: misma data que
+  `/api/ads` (insights + estado + audiencia real + tipo) sin Sheet ni nomenclatura, por anuncio o
+  agregada por conjunto/campaña (ROAS recompuesto desde spend×roas). Excel es-AR (`;`, coma
+  decimal, BOM). Montos en moneda de la cuenta. Meta/TikTok/Google; `accounts=` → todas las cuentas
+  de la vista en un archivo (`_combinado`). Por anuncio: nomenclatura (`parseName`), etapa de embudo
+  (`audEmbudoPos`), video p50/tiempo promedio/hook rate/hold rate, estado SIEMPRE con valor.
 - `app/api/*` — `accounts` (filtra por sesión), `ads` (insights + targeting + estado en paralelo,
   cruza Sheet, arma tipoMap), `login`, `logout`, `sheets/tabs` (scopeada por `tabs` de sesión),
   `tiendanube/{stores,summary}` (stores scopeadas por cuenta), `copy` (generador), **`analyze`**

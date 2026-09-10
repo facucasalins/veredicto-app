@@ -679,6 +679,19 @@ export default function App() {
               {!soloGoogle && <select className="cselect" value={sheetTab} onChange={(e) => setSheetTab(e.target.value)}><option value="">— pestaña sheet —</option>{sheetTabs.map((t) => <option key={t.gid} value={t.title}>{t.title}</option>)}</select>}
               <select className="cselect" value={preset} onChange={(e) => setPreset(e.target.value)}><option value="today">Hoy</option><option value="yesterday">Ayer</option><option value="last_7d">Últimos 7 días</option><option value="last_14d">Últimos 14 días</option><option value="last_30d">Últimos 30 días</option><option value="last_90d">Últimos 90 días</option><option value="this_month">Este mes</option><option value="last_month">Mes pasado</option><option value="maximum">Máximo</option><option value="custom">Personalizado…</option></select>
               {preset === "custom" && <span className="daterange"><input type="date" className="cdate" value={cSince} max={cUntil || undefined} onChange={(e) => setCSince(e.target.value)} /><i>→</i><input type="date" className="cdate" value={cUntil} min={cSince || undefined} onChange={(e) => setCUntil(e.target.value)} /></span>}
+              {account && (preset !== "custom" || (cSince && cUntil)) && (
+                // ⬇ CSV: baja los resultados del período elegido (misma data que el panel, sin Sheet) por
+                // anuncio, conjunto o campaña. En la vista combinada van TODAS las cuentas en el mismo archivo.
+                <select className="cselect csvsel" value="" title="Descargar los resultados del período como CSV (Excel / Google Sheets)" onChange={(e) => {
+                  const nivel = e.target.value; if (!nivel) return;
+                  const a = document.createElement("a");
+                  a.href = "/api/export?accounts=" + encodeURIComponent(accountsQS) + "&curs=" + cursQS + "&nivel=" + nivel + "&preset=" + preset + customRange;
+                  a.download = ""; document.body.appendChild(a); a.click(); a.remove();
+                }}>
+                  <option value="">⬇ CSV…</option>
+                  <option value="anuncio">por anuncio</option><option value="conjunto">por conjunto</option><option value="campana">por campaña</option>
+                </select>
+              )}
               {tnStore && !ttHasReal && (
                 <span className="ttinline" title="Sin acceso a la API de TikTok todavía: cargá a mano lo invertido en ESTE período (en USD). Se convierte al dólar oficial de hoy y se suma a inversión, MER, CAC y margen de la banda de Tienda Nube.">
                   <button className={"ttbtn" + (ttOn ? " on" : "")} onClick={() => setTtOnP(!ttOn)}>🎵 TIKTOK</button>
