@@ -1297,6 +1297,8 @@ function Angulos({ withV, u, modo = "ventas", account, extras = [], tab, account
   const [tLoading, setTLoading] = useState(false);
   const [tErr, setTErr] = useState("");
   const [hist, saveHist] = useHistSync("hist_test", account);
+  const [voz, setVoz] = useState([]);       // inventario de voz real de las clientas (por tab)
+  const [cruce, setCruce] = useState({});   // vozId → motivador detectado en creativos | null
   const rowsSheet = useMemo(() => withV.filter((r) => r.sheet), [withV]); // solo estas se clasifican (el nivel sale del gancho)
   const dias = diasPeriodo(preset, cSince, cUntil);
   const periodKey = [account, ...extras].join(",") + "|" + tab + "|" + preset + "|" + cSince + "|" + cUntil;
@@ -1440,6 +1442,7 @@ function Angulos({ withV, u, modo = "ventas", account, extras = [], tab, account
     const mx = {}; for (const n of NIV_ORDEN) { mx[n] = {}; for (const e of ETAPAS) { const c = matriz[n][e]; const cc = ctx.celdas[n][e]; mx[n][e] = { estado: c.estado, creativos: cc.creativos, spend: Math.round(c.spend), pct_spend: Math.round(c.pct * 100), ...(msg ? { costo_conv: c.costoConv && Math.round(c.costoConv) } : { roas: +c.roas.toFixed(2), cpa: c.cpa && Math.round(c.cpa) }), hook_rate: c.hook != null ? +(c.hook * 100).toFixed(1) : null, hold_rate: c.hold != null ? +(c.hold * 100).toFixed(1) : null, motivadores_en_celda: cc.motivadores_en_celda, formatos_en_celda: cc.formatos_en_celda }; } }
     const body = { account, extras, tab, modo, accountName, marca: modaSheet("marca"), publico: modaSheet("publico"), periodo: dias ? dias + " días" : preset, umbral: u, receta, lectura,
       matriz: mx, motivadores: ctx.motivadores, voz: ctx.voz, excluidos_sin_reproducciones: ctx.excluidos_sin_reproducciones,
+      voz_clientas: vozPayload(voz, cruce, ctx.motivadores),
       referencias: { mediana_hook_rate: medHook != null ? +(medHook * 100).toFixed(1) : null, mediana_hold_rate: medHold != null ? +(medHold * 100).toFixed(1) : null, ...(msg ? { mediana_costo_conv: medVenta && Math.round(medVenta) } : { mediana_roas: medVenta }) } };
     try {
       const r = await fetch("/api/conciencia/proximo-test", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
@@ -1519,6 +1522,8 @@ function Angulos({ withV, u, modo = "ventas", account, extras = [], tab, account
           : <div className="dedup">{loading ? "clasificando…" : "Todavía no hay motivadores clasificados."}</div>}
       </section>
 
+      <VozClientas account={account} extras={extras} tab={tab} motivadores={motivadores} voz={voz} setVoz={setVoz} cruce={cruce} setCruce={setCruce} msg={msg} />
+
       <section className="an">
         <div className="anhead">
           <div><div className="antitle">◎ PRÓXIMO TEST</div><div className="ansub">Claude cruza la matriz (celdas sin probar, ganadoras y perdedoras) con los motivadores ya tocados y propone 3 hipótesis específicas de la marca. Nunca juzga niveles 1-3 por {msg ? "costo/conv" : "ROAS"}.</div></div>
@@ -1531,6 +1536,98 @@ function Angulos({ withV, u, modo = "ventas", account, extras = [], tab, account
 
       <Calibracion filas={filas} niv={niv} accountName={accountName} tab={tab} />
     </>
+  );
+}
+
+// ─────────── VOZ DE LAS CLIENTAS: motivadores reales (dijeron ellas), no inferidos de los creativos ───────────
+// Inventario por marca en Upstash (`lib/voz.js`). Se carga pegando texto crudo (comentarios, chats,
+// MeLi, reseñas) → Claude extrae motivadores con la frase literal, dedup contra lo guardado
+// ("es el mismo que #id" suma veces_visto) → propuestas con check para aceptar/editar/descartar.
+// Cruce con la matriz: cada motivador guardado se matchea (Claude, cacheado) contra los motivadores
+// detectados en los creativos → "probado" con su resultado, o "sin creativo" = el backlog real.
+const VOZ_TIPOS = ["Dolor", "Deseo", "Objecion", "Ocasion", "Identidad"];
+const VOZ_FUENTES = [["comentarios", "comentarios de posts"], ["whatsapp", "WhatsApp"], ["meli", "preguntas de MeLi"], ["resenas", "reseñas"], ["manual", "manual"]];
+// Lo que reciben PRÓXIMO TEST y GENERAR: sin_creativo (backlog) y probados (con el motivador del creativo y su resultado).
+const vozPayload = (voz, cruce, motivadores) => {
+  const res = (m) => { const x = motivadores.find((y) => y.motivador === m); return x ? { creativos: x.creativos, niveles: x.niveles, hook_rate: x.hook_rate, ...(x.roas != null ? { roas: x.roas } : {}), ...(x.costo_conv != null ? { costo_conv: x.costo_conv } : {}) } : null; };
+  const item = (v) => ({ id: v.id, tipo: v.tipo, frase_literal: v.frase_literal, resumen: v.resumen, fuente: v.fuente, veces_visto: v.veces_visto });
+  return {
+    sin_creativo: voz.filter((v) => !cruce[v.id]).map(item),
+    probados: voz.filter((v) => cruce[v.id]).map((v) => ({ ...item(v), motivador_creativo: cruce[v.id], resultado: res(cruce[v.id]) })),
+  };
+};
+function VozClientas({ account, extras, tab, motivadores, voz, setVoz, cruce, setCruce, msg }) {
+  const [texto, setTexto] = useState("");
+  const [fuente, setFuente] = useState("comentarios");
+  const [props, setProps] = useState(null); // propuestas de Claude (con aceptar/edición)
+  const [busy, setBusy] = useState("");
+  const [err, setErr] = useState("");
+  const [cache, setCache] = useState(true);
+  const [manual, setManual] = useState({ tipo: "Dolor", frase_literal: "", resumen: "" });
+  const [open, setOpen] = useState(true);
+  const api = async (body) => { const r = await fetch("/api/voz", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ account, extras, tab, ...body }) }); const j = await r.json(); if (j.error) { const e = new Error(j.error); e.status = r.status; throw e; } return j; };
+  useEffect(() => { if (!tab) return; let c = false; api({ action: "listar" }).then((j) => { if (!c) { setVoz(j.voz || []); setCache(j.cache !== false); } }).catch(() => {}); return () => { c = true; }; }, [tab]); // eslint-disable-line react-hooks/exhaustive-deps
+  // cruce automático (una vez por set de motivadores; el server lo cachea)
+  const firma = motivadores.map((m) => m.motivador).join("|");
+  useEffect(() => { if (!voz.length || !motivadores.length) return; let c = false; api({ action: "cruzar", motivadores: motivadores.map((m) => ({ motivador: m.motivador })), voz }).then((j) => { if (!c) setCruce(j.cruce || {}); }).catch(() => {}); return () => { c = true; }; }, [voz.length, firma]); // eslint-disable-line react-hooks/exhaustive-deps
+  const extraer = async () => { setBusy("extraer"); setErr(""); try { const j = await api({ action: "extraer", texto }); setProps(j.propuestas.map((p) => ({ ...p, aceptar: true }))); } catch (e) { setErr(e.message); } finally { setBusy(""); } };
+  const guardar = async () => {
+    setBusy("guardar"); setErr("");
+    try { const j = await api({ action: "guardar", items: props, fuente }); setVoz(j.voz); setProps(null); setTexto(""); }
+    catch (e) {
+      if (e.status === 409) { // sin Upstash: queda solo en esta vista
+        const lista = [...voz]; for (const it of props.filter((x) => x.aceptar)) { const ex = it.mismo_que && lista.find((v) => v.id === it.mismo_que); if (ex) ex.veces_visto += it.veces_visto || 1; else lista.push({ id: "tmp" + Math.random().toString(36).slice(2, 8), tipo: it.tipo, frase_literal: it.frase_literal, resumen: it.resumen, fuente, fecha: new Date().toISOString().slice(0, 10), veces_visto: it.veces_visto || 1 }); }
+        setVoz(lista); setProps(null); setErr("Sin Upstash no se guarda: quedó solo en esta vista.");
+      } else setErr(e.message);
+    } finally { setBusy(""); }
+  };
+  const alta = async () => { if (!manual.frase_literal.trim()) return; setBusy("manual"); setErr(""); try { const j = await api({ action: "manual", item: manual }); setVoz(j.voz); setManual({ tipo: "Dolor", frase_literal: "", resumen: "" }); } catch (e) { setErr(e.message); } finally { setBusy(""); } };
+  const borrar = async (id) => { try { const j = await api({ action: "borrar", id }); setVoz(j.voz); } catch (e) { setVoz(voz.filter((v) => v.id !== id)); if (e.status !== 409) setErr(e.message); } };
+  const resDe = (m) => motivadores.find((x) => x.motivador === m);
+  const sinCreativo = voz.filter((v) => !cruce[v.id]);
+  return (
+    <section className="sect">
+      <div className="secthead"><span className="sverb" style={{ background: "#0F6E56", color: "#fff" }}><span className="sq" style={{ background: "#fff" }} />❝</span><span className="stitle">VOZ DE LAS CLIENTAS</span>
+        <span className="sright">{voz.length} motivador{voz.length !== 1 ? "es" : ""} · {sinCreativo.length} sin creativo{!cache ? <span className="ctip" title="Sin Upstash el inventario no se guarda: lo que cargues queda solo en esta vista."> · sin cache ⓘ</span> : null}<button className="cretry" style={{ marginLeft: 8 }} onClick={() => setOpen(!open)}>{open ? "▴ plegar" : "▾ abrir"}</button></span></div>
+      {open && (<>
+        <div className="thinnote">Pegá texto crudo de las clientas (comentarios de posts, chats de WhatsApp, preguntas de MeLi, reseñas). Claude extrae los motivadores con la frase literal y detecta repetidos contra lo ya guardado. Lo que no tiene creativo es el backlog real de ángulos.</div>
+        <div className="vozin">
+          <textarea className="voztxt" rows={5} placeholder="Pegá acá los comentarios / chats / preguntas…" value={texto} onChange={(e) => setTexto(e.target.value)} />
+          <div className="vozctl">
+            <select className="cselect" value={fuente} onChange={(e) => setFuente(e.target.value)}>{VOZ_FUENTES.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>
+            <button className="anbtn" onClick={extraer} disabled={busy || texto.trim().length < 20}>{busy === "extraer" ? "● EXTRAYENDO..." : "▶ EXTRAER"}</button>
+          </div>
+        </div>
+        {err && <div className="generr">{err}</div>}
+        {props && (
+          <div className="vozprops">
+            <div className="cdhead">{props.length} propuesta{props.length !== 1 ? "s" : ""} · tildá las que van, editá tipo/resumen, y guardá <button className="anbtn" style={{ marginLeft: "auto" }} onClick={guardar} disabled={busy || !props.some((p) => p.aceptar)}>{busy === "guardar" ? "● GUARDANDO..." : "✓ GUARDAR " + props.filter((p) => p.aceptar).length}</button></div>
+            {props.map((p, i) => (
+              <div className={"vozprop" + (p.aceptar ? "" : " off")} key={i}>
+                <input type="checkbox" checked={!!p.aceptar} onChange={(e) => setProps(props.map((x, j) => (j === i ? { ...x, aceptar: e.target.checked } : x)))} />
+                <select value={p.tipo} onChange={(e) => setProps(props.map((x, j) => (j === i ? { ...x, tipo: e.target.value } : x)))}>{VOZ_TIPOS.map((t) => <option key={t}>{t}</option>)}</select>
+                <div className="vozpbody"><div className="vozfrase">“{p.frase_literal}”</div><input className="vozres" value={p.resumen} onChange={(e) => setProps(props.map((x, j) => (j === i ? { ...x, resumen: e.target.value } : x)))} /><div className="vozmeta">visto {p.veces_visto}×{p.mismo_que ? <span className="vozdup"> · es el mismo que “{(voz.find((v) => v.id === p.mismo_que) || {}).resumen || p.mismo_que}” → suma</span> : null}</div></div>
+              </div>))}
+          </div>
+        )}
+        <div className="vozmanual">
+          <span className="callab">ALTA MANUAL</span>
+          <select value={manual.tipo} onChange={(e) => setManual({ ...manual, tipo: e.target.value })}>{VOZ_TIPOS.map((t) => <option key={t}>{t}</option>)}</select>
+          <input placeholder="frase literal de la clienta" value={manual.frase_literal} onChange={(e) => setManual({ ...manual, frase_literal: e.target.value })} />
+          <input placeholder="resumen (opcional)" value={manual.resumen} onChange={(e) => setManual({ ...manual, resumen: e.target.value })} />
+          <button className="cretry" onClick={alta} disabled={busy || !manual.frase_literal.trim()}>+ agregar</button>
+        </div>
+        {voz.length > 0 && (
+          <div className="cmotwrap"><table className="cmot"><thead><tr><th>TIPO</th><th>FRASE LITERAL</th><th>RESUMEN</th><th>FUENTE</th><th>VISTO</th><th>PROBADO</th><th></th></tr></thead>
+            <tbody>{[...voz].sort((a, b) => (b.veces_visto || 0) - (a.veces_visto || 0)).map((v) => { const m = cruce[v.id]; const r = m ? resDe(m) : null; return (
+              <tr key={v.id} className={!m ? "vozsin" : ""}>
+                <td><span className="cmtipo">{v.tipo}</span></td><td className="vozfrase">“{v.frase_literal}”</td><td>{v.resumen}</td><td className="mono">{v.fuente}<br /><small>{v.fecha}</small></td><td className="mono num">{v.veces_visto}×</td>
+                <td>{m ? <><b>sí</b> · “{m}”{r ? <div className="vozres2">{r.n} creat. · niveles {r.niveles.join("/")} · {msg ? (r.costoConv ? money(r.costoConv) + "/conv" : "—") : r.roas.toFixed(1) + "x"} · hook {pctf(r.hook)}</div> : null}</> : <span className="vozbacklog">sin creativo → backlog</span>}</td>
+                <td><button className="cdx" onClick={() => borrar(v.id)} title="borrar">✕</button></td>
+              </tr>); })}</tbody></table></div>
+        )}
+      </>)}
+    </section>
   );
 }
 
@@ -1587,6 +1684,7 @@ function TestsOut({ hip = [], onBrief }) {
       <div className="ctest" key={i}>
         <div className="cthead"><span className="ctniv">NIVEL {h.nivel_objetivo}</span><span className="ctlab">{NIV_LABEL[h.nivel_objetivo] || ""}</span>{h.motivadorTipo && <span className="cmtipo">{h.motivadorTipo}</span>}<span className="ctetapa">{String(h.etapa_audiencia_sugerida || "").toUpperCase()}</span></div>
         <div className="ctmot">{h.motivador}</div>
+        {h.verificado_con_clientas != null && <div className={"ctverif" + (h.verificado_con_clientas ? " si" : "")}>{h.verificado_con_clientas ? "✓ verificado con clientas" + (h.frase_clienta ? ": “" + h.frase_clienta + "”" : "") : "no verificado con clientas"}</div>}
         <div className="cthook">“{h.hook_ejemplo}”</div>
         <div className="ctwhy"><b>Por qué:</b> {h.por_que}</div>
         {h.motivador_cercano && <div className="ctwhy"><b>Más cercano ya probado:</b> {h.motivador_cercano} · <b>se diferencia en:</b> {h.diferencia}</div>}
@@ -2710,7 +2808,7 @@ REGLAS (no negociables):
 3. Si te paso ganchos literales de la marca ("así habla esta marca"): tus hooks de ejemplo tienen que sonar a esos — mismo registro, largo y jerga — no a un manifiesto ni a un eslogan.
 4. Razoná antes de proponer: cada ángulo lleva "descarte" con 2 ideas que consideraste y por qué las descartaste (ya probada / fuera de voz / mismo tipo que otra).
 
-Devolvé EXCLUSIVAMENTE JSON válido, sin markdown ni backticks, con los campos EN ESTE ORDEN por ángulo: {"angulos":[{"descarte":[{"idea":"...","motivo":"ya probada | fuera de voz | mismo tipo que otra"},{"idea":"...","motivo":"..."}],"tipo":"Dolor|Ocasion|Identidad|Objecion|Deseo|Oferta","nombre":"nombre corto","motivador":"el motivador concreto, ≤80 chars","cercano":"motivador probado más cercano (o \"ninguno\")","diferencia":"en qué se diferencia, 1 frase","desc":"por qué podría funcionar y cómo se ejecuta en un creativo, 1-2 oraciones","hook_ejemplo":"1 línea, el gancho de los primeros 3 s"}, ... 6 items]}`,
+Devolvé EXCLUSIVAMENTE JSON válido, sin markdown ni backticks, con los campos EN ESTE ORDEN por ángulo: {"angulos":[{"descarte":[{"idea":"...","motivo":"ya probada | fuera de voz | mismo tipo que otra"},{"idea":"...","motivo":"..."}],"tipo":"Dolor|Ocasion|Identidad|Objecion|Deseo|Oferta","nombre":"nombre corto","motivador":"el motivador concreto, ≤80 chars","cercano":"motivador probado más cercano (o \"ninguno\")","diferencia":"en qué se diferencia, 1 frase","desc":"por qué podría funcionar y cómo se ejecuta en un creativo, 1-2 oraciones","hook_ejemplo":"1 línea, el gancho de los primeros 3 s","verificado_con_clientas":true|false,"frase_clienta":"la frase literal de la voz si verificado, o \"\""}, ... 6 items]}`,
   },
 };
 
@@ -2755,6 +2853,19 @@ function Generar({ rows = [], accountName = "", prefill = null, account, extras 
     const msg = modoApp === "mensajes";
     const filas = rowsSheet.map((r) => filaConciencia(r, data.niveles || {}, data, false));
     const ctx = contextoAngulos(filas, u, msg);
+    // voz real de las clientas (inventario + cruce cacheado) — contexto OBLIGATORIO para los ángulos
+    let vozTxt = "";
+    try {
+      const vz = await (await fetch("/api/voz", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ account, extras, tab, action: "listar" }) })).json();
+      const lista = (vz && vz.voz) || [];
+      if (lista.length) {
+        const cr = await (await fetch("/api/voz", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ account, extras, tab, action: "cruzar", voz: lista, motivadores: ctx.motivadores.map((m) => ({ motivador: m.motivador })) }) })).json();
+        const vp = vozPayload(lista, (cr && cr.cruce) || {}, ctx.motivadores);
+        vozTxt = "\n\nVOZ REAL DE LAS CLIENTAS (dijeron ellas — PRIORIDAD sobre inventar):\nSIN CREATIVO todavía (backlog — usá estos primero):\n" + (vp.sin_creativo.map((v) => `- [${v.tipo}] “${v.frase_literal}” → ${v.resumen} (visto ${v.veces_visto}×)`).join("\n") || "- (ninguno)") +
+          "\nYA PROBADOS en creativos:\n" + (vp.probados.map((v) => `- [${v.tipo}] “${v.frase_literal}” → creativo: ${v.motivador_creativo}`).join("\n") || "- (ninguno)") +
+          "\nREGLA: cada ángulo lleva \"verificado_con_clientas\": true si sale de esta voz (citá la frase en \"frase_clienta\") o false si lo inventaste vos (se muestra como \"no verificado con clientas\").";
+      }
+    } catch { /* sin voz: seguimos */ }
     setCtxNota(`Contexto: ${ctx.motivadores.length} motivadores ya probados · ${ctx.voz.frio_mejor_hook_rate.length + ctx.voz.caliente_mejor_venta.length} ganchos de referencia${ctx.excluidos_sin_reproducciones ? " · " + ctx.excluidos_sin_reproducciones + " videos sin reproducciones excluidos" : ""}.`);
     const saturados = ctx.motivadores.filter((m) => m.creativos >= 3);
     return "\n\nINVENTARIO DE MOTIVADORES YA PROBADOS (tipo · motivador · niveles · creativos · hook rate · " + (msg ? "costo/conv" : "ROAS") + "):\n" +
@@ -2762,7 +2873,7 @@ function Generar({ rows = [], accountName = "", prefill = null, account, extras 
       (saturados.length ? "\n\nPROHIBIDO proponer estos motivadores (ya tienen 3+ creativos probados): " + saturados.map((m) => `"${m.motivador}"`).join(", ") : "") +
       "\n\nASÍ HABLA ESTA MARCA (ganchos literales que ya funcionan — los tuyos tienen que sonar a esto, no a un manifiesto):\n" +
       "Mejor hook rate en frío:\n" + ctx.voz.frio_mejor_hook_rate.map((v) => `- "${v.gancho}" (${v.hook_rate}% · nivel ${v.nivel})`).join("\n") +
-      "\nMejor venta en caliente:\n" + ctx.voz.caliente_mejor_venta.map((v) => `- "${v.gancho}" (${msg ? "$" + v.costo_conv + "/conv" : v.roas + "x"} · nivel ${v.nivel})`).join("\n");
+      "\nMejor venta en caliente:\n" + ctx.voz.caliente_mejor_venta.map((v) => `- "${v.gancho}" (${msg ? "$" + v.costo_conv + "/conv" : v.roas + "x"} · nivel ${v.nivel})`).join("\n") + vozTxt;
   };
 
   const generar = async () => {
@@ -2825,7 +2936,7 @@ ${emoji ? "Podés usar emojis con moderación." : "Sin emojis."}${hookLib}${ctxA
         <div className="genblockh">ÁNGULOS NUEVOS</div>
         {(d.angulos || []).map((a, i) => (
           <div className="outitem outang" key={"a" + i}>
-            <span className="outtext">{a.tipo && <span className="cmtipo">{a.tipo}</span>} <b>{a.nombre}</b>{a.motivador ? <> — {a.motivador}</> : null}<br />{a.desc}{a.hook_ejemplo && <div className="cthook">“{a.hook_ejemplo}”</div>}{a.cercano && a.cercano !== "ninguno" && <div className="ctwhy"><b>Más cercano ya probado:</b> {a.cercano} · <b>se diferencia en:</b> {a.diferencia}</div>}{Array.isArray(a.descarte) && a.descarte.length > 0 && <details className="ctdesc"><summary>descartó {a.descarte.length} idea{a.descarte.length > 1 ? "s" : ""}</summary>{a.descarte.map((x, j) => <div key={j}>· <i>{x.idea}</i> — {x.motivo}</div>)}</details>}</span>
+            <span className="outtext">{a.tipo && <span className="cmtipo">{a.tipo}</span>} <b>{a.nombre}</b>{a.motivador ? <> — {a.motivador}</> : null}<br />{a.desc}{a.verificado_con_clientas != null && <div className={"ctverif" + (a.verificado_con_clientas ? " si" : "")}>{a.verificado_con_clientas ? "✓ verificado con clientas" + (a.frase_clienta ? ": “" + a.frase_clienta + "”" : "") : "no verificado con clientas"}</div>}{a.hook_ejemplo && <div className="cthook">“{a.hook_ejemplo}”</div>}{a.cercano && a.cercano !== "ninguno" && <div className="ctwhy"><b>Más cercano ya probado:</b> {a.cercano} · <b>se diferencia en:</b> {a.diferencia}</div>}{Array.isArray(a.descarte) && a.descarte.length > 0 && <details className="ctdesc"><summary>descartó {a.descarte.length} idea{a.descarte.length > 1 ? "s" : ""}</summary>{a.descarte.map((x, j) => <div key={j}>· <i>{x.idea}</i> — {x.motivo}</div>)}</details>}</span>
             <button className="copybtn" onClick={() => copy((a.tipo ? "[" + a.tipo + "] " : "") + a.nombre + " — " + (a.motivador || "") + "\n" + a.desc + (a.hook_ejemplo ? "\nHook: " + a.hook_ejemplo : ""), "a" + i)}>{copied === "a" + i ? "✓" : "⧉"}</button>
           </div>
         ))}
@@ -3093,6 +3204,11 @@ tbody tr{border-bottom:1px solid var(--line);box-shadow:inset 5px 0 0 var(--bar)
 tbody tr:hover{background:#EFE6D2;}tbody tr:last-child{border-bottom:none;}
 td{padding:11px 12px;vertical-align:middle;}.num{text-align:right;}.name{font-weight:700;}
 .fmt{font-size:9px;color:var(--soft);border:1px solid var(--line);border-radius:3px;padding:1px 5px;margin-left:6px;font-family:'Space Mono',monospace;letter-spacing:1px;}
+.vozin{display:flex;gap:10px;align-items:flex-start;margin-bottom:10px;}.voztxt{flex:1;font-family:inherit;font-size:12.5px;padding:8px 10px;border:2px solid var(--ink);border-radius:8px;background:#F6F1E4;resize:vertical;}.vozctl{display:flex;flex-direction:column;gap:6px;}
+.vozprops{border:2px solid var(--ink);border-radius:8px;padding:10px 12px;background:#EFE8D6;margin-bottom:10px;}.vozprop{display:grid;grid-template-columns:20px 110px 1fr;gap:8px;align-items:start;padding:6px 0;border-top:1px dashed var(--line);}.vozprop.off{opacity:.45;}.vozprop select{font-size:11px;}.vozpbody{display:flex;flex-direction:column;gap:3px;}.vozfrase{font-style:italic;color:#4A4336;font-size:12.5px;}.vozres{font-size:12px;padding:3px 6px;border:1px solid var(--line);border-radius:4px;background:#fff;}.vozmeta{font-size:10.5px;color:var(--soft);}.vozdup{color:#C2861F;}
+.vozmanual{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:8px 0 12px;}.vozmanual input{font-size:12px;padding:4px 6px;border:1px solid var(--line);border-radius:4px;background:#fff;min-width:200px;}.vozmanual select{font-size:11px;}
+.vozsin td{background:#FBF3D9;}.vozbacklog{color:#C2861F;font-family:'Space Mono',monospace;font-size:10px;font-weight:700;}.vozres2{font-size:10.5px;color:var(--soft);}
+.ctverif{font-family:'Space Mono',monospace;font-size:9.5px;letter-spacing:.5px;color:#857A6A;}.ctverif.si{color:#0F6E56;font-weight:700;}
 .calgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-bottom:10px;}.calbox{border:2px solid var(--ink);border-radius:8px;padding:10px 12px;background:#F6F1E4;}.callab{font-family:'Space Mono',monospace;font-size:9px;letter-spacing:1px;color:var(--soft);}.calval{font-family:'Anton',Impact,sans-serif;font-size:26px;color:var(--ink);}.calsub{font-size:11px;color:#6B6552;}.calniv{display:inline-block;margin-right:8px;}
 .calconf{border-collapse:collapse;font-size:12px;}.calconf th,.calconf td{border:1px solid var(--line);padding:6px 12px;text-align:center;min-width:40px;}.calconf th{font-family:'Space Mono',monospace;font-size:10px;color:var(--soft);}.calconf td.diag{background:#DCE9E1;color:#2E8B6B;font-weight:700;}.calconf td.err{background:#F1D9D3;color:#C5362B;font-weight:700;}
 .ccconf{font-size:9px;color:var(--soft);font-weight:400;text-transform:none;letter-spacing:0;}.cretry{background:#F4C24A;border:1px solid var(--ink);border-radius:4px;padding:2px 8px;font-family:'Space Mono',monospace;font-size:10px;cursor:pointer;font-weight:700;}

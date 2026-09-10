@@ -161,6 +161,16 @@ respuestas concisas.
   pide UNA corrección si falla; devuelve `advertencia` si sigue rota. `GEN_TIPOS.angulos` exige 5
   tipos + Oferta, cercano/diferencia y `descarte` por ángulo. La clasificación se comparte entre
   pestañas vía `conciencia` en App (`{key, data}`).
+- `lib/voz.js` — **voz real de las clientas** por marca (Upstash `nusa:voz:<tab>`): motivadores
+  {id, tipo Dolor|Deseo|Objecion|Ocasion|Identidad, frase_literal, resumen, fuente, fecha,
+  veces_visto}. `extraerVoz(texto, existentes)` (Claude: motivadores con frase literal citada +
+  `mismo_que` para dedup), `cruzarVoz(tab, voz, motivadoresCreativos)` (match contra los
+  motivadores detectados en creativos, cacheado en `nusa:voz_cruce:<tab>` por firma del set),
+  `leerVoz`/`guardarVoz`/`nuevoItem`. Ruta `/api/voz` (POST con `action`: listar | extraer |
+  guardar | manual | editar | borrar | cruzar; auth de `conciencia/_auth`). UI: sección **VOZ DE LAS
+  CLIENTAS** en ÁNGULOS (`VozClientas`); `vozPayload` arma `{sin_creativo, probados}` que reciben
+  PRÓXIMO TEST y GENERAR → ángulos como contexto obligatorio (priorizar backlog; lo inventado va
+  marcado `verificado_con_clientas:false`). Sin Upstash: guardar → 409, queda en la vista.
 - `lib/fx.js` — cotización del **dólar oficial** (Argentina) para no mezclar monedas cuando la cuenta de
   Meta está en USD. `getDolarOficial()` (PROMEDIO de compra y venta = medio del spread, cache en memoria
   ~1h) y `convertMonto(monto, from, to)` (solo ARS↔USD). Fuente: dolarapi.com, fallback criptoya.com.
