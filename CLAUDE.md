@@ -171,6 +171,14 @@ respuestas concisas.
   CLIENTAS** en ÁNGULOS (`VozClientas`); `vozPayload` arma `{sin_creativo, probados}` que reciben
   PRÓXIMO TEST y GENERAR → ángulos como contexto obligatorio (priorizar backlog; lo inventado va
   marcado `verificado_con_clientas:false`). Sin Upstash: guardar → 409, queda en la vista.
+  **Seguimiento de tests** (page.jsx, `hist_test`): cada hipótesis lleva `estado` (propuesta →
+  aprobada → grabada → en_pauta → evaluada), `creativos` (fingerprints/texto vinculados al pasar a
+  en pauta, `creativosDe` matchea contra el panel), `fecha_pauta` y `evaluacion` (`evaluarHipotesis`
+  contra el `benchmark` guardado al proponer: hook/hold en frío o niveles 1-2, CTR + costo LPV en
+  3-4, ROAS/CPA o costo/conv vs umbral en 5 → cumplio | no_cumplio | sin_data). Auto a los 30 días
+  de en pauta. `TestsTabla` lista todo; el cerebro recibe `tests_en_curso`/`tests_evaluados` en el
+  snapshot (los comenta en SEGUIMIENTO) y `/proximo-test` recibe `tests_evaluados` para no repetir
+  una hipótesis que falló.
 - `lib/fx.js` — cotización del **dólar oficial** (Argentina) para no mezclar monedas cuando la cuenta de
   Meta está en USD. `getDolarOficial()` (PROMEDIO de compra y venta = medio del spread, cache en memoria
   ~1h) y `convertMonto(monto, from, to)` (solo ARS↔USD). Fuente: dolarapi.com, fallback criptoya.com.
