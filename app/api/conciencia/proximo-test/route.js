@@ -32,8 +32,11 @@ Devolvé EXACTAMENTE 3 hipótesis de test, en JSON puro (sin markdown): {"hipote
 - "formato_sugerido": string corto (ej: "POV selfie", "unboxing", "meme con texto", "demo en uso")
 - "metrica_de_exito": según el nivel — 1-2: hook rate y hold rate vs la mediana de la marca; 3-4: CTR y costo por LPV; 5: ${msg ? "costo por conversación" : "ROAS/CPA"} vs el umbral del cliente. Poné el número de referencia que te paso.
 - "cantidad_de_videos": 2-4
+- "verificado_con_clientas": true si el motivador sale de la VOZ REAL de las clientas (citá la frase en "frase_clienta"), false si lo inventaste vos
+- "frase_clienta": la frase literal de la clienta que lo respalda, o ""
 
 REGLAS (no negociables):
+0. VOZ DE LAS CLIENTAS: si te paso "voz_clientas", sus motivadores "sin_creativo" (dijeron ellas y NADIE grabó todavía) tienen PRIORIDAD sobre inventar. Solo inventá si el backlog no alcanza para 3 hipótesis distintas, y marcá lo inventado con verificado_con_clientas:false.
 1. NUNCA propongas como "nuevo" un nivel + motivador que ya figura ganador en la matriz o en el inventario.
 2. PROHIBIDO proponer un motivador que ya tenga 3 o más creativos probados en el inventario (ni reformulado). Cada hipótesis nombra el motivador probado más cercano y dice en qué se diferencia.
 3. DIVERSIDAD: las 3 hipótesis usan motivadorTipo DISTINTOS entre sí y ningún motivador se repite.
@@ -82,7 +85,7 @@ export async function POST(req) {
     marca: body.accountName || body.marca || "", marca_detectada: body.marca || "nd", publico_inferido: body.publico || "nd",
     periodo: body.periodo || "", umbral: body.umbral || {}, receta_ganadora: body.receta || {},
     matriz: body.matriz || {}, motivadores_probados: motivadores, motivadores_PROHIBIDOS_3_o_mas_creativos: motivadores.filter((m) => (m.creativos || 0) >= 3).map((m) => m.motivador),
-    voz_de_la_marca: body.voz || {}, referencias: body.referencias || {}, lectura: body.lectura || [],
+    voz_de_la_marca: body.voz || {}, voz_clientas: body.voz_clientas || { sin_creativo: [], probados: [] }, referencias: body.referencias || {}, lectura: body.lectura || [],
     nota: body.excluidos_sin_reproducciones ? `${body.excluidos_sin_reproducciones} creativos "sin reproducciones" (bug de Meta) fueron excluidos de todo esto.` : undefined,
   };
   try {

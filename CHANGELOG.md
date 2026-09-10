@@ -4,6 +4,21 @@ Registro de cambios por versión. **V 1.N = número del PR mergeado** — es el 
 app muestra en el header ("V 1.N ▮▮▮"), así se confirma de un vistazo qué versión corre en prod.
 Regla de la casa: cada PR suma su entrada acá ANTES de mergearse.
 
+## V 1.36 — ÁNGULOS: inventario de voz real de las clientas (PR C)
+- `lib/voz.js` + Upstash `nusa:voz:<tab>`: por marca, motivadores REALES {id, tipo, frase_literal
+  (cómo lo dijo la clienta), resumen, fuente comentarios|whatsapp|meli|resenas|manual, fecha,
+  veces_visto}. Ruta `/api/voz` (listar, extraer, guardar, manual, editar, borrar, cruzar).
+- Sección **VOZ DE LAS CLIENTAS** en ÁNGULOS: textarea para pegar texto crudo + fuente + "Extraer"
+  → Claude devuelve motivadores con la frase literal citada, dedup contra lo guardado ("es el
+  mismo que #id" suma veces_visto en vez de crear) → propuestas con check para aceptar / editar
+  tipo y resumen / descartar antes de guardar. Alta manual de a uno. Sin Upstash: queda en la vista.
+- **Cruce con la matriz**: cada motivador guardado se matchea (Claude, una vez, cacheado en
+  `nusa:voz_cruce:<tab>` por firma del set de motivadores) contra los motivadores detectados en los
+  creativos → "probado" con creativos / niveles / ROAS / hook, o **"sin creativo → backlog"**.
+- PRÓXIMO TEST y GENERAR → Ángulos nuevos reciben `voz_clientas` como contexto obligatorio:
+  priorizan el backlog "sin creativo" sobre inventar; cada propuesta lleva
+  `verificado_con_clientas` (con la frase) o se muestra "no verificado con clientas".
+
 ## V 1.35 — ÁNGULOS: validación de la clasificación (PR B)
 - Cada **override** guarda además `nivel_previo` y `fuente_previa` (regla | claude) en el mismo
   registro de Upstash: lo que dijo lo automático antes de la corrección.
