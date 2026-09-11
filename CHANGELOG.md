@@ -4,6 +4,72 @@ Registro de cambios por versión. **V 1.N = número del PR mergeado** — es el 
 app muestra en el header ("V 1.N ▮▮▮"), así se confirma de un vistazo qué versión corre en prod.
 Regla de la casa: cada PR suma su entrada acá ANTES de mergearse.
 
+## V 1.33 — Pestaña ÁNGULOS (nivel de conciencia × etapa × performance)
+- Nueva pestaña **ÁNGULOS** (entre EMBUDO y PANEL): clasifica cada creativo con Sheet en un
+  **nivel de conciencia** (Schwartz, juzgado SOLO por el gancho: 5 producto+oferta · 4 producto ·
+  3 solución · 2 problema · 1 inconsciente) y lo cruza con la etapa de su audiencia (frío/medio/
+  caliente = `rolEmbudo`) y su performance.
+- **Clasificación** (`lib/conciencia.js` + `/api/conciencia/clasificar`), tres fuentes en orden:
+  override manual (Upstash) > reglas duras sobre el Sheet (sin IA) > Claude en tandas de 20 con
+  rúbrica y `razon` antes del `nivel` (cache en Upstash sin TTL + memoria). Sin API key o sin
+  Upstash degrada (reglas solas; sin cache se avisa en el header del mapa).
+- **MAPA**: matriz niveles × etapa con spend, % del spend, ROAS/CPA (mensajes: costo/conv), hook y
+  hold rate medianos y cantidad de creativos. Estado de celda: sin probar / sin data / ganadora /
+  perdedora — en **frío** SOLO por hook rate vs la mediana (±15%), nunca por ROAS; en medio y
+  caliente por ROAS (o costo/conv). Click en la celda → lista de creativos con select de
+  **override** de nivel (guarda vía `/api/conciencia/override`, se refleja al instante).
+- **LECTURA**: 3-5 bullets deterministas (plantillas + números, sin IA). **MOTIVADORES PROBADOS**:
+  inventario tipo → motivador con creativos, spend, ROAS, hook mediano y niveles.
+- **PRÓXIMO TEST** (`/api/conciencia/proximo-test`): 3 hipótesis de Claude citando la celda que las
+  justifica (prioriza celdas sin probar en frío; nunca repite un ganador; prohibido juzgar 1-3 por
+  ROAS). "Armar brief" salta a GENERAR con tipo hooks + modo Explorar + el contexto precargado
+  (`prefill` en Generar). Historial `hist_test` con `useHistSync`.
+- Banda amarilla si el período es < 60 días. Sin planilla elegida: "Elegí una planilla". Vista
+  combinada: Meta + TikTok (Google afuera).
+- Soporte: `gancho_analisis` en el cruce del Sheet, `thruplay` por creativo en `buildRows` (hold
+  rate), `kvDel`/`kvMget` en `lib/store.js`, kind `hist_test` en `/api/history`.
+- **Matriz por CONJUNTO, no por audiencia dominante**: cada creativo reparte su spend entre sus
+  conjuntos (`breakdown`, que ahora trae impresiones, video 3 s y ThruPlay por conjunto) según la
+  audiencia real de cada uno — un creativo en Advantage+ y en RMKT aporta a frío Y a caliente.
+  "Creativos" de la celda = cuántos tuvieron spend ahí; hook/hold de la celda salen de los
+  conjuntos de esa etapa. Fila de totales por etapa al pie. Verificado (Juanita 30 d): frío ~$944k,
+  medio ~$300k, caliente ~$1,9M, nivel 5 × frío ~$574k con 27 creativos.
+- **"⚠ sin reproducciones"**: videos con más de 5.000 impresiones y menos de 2% de hook rate (Meta
+  no los cuenta como video, bug conocido) se marcan en la celda y en el PANEL, y quedan FUERA de las
+  medianas de hook/hold (celda y vista) y del veredicto ganadora/perdedora en frío.
+- **Desglose "sin nivel"** en el header: cuánto spend quedó sin nivel y por qué — sin fila en el
+  Sheet (fuera de la matriz; típico catálogos DPA), Claude no respondió, regla sin match — con
+  la acción para corregirlo.
+- **PRÓXIMO TEST y GENERAR → Ángulos nuevos, con el mismo contexto** (`contextoAngulos`): los
+  creativos "sin reproducciones" quedan FUERA del payload entero; va el inventario COMPLETO de
+  motivadores probados (motivador, tipo, niveles, creativos, hook, ROAS/costo); la "voz de la
+  marca" (texto_gancho literal de los 8 mejores por hook rate en frío y los 5 mejores por venta en
+  caliente); y por celda los motivadores y formatos ya usados con su cantidad.
+- Reglas duras en ambos: prohibido proponer un motivador con 3+ creativos probados (la ruta lo
+  valida y pide corrección una vez); cada propuesta nombra el motivador probado más cercano y en
+  qué se diferencia; diversidad obligatoria (3 hipótesis con motivadorTipo distintos; 6 ángulos =
+  Dolor, Ocasión, Identidad, Objeción, Deseo + Oferta, sin repetir motivador); celda llena (3+
+  creativos con ese formato/motivador) → motivador nuevo, no formato; `descarte` con 2 ideas
+  consideradas y por qué se descartaron, ANTES de la propuesta. Los hooks tienen que sonar a los
+  ganchos literales, no a un manifiesto.
+- GENERAR reusa la clasificación de ÁNGULOS si es del mismo período (estado compartido en App);
+  si no, la pide sola. Tarjetas muestran tipo, más cercano/diferencia y el descarte plegado.
+- Calibrado contra Juanita Shoes (30 días: 17/17 esperados) y Shark (10/11; FitTecnico queda en 3
+  por rúbrica). Dos desvíos documentados de las reglas del spec: precio dentro de un Comparativo
+  no es nivel 5, y ángulo Social_Proof sobre Entretenimiento va a Claude en vez de a 4.
+## V 1.31 — "▶ ver video": abrir el anuncio en una pestaña nueva
+- Chip **▶ ver video** al lado del nombre del creativo en el TOP ADS DEL MES, en el desplegable
+  por creativo de TOP PERFORMERS y en la tabla del PANEL. Abre en pestaña nueva la vista previa
+  oficial del anuncio (el video se reproduce ahí), sin buscarlo a mano en el Administrador.
+- Cómo: cada creativo lleva `adId` (el anuncio con más spend del grupo); `/api/video` resuelve al
+  clic `/{ad}/previews` de Meta y redirige (302). El link de Meta vence a las ~24 h, por eso no se
+  guarda. La URL directa del archivo (`video.source`) NO está permitida para el token de Sistema.
+  Fallback: el post (`effective_object_story_id`) y, último, el anuncio en el Administrador.
+- Solo Meta: en Google/TikTok el chip no aparece. Verifica sesión y `canSeeAccount`.
+- Fix (MoraShop): los creativos de tipo SHARE no renderizan en `MOBILE_FEED_STANDARD` ("la historia
+  de este anuncio no está disponible") — la ruta ahora prueba varios formatos (feed mobile → Reels
+  → feed desktop → story) y verifica el HTML de la vista previa antes de redirigir.
+
 ## V 1.30 — Tienda Nube: un solo barrido, cache y sin datos silenciosamente incompletos
 - **Causa raíz de la lentitud y de "no me carga nuevos vs recurrentes"**: la banda hacía TRES
   barridos completos de `/orders` a la vez (summary en serie, daily y tendencia en paralelo, ×2 con

@@ -88,6 +88,17 @@ const tf = (r) => { const m = String(r?.id || "").match(/\((\d{1,2}\.\d{2}\.\d{2
 const TF = ({ r }) => tf(r) ? <span className="tf">{tf(r)}</span> : null;
 // Tag de estado: solo aparece si SABEMOS que el creativo está pausado (activa === false).
 const Paused = ({ r }) => r && r.activa === false ? <span className="pausedtag">⏸ PAUSADA</span> : null;
+// Video que Meta NO está contando como video (bug conocido): muchas impresiones y casi cero
+// reproducciones de 3 s. Solo formatos de video. Se marca y se EXCLUYE de las medianas de hook/hold.
+const VIDEO_FMTS = ["VID", "REEL", "STORY"];
+const sinRepro = (r) => !!r && VIDEO_FMTS.includes(String(r.fmt || "").toUpperCase()) && (r.impresiones || 0) > 5000 && (r.video3s || 0) / r.impresiones < 0.02;
+const SinRepro = ({ r }) => sinRepro(r) ? <span className="norepro" title="Más de 5.000 impresiones y menos de 2% de reproducciones de 3 s: Meta no lo está contando como video. Excluido de las medianas de hook/hold.">⚠ sin reproducciones</span> : null;
+// "Ver video": abre la vista previa oficial del anuncio (video incluido) en una pestaña nueva.
+// /api/video resuelve el link de Meta AL CLIC (vence a las ~24 h). Solo creativos de Meta con
+// anuncio identificado (adId = el de más spend del creativo). stopPropagation: las cards se expanden al clic.
+const VideoLink = ({ r }) => r && r.adId && r._acc && (!r.plat || r.plat === "meta")
+  ? <a className="vlink" href={"/api/video?account=" + encodeURIComponent(r._acc) + "&ad=" + r.adId} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} title="Abre la vista previa del anuncio (con el video) en una pestaña nueva">▶ ver video</a>
+  : null;
 // Clasificación de calidad de Meta (vs competencia por la misma audiencia). Solo aparece si Meta
 // la informó (≥500 impresiones); diagnóstico de creativo. Valor titular = ponderado por spend.
 const QUAL = {
@@ -324,6 +335,8 @@ export default function App() {
   const [err, setErr] = useState("");
   const [metaErr, setMetaErr] = useState("");
   const [me, setMe] = useState(null);
+  const [genPrefill, setGenPrefill] = useState(null); // brief precargado desde ÁNGULOS → GENERAR
+  const [conciencia, setConciencia] = useState(null); // { key, data } — clasificación compartida entre ÁNGULOS y GENERAR (ángulos nuevos)
   useEffect(() => { fetch("/api/accounts").then((r) => r.json()).then((j) => { setAccounts(j.accounts || []); setMe(j.me || null); setMetaErr(j.error && !(j.accounts || []).length ? j.error : ""); }).catch(() => setMetaErr("No se pudo conectar con Meta")); }, []);
   const logout = async () => { try { await fetch("/api/logout", { method: "POST" }); } finally { window.location.href = "/login"; } };
   // la lectura del analista queda obsoleta si cambia el cliente/período/tienda/mezcla → la limpiamos
@@ -809,6 +822,7 @@ export default function App() {
             <button className={"tab" + (effView === "grabar" ? " active" : "")} onClick={() => setView("grabar")}>QUÉ GRABAR</button>
             <button className={"tab" + (effView === "top" ? " active" : "")} onClick={() => setView("top")}>TOP PERFORMERS</button>
             <button className={"tab" + (effView === "embudo" ? " active" : "")} onClick={() => setView("embudo")}>EMBUDO</button>
+            <button className={"tab" + (effView === "angulos" ? " active" : "")} onClick={() => setView("angulos")}>ÁNGULOS</button>
             <button className={"tab" + (effView === "panel" ? " active" : "")} onClick={() => setView("panel")}>PANEL</button>
             <button className={"tab" + (effView === "bib" ? " active" : "")} onClick={() => setView("bib")}>BIBLIOTECA</button>
             <button className={"tab" + (effView === "gen" ? " active" : "")} onClick={() => setView("gen")}>GENERAR</button>
@@ -836,10 +850,11 @@ export default function App() {
           {effView === "hoy" && (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Hoy acc={acciones} u={ueff} done={done} toggle={toggle} total={totalTasks} doneCount={doneCount} mantener={stats.counts.Mantener} modo={modo} />)}
           {effView === "grabar" && (soloGoogle ? <SinGoogle que="Qué grabar" /> : !withVCreative.length ? <EmptyState account={account} loading={loading} err={err} /> : <QueGrabar withV={withVCreative} u={ueff} modo={modo} role={role} accountName={(accounts.find((a) => a.id === account) || {}).name || ""} />)}
           {effView === "top" && (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Top withV={withV} u={ueff} audData={audConv} modo={modo} />)}
+          {effView === "angulos" && (soloGoogle ? <SinGoogle que="Ángulos" /> : !withVCreative.length ? <EmptyState account={account} loading={loading} err={err} /> : <Angulos withV={withVCreative} u={ueff} modo={modo} account={account} extras={extras} tab={sheetTab} accountName={(accounts.find((a) => a.id === account) || {}).name || ""} preset={preset} cSince={cSince} cUntil={cUntil} onBrief={(ctx) => { setGenPrefill({ tipo: "hooks", modo: "explorar", contexto: ctx, t: Date.now() }); setView("gen"); }} conciencia={conciencia} onClasif={setConciencia} />)}
           {effView === "embudo" && (soloGoogle ? <SinGoogle que="El embudo" /> : !withVCreative.length ? <EmptyState account={account} loading={loading} err={err} /> : <Embudo withV={withVCreative} u={ueff} modo={modo} accountName={(accounts.find((a) => a.id === account) || {}).name || ""} />)}
           {effView === "panel" && (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Panel rows={rows} u={ueff} stats={stats} sort={sort} setSortKey={setSortKey} modo={modo} />)}
           {effView === "bib" && <Biblioteca rows={withVCreative} hookMatch={hookMatch} setHookMatch={setHookMatch} />}
-          {effView === "gen" && (soloGoogle ? <SinGoogle que="El generador" /> : <Generar rows={withVCreative} accountName={(accounts.find((a) => a.id === account) || {}).name || ""} />)}
+          {effView === "gen" && (soloGoogle ? <SinGoogle que="El generador" /> : <Generar rows={withVCreative} accountName={(accounts.find((a) => a.id === account) || {}).name || ""} prefill={genPrefill} account={account} extras={extras} tab={sheetTab} u={ueff} modoApp={modo} periodKey={[account, ...extras].join(",") + "|" + sheetTab + "|" + preset + "|" + cSince + "|" + cUntil} conciencia={conciencia} onClasif={setConciencia} />)}
           {effView === "chat" && (!account ? <EmptyState account={account} loading={loading} err={err} /> : <Chat account={account} accountName={(accounts.find((a) => a.id === account) || {}).name || ""} store={tnStore} tab={sheetTab} accCur={accCur} extras={extras} extrasCur={extras.map(curOf)} criterio={tnCount} />)}
           {effView === "usuarios" && <Usuarios accounts={accounts} sheetTabs={sheetTabs} tnStores={tnStores} />}
         </>
@@ -1028,7 +1043,7 @@ function Top({ withV, u, audData, modo = "ventas" }) {
                 <div className="rexp">
                   {membersFor(d.key).sort((a, b) => b.spend - a.spend).map((m) => (
                     <div className="rexad" key={m.id}>
-                      <div className="rexhead"><b>{m.nombre}</b><TF r={m} /><Paused r={m} /><RolTag r={m} /><Calidad v={m.calidad} mix={m.calidadMix} /> <span className="rexkpi">{msg ? (money(m.costoConv) + "/conv · " + short(m.spend) + " · " + nf.format(m.conversaciones) + " conv") : (m.roas.toFixed(1) + "x · " + short(m.spend) + " · " + nf.format(m.ventas) + " vtas")}</span></div>
+                      <div className="rexhead"><b>{m.nombre}</b><TF r={m} /><Paused r={m} /><RolTag r={m} /><Calidad v={m.calidad} mix={m.calidadMix} /><VideoLink r={m} /> <span className="rexkpi">{msg ? (money(m.costoConv) + "/conv · " + short(m.spend) + " · " + nf.format(m.conversaciones) + " conv") : (m.roas.toFixed(1) + "x · " + short(m.spend) + " · " + nf.format(m.ventas) + " vtas")}</span></div>
                       {(m.breakdown || []).map((b, j) => (
                         <div className="rexline" key={j}><span className="rexcamp">{b.campaign}</span> › <span className="rexset">{b.adset}</span>{b.aud ? <span className="rexaud">{b.aud}</span> : null}<Calidad v={b.calidad} /><Freq v={b.freq} max={freqCap(b.aud, u.freqMax)} /><span className="rexmeta">{short(b.spend)} · {msg ? (nf.format(b.conversaciones) + " conv") : (nf.format(b.ventas) + " vtas · " + b.roas.toFixed(1) + "x")}</span></div>
                       ))}
@@ -1156,6 +1171,322 @@ function Embudo({ withV, u, modo = "ventas", accountName = "" }) {
         );
       })}
     </>
+  );
+}
+
+// ─────────── Vista: ÁNGULOS (nivel de conciencia × etapa × performance) ───────────
+// Cruza el NIVEL DE CONCIENCIA (Schwartz, juzgado por el gancho: 5 producto+oferta · 4 producto ·
+// 3 solución · 2 problema · 1 inconsciente) de cada creativo con su performance y la etapa de su
+// audiencia (frío/medio/caliente = rolEmbudo). La clasificación la hace /api/conciencia/clasificar
+// (override manual > reglas del Sheet > Claude, cacheado). Regla de oro: en FRÍO se juzga por hook
+// rate, nunca por ROAS; ganadora/perdedora por ROAS solo en medio y caliente.
+const NIV_LABEL = { 5: "Producto + oferta", 4: "Producto", 3: "Solución", 2: "Problema", 1: "Inconsciente", nd: "Sin clasificar" };
+const NIV_ORDEN = [5, 4, 3, 2, 1, "nd"];
+const ETAPAS = ["frio", "medio", "caliente", "total"];
+const ETAPA_LABEL = { frio: "FRÍO", medio: "MEDIO", caliente: "CALIENTE", total: "TOTAL" };
+const CONC_CAMPOS = ["texto_gancho", "gancho_analisis", "prim", "angulo", "oferta", "resumen", "marca", "cta_0a3s", "publico"];
+const CELDA = {
+  ganadora: { color: "#2E8B6B", bg: "#DCE9E1", lab: "ganadora" },
+  perdedora: { color: "#C5362B", bg: "#F1D9D3", lab: "perdedora" },
+  neutra: { color: "#6B6552", bg: "#EFE8D6", lab: "" },
+  sin_data: { color: "#857A6A", bg: "#E5DBC8", lab: "sin data" },
+  sin_probar: { color: "#A99E8A", bg: "transparent", lab: "sin probar" },
+};
+const mediana = (arr) => { const a = arr.filter((x) => x != null && isFinite(x)).sort((x, y) => x - y); if (!a.length) return null; const m = a.length >> 1; return a.length % 2 ? a[m] : (a[m - 1] + a[m]) / 2; };
+// Etapa por CONJUNTO (audiencia real del adset): Hot/Tibio → caliente, Lookalike → medio,
+// Advantage+/Amplio/Intereses → frío, sin señal (Mensajería, nd) → nd. La matriz reparte el spend
+// de cada creativo entre sus conjuntos — un creativo que corrió en Advantage+ y en RMKT aporta a
+// frío Y a caliente, no a su audiencia dominante.
+const etapaAud = (aud) => { const p = AUD_POS(aud); return p == null ? "nd" : p >= 1.5 ? "caliente" : p >= 1 ? "medio" : "frio"; };
+const hookRate = (r) => (r.impresiones ? r.video3s / r.impresiones : null);
+const holdRate = (r) => (r.video3s ? (r.thruplay || 0) / r.video3s : null);
+const pctf = (x, d = 1) => (x == null ? "—" : (x * 100).toFixed(d) + "%");
+const fpOf = (r) => String(r.id).split("‖").pop(); // vista combinada: "cuenta‖fingerprint"
+const diasPeriodo = (preset, cSince, cUntil) => { const r = preset === "custom" ? (cSince && cUntil ? { since: cSince, until: cUntil } : null) : presetToRange(preset); if (!r) return null; return Math.round((new Date(r.until) - new Date(r.since)) / 86400000) + 1; };
+
+// Fila del panel enriquecida para la matriz: nivel (de la clasificación), partes por CONJUNTO
+// (etapa real + spend/revenue/ventas/video de ese conjunto), hook/hold del creativo y el flag
+// "sin reproducciones". La usan ÁNGULOS y el contexto de GENERAR (ángulos nuevos).
+const filaConciencia = (r, niv, clasif, loading) => {
+  const fp = fpOf(r); const c = niv[fp] || null;
+  const nivel = c && c.nivel ? c.nivel : "nd";
+  const motivo = nivel !== "nd" ? null : (c ? (clasif && clasif.claude ? "claude" : "regla") : (loading ? "pendiente" : "regla"));
+  const partes = (r.breakdown || []).map((b) => ({ etapa: etapaAud(b.aud), aud: b.aud, adset: b.adset, spend: b.spend || 0, rev: (b.spend || 0) * (b.roas || 0), ventas: b.ventas || 0, conv: b.conversaciones || 0, imp: b.impresiones || 0, v3: b.video3s || 0, tp: b.thruplay || 0 }));
+  return { ...r, fp, c, nivel, motivo, partes, hook: hookRate(r), hold: holdRate(r), norepro: sinRepro(r) };
+};
+// Métricas de un creativo DENTRO de una etapa (sus conjuntos de esa etapa).
+const enEtapa = (r, etapa) => {
+  const ps = etapa === "total" ? r.partes : r.partes.filter((p) => p.etapa === etapa);
+  const sp = ps.reduce((s, p) => s + p.spend, 0); if (sp <= 0) return null;
+  const imp = ps.reduce((s, p) => s + p.imp, 0), v3 = ps.reduce((s, p) => s + p.v3, 0), tp = ps.reduce((s, p) => s + p.tp, 0);
+  const cv = ps.reduce((s, p) => s + p.conv, 0), vt = ps.reduce((s, p) => s + p.ventas, 0), rv = ps.reduce((s, p) => s + p.rev, 0);
+  return { spend: sp, rev: rv, ventas: vt, conv: cv, roas: sp ? rv / sp : 0, costo: cv ? sp / cv : null, hook: imp ? v3 / imp : null, hold: v3 ? tp / v3 : null, auds: [...new Set(ps.map((p) => p.aud).filter(Boolean))] };
+};
+// Inventario de motivadores probados (tipo → motivador) sobre un set de filas.
+const motivadoresDe = (filas, msg) => {
+  const by = {};
+  for (const r of filas) { if (!r.c || !r.c.motivador) continue; const k = (r.c.motivadorTipo || "—") + "‖" + r.c.motivador; const g = by[k] || (by[k] = { tipo: r.c.motivadorTipo || "—", motivador: r.c.motivador, n: 0, spend: 0, rev: 0, conv: 0, hooks: [], niveles: new Set() }); g.n += 1; g.spend += r.spend; g.rev += r.spend * (r.roas || 0); g.conv += r.conversaciones || 0; if (!r.norepro) g.hooks.push(r.hook); g.niveles.add(r.nivel); }
+  return Object.values(by).map((g) => ({ ...g, roas: g.spend ? g.rev / g.spend : 0, costoConv: g.conv ? g.spend / g.conv : null, hook: mediana(g.hooks), niveles: [...g.niveles].sort((a, b) => b - a) })).sort((a, b) => b.spend - a.spend);
+};
+// Contexto que reciben Claude en PRÓXIMO TEST y en GENERAR → ángulos nuevos. SIN los creativos
+// "sin reproducciones" (no solo fuera de las medianas: fuera del payload entero). Incluye:
+// - motivadores probados COMPLETOS (motivador, tipo, niveles, creativos, hook, ROAS/costo)
+// - "voz": texto_gancho literal de los 8 mejores por hook rate en frío y los 5 mejores por
+//   ROAS (mensajes: costo/conv) en caliente — así habla esta marca
+// - por celda: motivadores y formatos de gancho ya usados con su cantidad (regla de celda llena)
+const contextoAngulos = (filasTodas, u, msg) => {
+  const filas = filasTodas.filter((r) => !r.norepro);
+  const gancho = (r) => (r.sheet && r.sheet.texto_gancho && r.sheet.texto_gancho !== "nd" ? r.sheet.texto_gancho : null);
+  const conG = filas.filter((r) => gancho(r));
+  const frio = conG.map((r) => ({ r, m: enEtapa(r, "frio") })).filter((x) => x.m && x.m.hook != null && x.m.spend >= u.pisoSpend).sort((a, b) => b.m.hook - a.m.hook).slice(0, 8);
+  const cal = conG.map((r) => ({ r, m: enEtapa(r, "caliente") })).filter((x) => x.m && x.m.spend >= u.pisoSpend && (msg ? x.m.costo : x.m.roas > 0)).sort((a, b) => (msg ? a.m.costo - b.m.costo : b.m.roas - a.m.roas)).slice(0, 5);
+  const voz = {
+    frio_mejor_hook_rate: frio.map((x) => ({ gancho: gancho(x.r), hook_rate: +(x.m.hook * 100).toFixed(1), nivel: x.r.nivel, tipo: x.r.c?.motivadorTipo || "" })),
+    caliente_mejor_venta: cal.map((x) => ({ gancho: gancho(x.r), ...(msg ? { costo_conv: Math.round(x.m.costo) } : { roas: +x.m.roas.toFixed(2) }), nivel: x.r.nivel, tipo: x.r.c?.motivadorTipo || "" })),
+  };
+  const motivadores = motivadoresDe(filas, msg).map((m) => ({ tipo: m.tipo, motivador: m.motivador, niveles: m.niveles, creativos: m.n, spend: Math.round(m.spend), hook_rate: m.hook != null ? +(m.hook * 100).toFixed(1) : null, ...(msg ? { costo_conv: m.costoConv && Math.round(m.costoConv) } : { roas: +m.roas.toFixed(2) }) }));
+  const celdas = {};
+  for (const n of NIV_ORDEN) { celdas[n] = {}; for (const e of ETAPAS) {
+    const rs = filas.filter((r) => r.nivel === n).map((r) => ({ r, m: enEtapa(r, e) })).filter((x) => x.m);
+    const cnt = (f) => { const o = {}; for (const x of rs) { const k = f(x.r); if (k) o[k] = (o[k] || 0) + 1; } return Object.fromEntries(Object.entries(o).sort((a, b) => b[1] - a[1]).slice(0, 8)); };
+    celdas[n][e] = { creativos: rs.length, motivadores_en_celda: cnt((r) => r.c && r.c.motivador), formatos_en_celda: cnt((r) => r.sheet && r.sheet.gformato !== "nd" ? r.sheet.gformato : null) };
+  } }
+  return { motivadores, voz, celdas, excluidos_sin_reproducciones: filasTodas.length - filas.length };
+};
+
+function Angulos({ withV, u, modo = "ventas", account, extras = [], tab, accountName = "", preset, cSince, cUntil, onBrief, conciencia = null, onClasif }) {
+  const msg = modo === "mensajes";
+  const [clasif, setClasif] = useState(null); // { niveles: {fp → {nivel, fuente, motivador, motivadorTipo, confianza}}, cache, claude }
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState("");
+  const [ver, setVer] = useState(0); // fuerza re-clasificar (después de quitar un override)
+  const [sel, setSel] = useState(null); // celda abierta {nivel, etapa}
+  const [tests, setTests] = useState(null);
+  const [tLoading, setTLoading] = useState(false);
+  const [tErr, setTErr] = useState("");
+  const [hist, saveHist] = useHistSync("hist_test", account);
+  const rowsSheet = useMemo(() => withV.filter((r) => r.sheet), [withV]); // solo estas se clasifican (el nivel sale del gancho)
+  const dias = diasPeriodo(preset, cSince, cUntil);
+  const periodKey = [account, ...extras].join(",") + "|" + tab + "|" + preset + "|" + cSince + "|" + cUntil;
+
+  // Clasificación: una vez por (cuentas, tab, período). Manda solo los campos del Sheet que usa la lib.
+  useEffect(() => {
+    if (!tab || !rowsSheet.length) { setClasif(null); return; }
+    if (conciencia && conciencia.key === periodKey && conciencia.data && !ver) { setClasif(conciencia.data); return; } // ya clasificado (mismo período) → sin refetch
+    let cancelled = false;
+    setLoading(true); setErr(""); setSel(null);
+    const rows = rowsSheet.map((r) => { const o = { fingerprint: fpOf(r) }; for (const k of CONC_CAMPOS) o[k] = r.sheet[k]; return o; });
+    fetch("/api/conciencia/clasificar", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ account, extras, tab, rows }) })
+      .then((r) => r.json())
+      .then((j) => { if (cancelled) return; if (j.error) setErr(j.error); else { setClasif(j); if (onClasif) onClasif({ key: periodKey, data: j }); } })
+      .catch((e) => { if (!cancelled) setErr(e.message); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [periodKey, rowsSheet.length, ver]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Filas enriquecidas + matriz
+  const niv = (clasif && clasif.niveles) || {};
+  // La matriz trabaja sobre los creativos CON fila en el Sheet (el nivel sale del gancho, que vive
+  // ahí). Los que no tienen fila (típico: catálogos DPA, que además concentran mucho spend en
+  // retargeting) NO entran a la matriz — se reportan en el desglose "sin nivel" del header para
+  // que se vea cuánta plata queda afuera y por qué. Cada fila lleva sus PARTES por conjunto (etapa
+  // real + spend/revenue/ventas/video de ese conjunto).
+  const filas = useMemo(() => rowsSheet.map((r) => filaConciencia(r, niv, clasif, loading)), [rowsSheet, niv, clasif, loading]);
+  const totalSpend = filas.reduce((s, r) => s + r.spend, 0);
+  const metricaVenta = (r) => (msg ? (r.conversaciones ? r.costoConv : null) : r.roas);
+  const medVenta = useMemo(() => mediana(filas.filter((r) => r.spend >= u.pisoSpend).map(metricaVenta)), [filas, u.pisoSpend, msg]); // eslint-disable-line react-hooks/exhaustive-deps
+  // medianas de video de la VISTA: sin los "sin reproducciones" (Meta no los cuenta como video)
+  const medHook = useMemo(() => mediana(filas.filter((r) => r.spend >= u.pisoSpend && !r.norepro).map((r) => r.hook)), [filas, u.pisoSpend]);
+  const medHold = useMemo(() => mediana(filas.filter((r) => r.spend >= u.pisoSpend && !r.norepro).map((r) => r.hold)), [filas, u.pisoSpend]);
+  // spend que quedó sin nivel, por motivo (para corregirlo: cargar el Sheet, reintentar Claude, ajustar reglas)
+  const ndInfo = useMemo(() => {
+    const o = {};
+    for (const r of withV) if (!r.sheet && r.spend > 0) { (o.sin_sheet || (o.sin_sheet = { n: 0, spend: 0 })).n += 1; o.sin_sheet.spend += r.spend; }
+    for (const r of filas) { if (r.nivel !== "nd") continue; const k = r.motivo || "regla"; (o[k] || (o[k] = { n: 0, spend: 0 })).n += 1; o[k].spend += r.spend; }
+    return o;
+  }, [filas, withV]);
+  const spendCuenta = withV.reduce((s, r) => s + r.spend, 0); // para el % del desglose "sin nivel" (incluye lo sin Sheet)
+  // Celda nivel × etapa: reparte cada creativo por CONJUNTO. "creativos" = cuántos tuvieron spend acá.
+  // El hook/hold de un creativo EN la celda sale de sus conjuntos de esa etapa; los "sin
+  // reproducciones" se listan pero no entran a las medianas ni al veredicto de la celda.
+  const celda = (nivel, etapa) => {
+    const rs = [];
+    let spend = 0, rev = 0, ventas = 0, conv = 0;
+    for (const r of filas) {
+      if (r.nivel !== nivel) continue;
+      const ps = etapa === "total" ? r.partes : r.partes.filter((p) => p.etapa === etapa);
+      const sp = ps.reduce((s, p) => s + p.spend, 0);
+      if (sp <= 0) continue;
+      const imp = ps.reduce((s, p) => s + p.imp, 0), v3 = ps.reduce((s, p) => s + p.v3, 0), tp = ps.reduce((s, p) => s + p.tp, 0);
+      const cv = ps.reduce((s, p) => s + p.conv, 0), vt = ps.reduce((s, p) => s + p.ventas, 0), rv = ps.reduce((s, p) => s + p.rev, 0);
+      rs.push({ ...r, cellSpend: sp, cellRoas: sp ? rv / sp : 0, cellCosto: cv ? sp / cv : null, cellHook: imp ? v3 / imp : null, cellHold: v3 ? tp / v3 : null, cellAuds: [...new Set(ps.map((p) => p.aud).filter(Boolean))] });
+      spend += sp; rev += rv; ventas += vt; conv += cv;
+    }
+    const roas = spend ? rev / spend : 0, cpa = ventas ? spend / ventas : null, costoConv = conv ? spend / conv : null;
+    const ok = rs.filter((r) => !r.norepro);
+    const hook = mediana(ok.map((r) => r.cellHook)), hold = mediana(ok.map((r) => r.cellHold));
+    let estado;
+    if (!rs.length) estado = "sin_probar";
+    else if (nivel === "nd" || etapa === "total") estado = "neutra";
+    else if (spend < u.pisoSpend || rs.length < 2) estado = "sin_data";
+    else if (etapa === "frio") estado = medHook == null || hook == null ? "neutra" : hook >= medHook * 1.15 ? "ganadora" : hook <= medHook * 0.85 ? "perdedora" : "neutra"; // frío: SOLO hook rate (sin los "sin reproducciones")
+    else { const v = msg ? costoConv : roas; if (medVenta == null || v == null) estado = "neutra"; else if (msg) estado = v <= medVenta * 0.85 ? "ganadora" : v >= medVenta * 1.15 ? "perdedora" : "neutra"; else estado = v >= medVenta * 1.15 ? "ganadora" : v <= medVenta * 0.85 ? "perdedora" : "neutra"; }
+    return { nivel, etapa, rows: rs.sort((a, b) => b.cellSpend - a.cellSpend), n: rs.length, spend, pct: totalSpend ? spend / totalSpend : 0, roas, cpa, costoConv, hook, hold, estado, norepro: rs.length - ok.length };
+  };
+  const matriz = useMemo(() => { const m = {}; for (const n of NIV_ORDEN) { m[n] = {}; for (const e of ETAPAS) m[n][e] = celda(n, e); } return m; }, [filas, u.pisoSpend, medVenta, medHook, msg, totalSpend]); // eslint-disable-line react-hooks/exhaustive-deps
+  const etapaTot = (e) => NIV_ORDEN.reduce((s, n) => s + matriz[n][e].spend, 0);
+
+  // LECTURA determinista (plantillas + números, sin IA)
+  const lectura = useMemo(() => {
+    const out = [];
+    if (!filas.length) return out;
+    const tot = NIV_ORDEN.filter((n) => n !== "nd").map((n) => matriz[n].total).filter((c) => c.n);
+    const top = [...tot].sort((a, b) => b.spend - a.spend)[0];
+    if (top) out.push(`${Math.round(top.pct * 100)}% del spend en nivel ${top.nivel} (${NIV_LABEL[top.nivel].toLowerCase()})`);
+    const roasView = totalSpend ? filas.reduce((s, r) => s + r.spend * (r.roas || 0), 0) / totalSpend : 0;
+    const convView = filas.reduce((s, r) => s + (r.conversaciones || 0), 0), costoView = convView ? totalSpend / convView : null;
+    const conf = tot.filter((c) => c.spend >= u.pisoSpend && c.n >= 2 && c.nivel !== top?.nivel);
+    const mejor = msg ? conf.filter((c) => c.costoConv).sort((a, b) => a.costoConv - b.costoConv)[0] : conf.sort((a, b) => b.roas - a.roas)[0];
+    if (mejor && (msg ? costoView && mejor.costoConv < costoView * 0.9 : roasView && mejor.roas > roasView * 1.1)) {
+      const d = msg ? Math.round((1 - mejor.costoConv / costoView) * 100) : Math.round((mejor.roas / roasView - 1) * 100);
+      out.push(msg ? `el nivel ${mejor.nivel} sale ${d}% más barato por conversación con ${Math.round(mejor.pct * 100)}% del spend` : `el nivel ${mejor.nivel} rinde +${d}% de ROAS con ${Math.round(mejor.pct * 100)}% del spend`);
+    }
+    const sinFrio = [1, 2, 3].filter((n) => matriz[n].frio.estado === "sin_probar");
+    if (sinFrio.length) out.push(`nivel${sinFrio.length > 1 ? "es" : ""} ${sinFrio.slice().reverse().join(", ")} sin probar en frío`);
+    const perd = []; for (const n of [5, 4, 3, 2, 1]) for (const e of ["medio", "caliente"]) if (matriz[n][e].estado === "perdedora") perd.push(`${n}×${e}`);
+    if (perd.length) out.push(`celda${perd.length > 1 ? "s" : ""} perdedora${perd.length > 1 ? "s" : ""} por ${msg ? "costo/conv" : "ROAS"}: ${perd.join(", ")}`);
+    const ganFrio = [5, 4, 3, 2, 1].filter((n) => matriz[n].frio.estado === "ganadora");
+    if (ganFrio.length) out.push(`en frío engancha mejor el nivel ${ganFrio.join(" y ")} (hook rate sobre la mediana ${pctf(medHook)})`);
+    const nd = matriz.nd.total; if (nd.n) out.push(`${nd.n} creativo${nd.n > 1 ? "s" : ""} sin clasificar (${Math.round(nd.pct * 100)}% del spend)`);
+    return out.slice(0, 5);
+  }, [matriz, filas, totalSpend, u.pisoSpend, msg, medHook]);
+
+  // MOTIVADORES probados: motivadorTipo → motivador
+  const motivadores = useMemo(() => motivadoresDe(filas, msg), [filas, msg]);
+
+  // Override manual de nivel (celda abierta): guarda y recalcula en el momento
+  const setOverride = async (fp, nivel) => {
+    const cur = niv[fp] || {};
+    if (!nivel) { // quitar → borrar y re-clasificar
+      try { await fetch("/api/conciencia/override", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ account, extras, tab, fingerprint: fp }) }); } catch {}
+      setVer((v) => v + 1); return;
+    }
+    setClasif((p) => ({ ...p, niveles: { ...p.niveles, [fp]: { ...cur, nivel: +nivel, fuente: "override", confianza: "alta" } } }));
+    try {
+      const r = await fetch("/api/conciencia/override", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ account, extras, tab, fingerprint: fp, nivel: +nivel, motivador: cur.motivador, motivadorTipo: cur.motivadorTipo }) });
+      const j = await r.json(); if (j.error) setErr("Override no guardado: " + j.error + " (quedó solo en esta vista)");
+    } catch (e) { setErr("Override no guardado: " + e.message); }
+  };
+
+  // PRÓXIMO TEST
+  const modaSheet = (k) => { const c = {}; for (const r of filas) { const v = r.sheet && r.sheet[k]; if (v && v !== "nd") c[v] = (c[v] || 0) + r.spend; } return Object.entries(c).sort((a, b) => b[1] - a[1])[0]?.[0] || "nd"; };
+  const sugerir = async () => {
+    setTLoading(true); setTErr("");
+    const best = topWinners(withV, 1)[0] || null;
+    const receta = best ? { angulo: best.sheet?.angulo || best.ang, categoria: best.ang, hook: best.sheet?.tipo_gancho || best.hook, audiencia: best.aud, formato: best.fmt, nivel: niv[fpOf(best)]?.nivel || "nd" } : {};
+    const ctx = contextoAngulos(filas, u, msg); // sin los "sin reproducciones" — fuera del payload entero
+    const mx = {}; for (const n of NIV_ORDEN) { mx[n] = {}; for (const e of ETAPAS) { const c = matriz[n][e]; const cc = ctx.celdas[n][e]; mx[n][e] = { estado: c.estado, creativos: cc.creativos, spend: Math.round(c.spend), pct_spend: Math.round(c.pct * 100), ...(msg ? { costo_conv: c.costoConv && Math.round(c.costoConv) } : { roas: +c.roas.toFixed(2), cpa: c.cpa && Math.round(c.cpa) }), hook_rate: c.hook != null ? +(c.hook * 100).toFixed(1) : null, hold_rate: c.hold != null ? +(c.hold * 100).toFixed(1) : null, motivadores_en_celda: cc.motivadores_en_celda, formatos_en_celda: cc.formatos_en_celda }; } }
+    const body = { account, extras, tab, modo, accountName, marca: modaSheet("marca"), publico: modaSheet("publico"), periodo: dias ? dias + " días" : preset, umbral: u, receta, lectura,
+      matriz: mx, motivadores: ctx.motivadores, voz: ctx.voz, excluidos_sin_reproducciones: ctx.excluidos_sin_reproducciones,
+      referencias: { mediana_hook_rate: medHook != null ? +(medHook * 100).toFixed(1) : null, mediana_hold_rate: medHold != null ? +(medHold * 100).toFixed(1) : null, ...(msg ? { mediana_costo_conv: medVenta && Math.round(medVenta) } : { mediana_roas: medVenta }) } };
+    try {
+      const r = await fetch("/api/conciencia/proximo-test", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      const j = await r.json(); if (j.error) throw new Error(j.error);
+      setTests(j.hipotesis);
+      saveHist([{ t: Date.now(), label: (msg ? "mensajes" : "ventas") + " · " + (dias ? dias + "d" : preset), modo, hipotesis: j.hipotesis }, ...hist].slice(0, 15));
+    } catch (e) { setTErr("No se pudieron sugerir tests: " + e.message); } finally { setTLoading(false); }
+  };
+  const briefDe = (h) => `Nivel de conciencia objetivo: ${h.nivel_objetivo} (${NIV_LABEL[h.nivel_objetivo] || ""}). Motivador (${h.motivadorTipo || "—"}): ${h.motivador}.${h.motivador_cercano ? " Más cercano ya probado: " + h.motivador_cercano + " — se diferencia en: " + (h.diferencia || "") + "." : ""} Etapa de audiencia: ${h.etapa_audiencia_sugerida}. Ejemplo de gancho: "${h.hook_ejemplo}". Formato sugerido: ${h.formato_sugerido}. Por qué: ${h.por_que} Métrica de éxito: ${h.metrica_de_exito}. Cantidad de videos: ${h.cantidad_de_videos}.`;
+
+  if (!tab) return <section className="sect"><div className="anplaceholder">Elegí una <b>planilla</b> (pestaña del Sheet) en el header: el nivel de conciencia se juzga por el gancho de cada video, que vive ahí.</div></section>;
+  const celdaSel = sel ? matriz[sel.nivel][sel.etapa] : null;
+  const fmtVenta = (c) => (msg ? (c.costoConv ? money(c.costoConv) + "/conv" : "—") : c.roas.toFixed(1) + "x");
+  return (
+    <>
+      {dias != null && dias < 60 && <div className="cwarn">⚠ Con menos de 60 días la matriz queda casi vacía. Recomendado: <b>últimos 90 días</b>.</div>}
+      <section className="sect">
+        <div className="secthead"><span className="sverb" style={{ background: "#1E1812", color: "#F4C24A" }}><span className="sq" style={{ background: "#F4C24A" }} />◈</span><span className="stitle">MAPA · NIVEL DE CONCIENCIA × ETAPA</span>
+          <span className="sright">{loading ? "clasificando…" : clasif ? <>{filas.length} creativos · {Object.values(niv).filter((c) => c.fuente === "regla").length} por regla · {Object.values(niv).filter((c) => c.fuente === "claude").length} por Claude · {Object.values(niv).filter((c) => c.fuente === "override").length} manual{clasif.cache ? "" : <span className="ctip" title="Sin Upstash la clasificación por Claude no se guarda: se repite en cada carga.">· sin cache ⓘ</span>}</> : ""}</span></div>
+        {Object.keys(ndInfo).length > 0 && (
+          <div className="cnd">
+            <b>SIN NIVEL ({short(Object.values(ndInfo).reduce((s, x) => s + x.spend, 0))} · {Math.round(Object.values(ndInfo).reduce((s, x) => s + x.spend, 0) / (spendCuenta || 1) * 100)}% del spend de la cuenta)</b>
+            {ndInfo.sin_sheet && <span>· sin fila en el Sheet (fuera de la matriz): {short(ndInfo.sin_sheet.spend)} ({ndInfo.sin_sheet.n}) → catálogos o videos sin procesar en la planilla</span>}
+            {ndInfo.claude && <span>· Claude no respondió: {short(ndInfo.claude.spend)} ({ndInfo.claude.n}) → recargar la pestaña reintenta</span>}
+            {ndInfo.regla && <span>· regla sin match{clasif && clasif.claude ? "" : " (sin Claude)"}: {short(ndInfo.regla.spend)} ({ndInfo.regla.n}) → override manual en la celda nd</span>}
+            {ndInfo.pendiente && <span>· clasificando: {short(ndInfo.pendiente.spend)} ({ndInfo.pendiente.n})</span>}
+          </div>
+        )}
+        {err && <div className="generr">{err}</div>}
+        <div className="thinnote">Filas: nivel de conciencia del GANCHO (5 producto+oferta → 1 inconsciente). Columnas: etapa de la audiencia donde corrió. En <b>frío</b> la celda se juzga por hook rate vs la mediana ({pctf(medHook)}); en <b>medio/caliente</b> por {msg ? "costo/conv" : "ROAS"} vs la mediana ({msg ? (medVenta ? money(medVenta) : "—") : (medVenta != null ? medVenta.toFixed(1) + "x" : "—")}), ±15%. Sin data = menos de 2 creativos o spend bajo el piso. Cada creativo se reparte por CONJUNTO (su audiencia real), así que puede estar en varias columnas. Hold mediana de la vista: {pctf(medHold, 0)}. Videos "⚠ sin reproducciones" (más de 5.000 impresiones, menos de 2% de 3 s) quedan fuera de las medianas.</div>
+        <div className="cmatrixwrap"><table className="cmatrix">
+          <thead><tr><th className="cnivel">NIVEL</th>{ETAPAS.map((e) => <th key={e}>{ETAPA_LABEL[e]}</th>)}</tr></thead>
+          <tbody>{NIV_ORDEN.map((n) => (
+            <tr key={n}><td className="cnivel"><b>{n === "nd" ? "nd" : n}</b> <span>{NIV_LABEL[n]}</span></td>
+              {ETAPAS.map((e) => { const c = matriz[n][e]; const st = CELDA[c.estado]; const on = sel && sel.nivel === n && sel.etapa === e; return (
+                <td key={e} className={"ccell" + (c.n ? " clickable" : "") + (on ? " on" : "") + (c.estado === "sin_probar" ? " empty" : "")} style={{ background: st.bg, "--cc": st.color }} onClick={c.n ? () => setSel(on ? null : { nivel: n, etapa: e }) : undefined}>
+                  {c.n ? <>
+                    <div className="ccspend">{short(c.spend)} <small>{Math.round(c.pct * 100)}%</small></div>
+                    <div className="ccmain" style={{ color: st.color }}>{e === "frio" ? "hook " + pctf(c.hook) : fmtVenta(c)}</div>
+                    <div className="ccsub">{e === "frio" ? "hold " + pctf(c.hold, 0) : (msg ? "hook " + pctf(c.hook) : "CPA " + (c.cpa ? money(c.cpa) : "—"))} · {c.n} creat.</div>
+                    {st.lab && <div className="cclab" style={{ color: st.color }}>{st.lab}</div>}
+                    {c.norepro > 0 && <div className="ccnr">⚠ {c.norepro} sin repro.</div>}
+                  </> : <div className="ccempty">sin probar</div>}
+                </td>); })}
+            </tr>))}
+            <tr className="ctot"><td className="cnivel"><span>spend por etapa</span></td>{ETAPAS.map((e) => <td key={e} className="ctotcell mono">{short(etapaTot(e))} <small>{Math.round(etapaTot(e) / (totalSpend || 1) * 100)}%</small></td>)}</tr>
+          </tbody>
+        </table></div>
+        {celdaSel && (
+          <div className="cdetail">
+            <div className="cdhead">Nivel {celdaSel.nivel} · {ETAPA_LABEL[celdaSel.etapa]} · {celdaSel.n} creativo{celdaSel.n !== 1 ? "s" : ""} · {short(celdaSel.spend)} <button className="cdx" onClick={() => setSel(null)}>✕</button></div>
+            {celdaSel.rows.map((r) => (
+              <div className="cdrow" key={r.id}>
+                <span className="cdname">{r.nombre} <TF r={r} /><Paused r={r} /><SinRepro r={r} /><VideoLink r={r} />{r.cellAuds.length ? <small className="cdaud">{r.cellAuds.join(" · ")}</small> : null}</span>
+                <span className="cdniv">{true ? <>nivel <select value={r.c && r.c.fuente === "override" ? r.nivel : ""} onChange={(e) => setOverride(r.fp, e.target.value)} title="Override manual del nivel (se guarda para esta planilla)"><option value="">{r.nivel} · {r.c ? r.c.fuente : "nd"}</option>{[5, 4, 3, 2, 1].map((n) => <option key={n} value={n}>{n} · manual</option>)}</select></> : <small>sin fila en el Sheet</small>}</span>
+                <span className="cdmot">{r.c && r.c.motivador ? <><i>{r.c.motivadorTipo}</i> {r.c.motivador}</> : "—"}</span>
+                <span className="cdmeta mono">{short(r.cellSpend)}{celdaSel.etapa !== "total" && r.cellSpend < r.spend ? " de " + short(r.spend) : ""} · {msg ? (r.cellCosto ? money(r.cellCosto) + "/conv" : "0 conv") : r.cellRoas.toFixed(1) + "x"} · hook {pctf(r.cellHook)} · hold {pctf(r.cellHold, 0)}</span>
+              </div>))}
+          </div>
+        )}
+      </section>
+
+      <section className="sect">
+        <div className="secthead"><span className="sverb" style={{ background: "#2E6E94", color: "#fff" }}><span className="sq" style={{ background: "#fff" }} />≡</span><span className="stitle">LECTURA</span></div>
+        {lectura.length ? <ul className="clectura">{lectura.map((l, i) => <li key={i}>{l}</li>)}</ul> : <div className="dedup">{loading ? "clasificando…" : "Sin creativos con Sheet en el período."}</div>}
+      </section>
+
+      <section className="sect">
+        <div className="secthead"><span className="sverb" style={{ background: "#C2861F", color: "#fff" }}><span className="sq" style={{ background: "#fff" }} />♦</span><span className="stitle">MOTIVADORES PROBADOS</span><span className="sright">el inventario de ángulos que ya se tocaron · por spend</span></div>
+        {motivadores.length ? <div className="cmotwrap"><table className="cmot"><thead><tr><th>TIPO</th><th>MOTIVADOR</th><th>CREAT.</th><th>SPEND</th><th>{msg ? "COSTO/CONV" : "ROAS"}</th><th>HOOK MED.</th><th>NIVELES</th></tr></thead>
+          <tbody>{motivadores.slice(0, 40).map((m, i) => <tr key={i}><td><span className="cmtipo">{m.tipo}</span></td><td>{m.motivador}</td><td className="mono num">{m.n}</td><td className="mono num">{short(m.spend)}</td><td className="mono num">{msg ? (m.costoConv ? money(m.costoConv) : "—") : m.roas.toFixed(1) + "x"}</td><td className="mono num">{pctf(m.hook)}</td><td className="mono">{m.niveles.join(" · ")}</td></tr>)}</tbody></table></div>
+          : <div className="dedup">{loading ? "clasificando…" : "Todavía no hay motivadores clasificados."}</div>}
+      </section>
+
+      <section className="an">
+        <div className="anhead">
+          <div><div className="antitle">◎ PRÓXIMO TEST</div><div className="ansub">Claude cruza la matriz (celdas sin probar, ganadoras y perdedoras) con los motivadores ya tocados y propone 3 hipótesis específicas de la marca. Nunca juzga niveles 1-3 por {msg ? "costo/conv" : "ROAS"}.</div></div>
+          <button className="anbtn" onClick={sugerir} disabled={tLoading || loading || !filas.length}>{tLoading ? "● PENSANDO..." : tests ? "↻ SUGERIR DE NUEVO" : "▶ SUGERIR TESTS"}</button>
+        </div>
+        {tErr && <div className="generr">{tErr}</div>}
+        {tests && <TestsOut hip={tests} onBrief={(h) => onBrief && onBrief(briefDe(h))} />}
+        <Historial items={hist} render={(it) => <TestsOut hip={it.hipotesis} onBrief={(h) => onBrief && onBrief(briefDe(h))} />} />
+      </section>
+    </>
+  );
+}
+function TestsOut({ hip = [], onBrief }) {
+  return (
+    <div className="ctests">{hip.map((h, i) => (
+      <div className="ctest" key={i}>
+        <div className="cthead"><span className="ctniv">NIVEL {h.nivel_objetivo}</span><span className="ctlab">{NIV_LABEL[h.nivel_objetivo] || ""}</span>{h.motivadorTipo && <span className="cmtipo">{h.motivadorTipo}</span>}<span className="ctetapa">{String(h.etapa_audiencia_sugerida || "").toUpperCase()}</span></div>
+        <div className="ctmot">{h.motivador}</div>
+        <div className="cthook">“{h.hook_ejemplo}”</div>
+        <div className="ctwhy"><b>Por qué:</b> {h.por_que}</div>
+        {h.motivador_cercano && <div className="ctwhy"><b>Más cercano ya probado:</b> {h.motivador_cercano} · <b>se diferencia en:</b> {h.diferencia}</div>}
+        {Array.isArray(h.descarte) && h.descarte.length > 0 && <details className="ctdesc"><summary>descartó {h.descarte.length} idea{h.descarte.length > 1 ? "s" : ""}</summary>{h.descarte.map((d, j) => <div key={j}>· <i>{d.idea}</i> — {d.motivo}</div>)}</details>}
+        <div className="ctmeta"><span><b>Formato:</b> {h.formato_sugerido}</span><span><b>Éxito:</b> {h.metrica_de_exito}</span><span><b>Videos:</b> {h.cantidad_de_videos}</span></div>
+        {onBrief && <button className="ctbrief" onClick={() => onBrief(h)}>✎ ARMAR BRIEF →</button>}
+      </div>))}</div>
   );
 }
 
@@ -1860,7 +2191,7 @@ function Dash({ stats, u = {}, goal, setGoal, factTienda, tnStore, modo = "venta
           {topAds.map((r, i) => { const b = BUCKETS[r.v]; const bd = r.breakdown || []; const exp = bd.length > 0; const isOpen = openCard === r.id; return (
             <div className={"topcard" + (exp ? " clickable" : "") + (isOpen ? " open" : "")} key={r.id} style={{ "--bar": b.color }} onClick={exp ? () => setOpenCard(isOpen ? null : r.id) : undefined}>
               <div className="tcardtop"><span className="trank">{String(i + 1).padStart(2, "0")}</span><span className="badge" style={{ background: b.bg, color: b.color }}><span className="sq" style={{ background: b.color }} />{r.v}</span></div>
-              <div className="tname">{Object.keys(stats.spendByPlat || {}).length > 1 && <PlatTag p={r.plat} />}{r.nombre} <span className="fmt">{r.fmt}</span><TF r={r} /><Paused r={r} /><Calidad v={r.calidad} mix={r.calidadMix} /></div>{msg ? <div className="troas">{money(r.costoConv)}</div> : <div className="troas">{r.roas.toFixed(1)}<small>x</small></div>}<div className="tmeta mono">{msg ? (nf.format(r.conversaciones) + " conv · " + short(r.spend)) : (short(r.spend) + " spend · " + r.ang)}</div>
+              <div className="tname">{Object.keys(stats.spendByPlat || {}).length > 1 && <PlatTag p={r.plat} />}{r.nombre} <span className="fmt">{r.fmt}</span><TF r={r} /><Paused r={r} /><Calidad v={r.calidad} mix={r.calidadMix} /><VideoLink r={r} /></div>{msg ? <div className="troas">{money(r.costoConv)}</div> : <div className="troas">{r.roas.toFixed(1)}<small>x</small></div>}<div className="tmeta mono">{msg ? (nf.format(r.conversaciones) + " conv · " + short(r.spend)) : (short(r.spend) + " spend · " + r.ang)}</div>
               {exp && <div className="tcardmore"><span className="tcardcaret">{isOpen ? "▾" : "▸"}</span>{isOpen ? "ocultar" : "ver"} {bd.length} conjunto{bd.length !== 1 ? "s" : ""}</div>}
               {isOpen && (
                 <div className="tcardexp" onClick={(e) => e.stopPropagation()}>
@@ -2078,7 +2409,7 @@ function Panel({ rows, u = {}, stats, sort, setSortKey, modo = "ventas" }) {
           <tbody>
             {rows.map((r) => { const b = BUCKETS[r.v]; return (
               <tr key={r.id} style={{ "--bar": b.color }}>
-                <td className="name">{mix && <PlatTag p={r.plat} />}{r.nombre} <span className="fmt">{r.fmt}</span><TF r={r} /><Paused r={r} /><RolTag r={r} /><Calidad v={r.calidad} mix={r.calidadMix} /></td>
+                <td className="name">{mix && <PlatTag p={r.plat} />}{r.nombre} <span className="fmt">{r.fmt}</span><TF r={r} /><Paused r={r} /><SinRepro r={r} /><RolTag r={r} /><Calidad v={r.calidad} mix={r.calidadMix} /><VideoLink r={r} /></td>
                 <td className="ang">{r.ang}{r.sec !== "—" ? <span className="sec"> / {r.sec}</span> : null}<span className="split">{r.split}</span></td>
                 <td className="aud">{r.aud}</td><td className="mono num">{money(r.spend)}</td>{msg ? <><td className="mono num strong">{nf.format(r.conversaciones)}</td><td className="mono num">{money(r.costoConv)}</td></> : <><td className="mono num strong">{r.roas.toFixed(1)}x</td><td className="mono num">{money(r.cpa)}</td></>}
                 <td><span className="badge" style={{ background: b.bg, color: b.color }}><span className="sq" style={{ background: b.color }} />{r.v}</span></td>
@@ -2257,12 +2588,20 @@ const GEN_TIPOS = {
   angulos: {
     label: "Ángulos nuevos",
     btn: "GENERAR ÁNGULOS",
-    max: 1500,
-    system: `${GEN_PERSONA}\n\nTu tarea: proponer 6 ÁNGULOS DE VENTA NUEVOS para testear, distintos a los que la marca ya usa pero coherentes con el producto y con lo que funciona. Para cada uno: un nombre corto y una explicación de 1-2 oraciones de por qué podría funcionar y cómo se ejecutaría en un creativo. Devolvé EXCLUSIVAMENTE JSON válido, sin markdown ni backticks: {"angulos":[{"nombre":"...","desc":"..."}, ... 6 items]}`,
+    max: 8000, // 6 ángulos con descarte + motivador + hook: con 4000 se cortaba
+    system: `${GEN_PERSONA}\n\nTu tarea: proponer 6 ÁNGULOS DE VENTA NUEVOS para testear, distintos a los que la marca ya usa pero coherentes con el producto y con lo que funciona. Cada ángulo es un MOTIVADOR concreto (el dolor, deseo, objeción, ocasión o identidad que toca) con un tipo.
+
+REGLAS (no negociables):
+1. DIVERSIDAD: los 6 ángulos cubren los 5 tipos Dolor, Ocasion, Identidad, Objecion y Deseo (uno de cada) y el sexto es Oferta. Ninguno repite el motivador de otro.
+2. Si te paso el INVENTARIO de motivadores ya probados: PROHIBIDO proponer un motivador que ya tenga 3 o más creativos probados (ni con otras palabras). Cada ángulo nombra el motivador probado más cercano y dice en qué se diferencia.
+3. Si te paso ganchos literales de la marca ("así habla esta marca"): tus hooks de ejemplo tienen que sonar a esos — mismo registro, largo y jerga — no a un manifiesto ni a un eslogan.
+4. Razoná antes de proponer: cada ángulo lleva "descarte" con 2 ideas que consideraste y por qué las descartaste (ya probada / fuera de voz / mismo tipo que otra).
+
+Devolvé EXCLUSIVAMENTE JSON válido, sin markdown ni backticks, con los campos EN ESTE ORDEN por ángulo: {"angulos":[{"descarte":[{"idea":"...","motivo":"ya probada | fuera de voz | mismo tipo que otra"},{"idea":"...","motivo":"..."}],"tipo":"Dolor|Ocasion|Identidad|Objecion|Deseo|Oferta","nombre":"nombre corto","motivador":"el motivador concreto, ≤80 chars","cercano":"motivador probado más cercano (o \"ninguno\")","diferencia":"en qué se diferencia, 1 frase","desc":"por qué podría funcionar y cómo se ejecuta en un creativo, 1-2 oraciones","hook_ejemplo":"1 línea, el gancho de los primeros 3 s"}, ... 6 items]}`,
   },
 };
 
-function Generar({ rows = [], accountName = "" }) {
+function Generar({ rows = [], accountName = "", prefill = null, account, extras = [], tab, u = {}, modoApp = "ventas", periodKey = "", conciencia = null, onClasif }) {
   // Receta ganadora = mayor ROAS entre creativos CONFIABLES (con spend real y al menos 5 ventas,
   // para no coronar un ROAS ruidoso de poca data). Si ninguno llega a 5 ventas, cae a los que tienen spend.
   const best = useMemo(() => topWinners(rows, 1)[0] || null, [rows]);
@@ -2282,15 +2621,47 @@ function Generar({ rows = [], accountName = "" }) {
   const [err, setErr] = useState("");
   const [copied, setCopied] = useState(null);
   const copy = (t, id) => { try { navigator.clipboard.writeText(t); } catch (e) {} setCopied(id); setTimeout(() => setCopied(null), 1200); };
+  // Brief precargado desde ÁNGULOS ("Armar brief"): fija tipo/modo y suma el contexto del test al prompt.
+  const [extra, setExtra] = useState("");
+  useEffect(() => { if (prefill && prefill.t) { setTipo(prefill.tipo || "hooks"); setModo(prefill.modo || "explorar"); setExtra(prefill.contexto || ""); setOut(null); } }, [prefill && prefill.t]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Ángulos nuevos: mismo contexto que PRÓXIMO TEST (motivadores probados completos, voz de la
+  // marca, celdas). Reusa la clasificación de ÁNGULOS si es del mismo período; si no, la pide.
+  const [ctxNota, setCtxNota] = useState("");
+  const contextoParaAngulos = async () => {
+    const rowsSheet = rows.filter((r) => r.sheet);
+    if (!tab || !rowsSheet.length) { setCtxNota("Sin planilla del Sheet elegida: los ángulos salen sin el inventario de motivadores probados."); return ""; }
+    let data = conciencia && conciencia.key === periodKey ? conciencia.data : null;
+    if (!data) {
+      setCtxNota("Clasificando el nivel de conciencia de los creativos…");
+      const body = { account, extras, tab, rows: rowsSheet.map((r) => { const o = { fingerprint: fpOf(r) }; for (const k of CONC_CAMPOS) o[k] = r.sheet[k]; return o; }) };
+      const j = await (await fetch("/api/conciencia/clasificar", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })).json();
+      if (j.error) { setCtxNota("No se pudo clasificar (" + j.error + "): ángulos sin inventario de motivadores."); return ""; }
+      data = j; if (onClasif) onClasif({ key: periodKey, data: j });
+    }
+    const msg = modoApp === "mensajes";
+    const filas = rowsSheet.map((r) => filaConciencia(r, data.niveles || {}, data, false));
+    const ctx = contextoAngulos(filas, u, msg);
+    setCtxNota(`Contexto: ${ctx.motivadores.length} motivadores ya probados · ${ctx.voz.frio_mejor_hook_rate.length + ctx.voz.caliente_mejor_venta.length} ganchos de referencia${ctx.excluidos_sin_reproducciones ? " · " + ctx.excluidos_sin_reproducciones + " videos sin reproducciones excluidos" : ""}.`);
+    const saturados = ctx.motivadores.filter((m) => m.creativos >= 3);
+    return "\n\nINVENTARIO DE MOTIVADORES YA PROBADOS (tipo · motivador · niveles · creativos · hook rate · " + (msg ? "costo/conv" : "ROAS") + "):\n" +
+      ctx.motivadores.map((m) => `- [${m.tipo}] ${m.motivador} · niveles ${m.niveles.join("/")} · ${m.creativos} creativo${m.creativos !== 1 ? "s" : ""} · hook ${m.hook_rate != null ? m.hook_rate + "%" : "—"} · ${msg ? (m.costo_conv ? "$" + m.costo_conv : "—") : m.roas + "x"}`).join("\n") +
+      (saturados.length ? "\n\nPROHIBIDO proponer estos motivadores (ya tienen 3+ creativos probados): " + saturados.map((m) => `"${m.motivador}"`).join(", ") : "") +
+      "\n\nASÍ HABLA ESTA MARCA (ganchos literales que ya funcionan — los tuyos tienen que sonar a esto, no a un manifiesto):\n" +
+      "Mejor hook rate en frío:\n" + ctx.voz.frio_mejor_hook_rate.map((v) => `- "${v.gancho}" (${v.hook_rate}% · nivel ${v.nivel})`).join("\n") +
+      "\nMejor venta en caliente:\n" + ctx.voz.caliente_mejor_venta.map((v) => `- "${v.gancho}" (${msg ? "$" + v.costo_conv + "/conv" : v.roas + "x"} · nivel ${v.nivel})`).join("\n");
+  };
 
   const generar = async () => {
     setLoading(true); setErr(""); setOut(null);
     const cfg = GEN_TIPOS[tipo];
+    let ctxAng = "";
+    if (tipo === "angulos") { try { ctxAng = await contextoParaAngulos(); } catch (e) { setCtxNota("Sin contexto de ángulos: " + e.message); } }
     const hookLib = tipo === "hooks" ? "\n\nBiblioteca de patrones de gancho (referencia estructural):\n" + HOOKS.slice(0, 30).map((h) => "- " + h[1]).join("\n") : "";
     const modoTxt = modo === "explorar"
       ? "MODO EXPLORAR (salir de la caja): NO repitas la receta ganadora — usala solo como contraste de lo YA probado. Proponé enfoques, ganchos y ángulos NUEVOS y bien distintos para abrir vetas no exploradas, manteniendo coherencia con el producto y la marca."
       : "MODO ITERAR (escalar lo que funciona): generá variaciones CERCANAS a la receta ganadora — mismo ángulo/gancho/formato que ya rinde, con cambios incrementales para exprimirlo más.";
-    const prompt = `Marca / producto: ${producto || "(no especificado)"}
+    const prompt = `${extra ? "CONTEXTO DEL TEST A ARMAR (viene de la pestaña ÁNGULOS — el objetivo manda sobre la receta):\n" + extra + "\n\n" : ""}Marca / producto: ${producto || "(no especificado)"}
 
 ${modoTxt}
 
@@ -2301,7 +2672,7 @@ Receta ganadora actual (lo que mejor rinde):
 - Audiencia top: ${recipe.audiencia}
 - Formato: ${recipe.formato}
 
-${emoji ? "Podés usar emojis con moderación." : "Sin emojis."}${hookLib}`;
+${emoji ? "Podés usar emojis con moderación." : "Sin emojis."}${hookLib}${ctxAng}`;
     try {
       const res = await fetch("/api/copy", {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -2309,9 +2680,11 @@ ${emoji ? "Podés usar emojis con moderación." : "Sin emojis."}${hookLib}`;
       });
       const data = await res.json();
       if (data.error) throw new Error(data.error.message || data.error);
+      if (data.stop_reason === "max_tokens") throw new Error("la respuesta se cortó por largo — probá de nuevo");
       const text = (data.content || []).filter((b) => b.type === "text").map((b) => b.text).join("\n");
       const clean = text.replace(/```json|```/g, "").trim();
-      setOut({ tipo, data: JSON.parse(clean) });
+      let parsed; try { parsed = JSON.parse(clean); } catch { throw new Error("la IA devolvió un formato inválido — probá de nuevo"); }
+      setOut({ tipo, data: parsed });
     } catch (e) {
       setErr("No se pudo generar: " + e.message);
     } finally { setLoading(false); }
@@ -2338,9 +2711,9 @@ ${emoji ? "Podés usar emojis con moderación." : "Sin emojis."}${hookLib}`;
       <div className="genblock">
         <div className="genblockh">ÁNGULOS NUEVOS</div>
         {(d.angulos || []).map((a, i) => (
-          <div className="outitem" key={"a" + i}>
-            <span className="outtext"><b>{a.nombre}</b> — {a.desc}</span>
-            <button className="copybtn" onClick={() => copy(a.nombre + " — " + a.desc, "a" + i)}>{copied === "a" + i ? "✓" : "⧉"}</button>
+          <div className="outitem outang" key={"a" + i}>
+            <span className="outtext">{a.tipo && <span className="cmtipo">{a.tipo}</span>} <b>{a.nombre}</b>{a.motivador ? <> — {a.motivador}</> : null}<br />{a.desc}{a.hook_ejemplo && <div className="cthook">“{a.hook_ejemplo}”</div>}{a.cercano && a.cercano !== "ninguno" && <div className="ctwhy"><b>Más cercano ya probado:</b> {a.cercano} · <b>se diferencia en:</b> {a.diferencia}</div>}{Array.isArray(a.descarte) && a.descarte.length > 0 && <details className="ctdesc"><summary>descartó {a.descarte.length} idea{a.descarte.length > 1 ? "s" : ""}</summary>{a.descarte.map((x, j) => <div key={j}>· <i>{x.idea}</i> — {x.motivo}</div>)}</details>}</span>
+            <button className="copybtn" onClick={() => copy((a.tipo ? "[" + a.tipo + "] " : "") + a.nombre + " — " + (a.motivador || "") + "\n" + a.desc + (a.hook_ejemplo ? "\nHook: " + a.hook_ejemplo : ""), "a" + i)}>{copied === "a" + i ? "✓" : "⧉"}</button>
           </div>
         ))}
       </div>
@@ -2356,6 +2729,8 @@ ${emoji ? "Podés usar emojis con moderación." : "Sin emojis."}${hookLib}`;
 
   return (
     <section className="gen">
+      {extra && <div className="genbrief"><b>BRIEF DESDE ÁNGULOS</b> {extra} <button className="genbriefx" onClick={() => setExtra("")}>✕ quitar</button></div>}
+      {tipo === "angulos" && ctxNota && <div className="thinnote">{ctxNota}</div>}
       <div className="genintro">Generá con IA (Claude Sonnet 4.6) usando tu <b>receta ganadora</b>{best ? "" : " — elegí un cliente para cargarla"}. Elegí qué querés generar y dale.</div>
       <div className="reciperow">
         <span className="recipechip">ÁNGULO · {recipe.angulo}</span>
@@ -2605,6 +2980,29 @@ tbody tr{border-bottom:1px solid var(--line);box-shadow:inset 5px 0 0 var(--bar)
 tbody tr:hover{background:#EFE6D2;}tbody tr:last-child{border-bottom:none;}
 td{padding:11px 12px;vertical-align:middle;}.num{text-align:right;}.name{font-weight:700;}
 .fmt{font-size:9px;color:var(--soft);border:1px solid var(--line);border-radius:3px;padding:1px 5px;margin-left:6px;font-family:'Space Mono',monospace;letter-spacing:1px;}
+.ctdesc{font-size:11px;color:var(--soft);margin-top:4px;}.ctdesc summary{cursor:pointer;font-family:'Space Mono',monospace;font-size:9.5px;letter-spacing:.5px;}.ctdesc div{margin:2px 0 0 8px;}.outang .outtext{display:block;line-height:1.5;}
+.norepro{font-size:9px;color:#C5362B;border:1px solid #C5362B;border-radius:3px;padding:1px 5px;margin-left:6px;font-family:'Space Mono',monospace;letter-spacing:.5px;white-space:nowrap;}
+.cnd{font-size:11.5px;color:#7A5410;background:#F1E4C4;border:1px solid #C2861F;border-radius:6px;padding:6px 10px;margin:8px 0;display:flex;flex-wrap:wrap;gap:6px 10px;}.cnd b{font-family:'Space Mono',monospace;font-size:10px;letter-spacing:1px;}
+.ctot td{border-top:2px solid var(--ink);padding-top:6px;}.ctotcell{text-align:center;font-size:12px;color:var(--ink);}.ctotcell small{color:var(--soft);}.ccnr{font-size:9.5px;color:#C5362B;margin-top:2px;}.cdaud{display:block;font-weight:400;color:var(--soft);font-size:10px;}
+.cwarn{background:#F1E4C4;color:#7A5410;border:2px solid #C2861F;border-radius:8px;padding:10px 14px;font-size:12.5px;margin:0 0 14px;}
+.sright{margin-left:auto;font-size:11px;color:var(--soft);font-family:'Space Mono',monospace;}.ctip{cursor:help;}
+.cmatrixwrap{overflow-x:auto;}.cmatrix{width:100%;border-collapse:separate;border-spacing:4px;table-layout:fixed;}
+.cmatrix th{font-family:'Space Mono',monospace;font-size:10px;letter-spacing:1px;color:var(--soft);text-align:center;padding:4px;}.cmatrix th.cnivel{text-align:left;width:150px;}
+.cmatrix td.cnivel{font-size:12px;color:var(--ink);padding:4px 6px;white-space:nowrap;}.cmatrix td.cnivel b{font-family:'Anton',Impact,sans-serif;font-size:18px;margin-right:6px;}.cmatrix td.cnivel span{color:var(--soft);font-size:11px;}
+.ccell{border:2px solid var(--cc,var(--line));border-radius:8px;padding:8px 9px;vertical-align:top;min-height:64px;font-size:11px;color:#6B6552;}.ccell.clickable{cursor:pointer;}.ccell.clickable:hover{outline:2px solid var(--ink);}.ccell.on{outline:3px solid var(--ink);}
+.ccell.empty{border-style:dashed;}.ccempty{color:#A99E8A;font-family:'Space Mono',monospace;font-size:10px;text-align:center;padding:14px 0;}
+.ccspend{font-family:'Space Mono',monospace;font-size:11px;color:var(--ink);}.ccspend small{color:var(--soft);}.ccmain{font-family:'Anton',Impact,sans-serif;font-size:20px;line-height:1.1;margin:2px 0;}.ccsub{font-size:10.5px;}.cclab{font-family:'Space Mono',monospace;font-size:9px;letter-spacing:1px;text-transform:uppercase;margin-top:3px;font-weight:700;}
+.cdetail{margin-top:12px;border:2px solid var(--ink);border-radius:8px;padding:10px 12px;background:#EFE8D6;}.cdhead{font-family:'Space Mono',monospace;font-size:11px;letter-spacing:1px;margin-bottom:6px;display:flex;align-items:center;gap:8px;}.cdx{margin-left:auto;background:none;border:1px solid var(--line);border-radius:4px;cursor:pointer;font-size:11px;padding:1px 6px;}
+.cdrow{display:grid;grid-template-columns:2fr 150px 2fr 1.4fr;gap:10px;align-items:center;padding:6px 0;border-top:1px dashed var(--line);font-size:12px;}.cdname{color:var(--ink);font-weight:700;}.cdniv select{font-size:11px;padding:2px 4px;border:1px solid var(--line);border-radius:4px;background:#fff;}.cdmot{color:#6B6552;}.cdmot i{font-style:normal;font-family:'Space Mono',monospace;font-size:9px;letter-spacing:1px;text-transform:uppercase;color:var(--soft);margin-right:4px;}.cdmeta{font-size:11px;color:var(--soft);text-align:right;}
+.clectura{margin:0;padding-left:20px;font-size:13.5px;line-height:1.7;color:var(--ink);}
+.cmotwrap{overflow-x:auto;}.cmot{width:100%;border-collapse:collapse;font-size:12px;}.cmot th{font-family:'Space Mono',monospace;font-size:10px;letter-spacing:1px;color:var(--soft);text-align:left;padding:6px 8px;border-bottom:2px solid var(--ink);}.cmot td{padding:6px 8px;border-bottom:1px dashed var(--line);vertical-align:top;}.cmot td.num{text-align:right;}
+.cmtipo{font-family:'Space Mono',monospace;font-size:9px;letter-spacing:1px;text-transform:uppercase;border:1px solid var(--line);border-radius:3px;padding:1px 5px;color:var(--soft);}
+.ctests{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px;margin-top:12px;}.ctest{border:2px solid var(--ink);border-radius:10px;padding:14px;background:#F6F1E4;display:flex;flex-direction:column;gap:6px;box-shadow:4px 4px 0 var(--ink);}
+.cthead{display:flex;gap:8px;align-items:center;}.ctniv{font-family:'Anton',Impact,sans-serif;font-size:15px;background:var(--ink);color:#F4C24A;padding:1px 8px;border-radius:4px;}.ctlab{font-size:11px;color:var(--soft);}.ctetapa{margin-left:auto;font-family:'Space Mono',monospace;font-size:9px;letter-spacing:1px;border:1px solid var(--line);border-radius:3px;padding:1px 6px;}
+.ctmot{font-size:15px;font-weight:700;color:var(--ink);}.cthook{font-style:italic;color:#4A4336;font-size:13px;}.ctwhy{font-size:12px;color:#6B6552;}.ctmeta{display:flex;flex-direction:column;gap:2px;font-size:11.5px;color:#6B6552;}
+.ctbrief{margin-top:auto;align-self:flex-start;background:#F4C24A;border:2px solid var(--ink);border-radius:6px;padding:6px 10px;font-family:'Space Mono',monospace;font-size:10px;letter-spacing:1px;cursor:pointer;font-weight:700;}
+.genbrief{background:#F1E4C4;border:2px solid #C2861F;border-radius:8px;padding:8px 12px;font-size:12px;margin-bottom:10px;color:#4A4336;}.genbrief b{font-family:'Space Mono',monospace;font-size:10px;letter-spacing:1px;margin-right:6px;}.genbriefx{margin-left:8px;background:none;border:1px solid #C2861F;border-radius:4px;cursor:pointer;font-size:10px;padding:1px 6px;}
+.vlink{font-size:9px;color:#0F6E56;border:1px solid #0F6E56;border-radius:3px;padding:1px 6px;margin-left:6px;font-family:'Space Mono',monospace;letter-spacing:1px;text-decoration:none;font-weight:700;white-space:nowrap;cursor:pointer;}.vlink:hover{background:#0F6E56;color:#FFF;}
 .tf{font-size:9px;color:var(--soft);background:rgba(0,0,0,.04);border:1px solid var(--line);border-radius:3px;padding:1px 5px;margin-left:6px;font-family:'Space Mono',monospace;letter-spacing:.5px;white-space:nowrap;}
 .pausedtag{font-size:9px;color:#8A1C12;background:#FBE8E6;border:1px solid #E0A59E;border-radius:3px;padding:1px 5px;margin-left:6px;font-family:'Space Mono',monospace;letter-spacing:.5px;white-space:nowrap;font-weight:700;}
 .qualtag{font-size:9px;border:1px solid currentColor;border-radius:3px;padding:1px 5px;margin-left:6px;font-family:'Space Mono',monospace;letter-spacing:.5px;white-space:nowrap;font-weight:700;cursor:help;}
