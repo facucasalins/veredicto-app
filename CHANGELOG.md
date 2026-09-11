@@ -13,6 +13,9 @@ Regla de la casa: cada PR suma su entrada acá ANTES de mergearse.
   guarda. La URL directa del archivo (`video.source`) NO está permitida para el token de Sistema.
   Fallback: el post (`effective_object_story_id`) y, último, el anuncio en el Administrador.
 - Solo Meta: en Google/TikTok el chip no aparece. Verifica sesión y `canSeeAccount`.
+- Fix (MoraShop): los creativos de tipo SHARE no renderizan en `MOBILE_FEED_STANDARD` ("la historia
+  de este anuncio no está disponible") — la ruta ahora prueba varios formatos (feed mobile → Reels
+  → feed desktop → story) y verifica el HTML de la vista previa antes de redirigir.
 
 ## V 1.30 — Tienda Nube: un solo barrido, cache y sin datos silenciosamente incompletos
 - **Causa raíz de la lentitud y de "no me carga nuevos vs recurrentes"**: la banda hacía TRES
