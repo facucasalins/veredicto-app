@@ -10,6 +10,7 @@ import { HOOKS } from "@/lib/hooks";
 import { getDolarOficial } from "@/lib/fx";
 import { gaEnabled, propertyFor, getResumen as gaGetResumen, getCanales as gaGetCanales, getDaily as gaGetDaily } from "@/lib/ga4";
 import { SESSION_COOKIE, verifySession, authDisabled, canSeeAccount } from "@/lib/auth";
+import { fechasAR } from "@/lib/dates";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300; // Vercel (Fluid): el loop de tools + una respuesta larga (hasta 8000 tokens) puede pasar tranquilo los 60s
@@ -120,8 +121,9 @@ export async function POST(req) {
   // GA4: si hay una propiedad mapeada para esta cuenta/tienda, el chat gana la tool ga4_trafico.
   const gaProp = gaEnabled() ? propertyFor(account, store) : null;
 
-  const hoy = new Date().toISOString().slice(0, 10);
-  const system = `Sos el asistente de datos de NUSA APP para la cuenta "${accountName || account}". Fecha de hoy: ${hoy}.
+  const { hoy, dia, rangos } = fechasAR();
+  const tablaFechas = rangos.map((r) => `  - ${r.label}: since=${r.since} until=${r.until}`).join("\n");
+  const system = `Sos el asistente de datos de NUSA APP para la cuenta "${accountName || account}". Hoy es ${dia} ${hoy} (hora de Argentina).
 
 ALCANCE — esto es INNEGOCIABLE. Sos el asistente COMPLETO de esta cuenta, con dos patas:
 1. DATOS: todo lo de ESTA cuenta — ${cuentas.map((c) => platformOf(c.id) + " Ads").join(" + ")}${multi ? " (vista COMBINADA: las herramientas devuelven los datos POR PLATAFORMA y el total; sumá o compará según lo que pidan)" : ""} (inversión, anuncios, campañas/conjuntos, ROAS, ventas, conversaciones, estados, audiencias${cuentas.some((c) => isGoogle(c.id)) ? "; en Google la \"audiencia\" es el canal de la campaña — Búsqueda/PMax/Shopping/... — y el budget vive siempre a nivel campaña" : ""})${store ? ", la tienda de Tienda Nube (facturación, órdenes, productos vendidos, stock/inventario actual, clientes nuevos vs recurrentes)" : ""}${tab ? ", la planilla de análisis cualitativo de los videos" : ""}${gaProp ? ", Google Analytics del sitio (sesiones de todos los canales, embudo carrito→checkout→compra, venta por canal — usalo para separar problema de pauta de problema de sitio y para ver cuánta venta es orgánica vs paga)" : ""} y la biblioteca de hooks de la app. Incluye análisis, diagnóstico, opinión y recomendaciones (estructura, qué reformar/escalar/pausar, dónde mover budget), fundadas en los números de las herramientas.
@@ -133,7 +135,9 @@ REGLAS:
 - ERRORES: si una herramienta devuelve "error" (o una lista "errores" para alguna plataforma), la consulta FALLÓ — NO es un dato vacío ni "cero". Informá el error con su mensaje textual, aclarando qué dato no se pudo traer, y NO saques conclusiones (ni "no hubo anuncios", ni "no hubo inversión") sobre lo que falló. Si trae "avisos", el resto de los datos es válido pero el campo avisado no está disponible: mencionalo.
 - Citá los números concretos. Para rankings/listas devolvé lista numerada, valor y contexto (período usado).
 - Todos los montos de Meta ya vienen en pesos argentinos${rateNota}. La tienda ya está en pesos.
-- Períodos relativos ("últimos 60 días", "este mes") calculalos desde hoy (${hoy}). Si no te dan período, usá los últimos 30 días y aclaralo en la respuesta.
+- FECHAS: estos rangos ya están resueltos — usalos TAL CUAL como since/until, no los recalcules:
+${tablaFechas}
+  Para otros períodos relativos ("últimos 60 días", "este mes") calculá desde hoy (${dia} ${hoy}) con la misma convención: "últimos N días" = N días completos SIN hoy (igual que Meta). Si no te dan período, usá "últimos 30 días (sin hoy)" y aclaralo en la respuesta. Siempre mencioná las fechas exactas usadas.
 - ${store ? `La tienda conectada es "${store}". El criterio de VENTA de este cliente es: ${criterio === "no_canceladas" ? "toda orden NO cancelada cuenta como venta (pagadas + pendientes de pago; las de pago anulado no)" : "solo las órdenes PAGADAS cuentan como venta"} — los números de facturación/órdenes de las herramientas ya vienen con ese criterio aplicado.` : "Esta cuenta NO tiene Tienda Nube conectada: si preguntan por productos o facturación de tienda, decilo."}
 - ${tab ? `La pestaña de la planilla de análisis es "${tab}".` : "No hay pestaña de planilla seleccionada: si preguntan por el análisis cualitativo, pedí que elijan la pestaña del Sheet en el panel."}
 - Español rioplatense (vos), conciso y directo. Sin relleno.`;
