@@ -4,6 +4,19 @@ Registro de cambios por versión. **V 1.N = número del PR mergeado** — es el 
 app muestra en el header ("V 1.N ▮▮▮"), así se confirma de un vistazo qué versión corre en prod.
 Regla de la casa: cada PR suma su entrada acá ANTES de mergearse.
 
+## V 1.38 — Chat: errores reales, fechas en hora argentina y token de Meta por header
+- **Errores visibles, no datos vacíos**: las tools del chat (`meta_anuncios`,
+  `estructura_campanas`, `meta_resumen`) devuelven `{error}` cuando falla la consulta (antes `[]`
+  → el modelo leía "0 anuncios" como dato). En vista combinada, datos + `errores` por plataforma;
+  los datos secundarios (targeting, estado, canal) degradan con `avisos`. El prompt obliga a
+  informar el error. La banda de Tienda Nube muestra el error real en vez de "sin datos".
+- **Fechas**: `fechasAR()` — "hoy" en hora de Argentina con día de la semana y rangos ya resueltos
+  (ayer, últimos 7/30 sin hoy, esta semana, mes pasado) inyectados en el prompt del chat.
+  `presetToRange` también calcula "hoy" en Argentina (antes UTC: pasadas las 21 h ya era mañana)
+  y `last_Nd` excluye hoy como Meta → Tienda Nube/GA4 alineados con los anuncios.
+- **Token de Meta por header** `Authorization: Bearer` en las 9 llamadas de `lib/meta.js`
+  (`graphFetch`): el token ya no viaja en la URL.
+
 ## V 1.30 — Tienda Nube: un solo barrido, cache y sin datos silenciosamente incompletos
 - **Causa raíz de la lentitud y de "no me carga nuevos vs recurrentes"**: la banda hacía TRES
   barridos completos de `/orders` a la vez (summary en serie, daily y tendencia en paralelo, ×2 con
