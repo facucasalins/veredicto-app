@@ -119,9 +119,38 @@ respuestas concisas.
   `/api/ga4` (degrada con `{off:true}`) → banda `Ga4Band` en el front + `trafico_sitio_ga4` en el
   snapshot del cerebro.
 - `lib/store.js` — storage server-side en **Upstash Redis** (REST, sin dependencias): `storeEnabled()`,
-  `kvGet(key)`, `kvSet(key, value)`. Para historiales/conversaciones compartidos. Sin env vars degrada
+  `kvGet(key)`, `kvSet(key, value, ttlSec?)`, `kvDel(key)`, `kvMget(keys)` (un request). Para historiales/conversaciones compartidos. Sin env vars degrada
   (el front sigue en localStorage). Lo consume `/api/history` (GET/POST, scopeado por sesión, claves
-  `nusa:<kind>:<account>`, kinds: `hist_an`/`hist_plan`/`chat`).
+  `nusa:<kind>:<account>`, kinds: `hist_an`/`hist_plan`/`hist_test`/`chat`).
+- `lib/conciencia.js` — **nivel de conciencia (Schwartz)** de cada creativo, juzgado SOLO por el
+  gancho: 5 producto+oferta · 4 producto · 3 solución · 2 problema · 1 inconsciente.
+  `classifyRows(rows, tab)` → `{niveles: {fingerprint → {nivel, fuente, motivador, motivadorTipo,
+  confianza, razon?}}, cache, claude}`. Tres fuentes en orden: override manual (Upstash
+  `nusa:nivel_override:<tab>:<fp>`) > `reglas()` duras sobre el Sheet (regex de oferta en
+  `texto_gancho`, cta+oferta, Urgencia+Escasez → 5; Lanzamiento/Comparativo/Testimonial o ángulo
+  Novedad/Social_Proof/Autoridad → 4; Aspiracional/Storytelling/Entretenimiento sin oferta → 1) >
+  Claude (tandas de 20, rúbrica textual, `razon` antes de `nivel`, cache `nusa:nivel:<tab>:<fp>`
+  sin TTL + memoria). Desvíos calibrados (Juanita/Shark, sep 2026): el regex de 5 no aplica en
+  Comparativo/Testimonial (precio = objeción), y el 4 por ángulo solo no aplica sobre categorías
+  de nivel 1 (va a Claude). Sin API key o sin Upstash degrada. Lo consumen las rutas
+  `app/api/conciencia/{clasificar,override,proximo-test}` (auth compartida en `_auth.js`:
+  sesión + `canSeeAccount` de account+extras + `tab` contra `sess.tabs`) y la pestaña **ÁNGULOS**
+  de page.jsx (`Angulos`: matriz nivel × etapa con estado de celda — frío SOLO por hook rate,
+  medio/caliente por ROAS o costo/conv ±15% vs mediana —, lectura determinista, motivadores
+  probados, próximo test con "Armar brief" → `prefill` de Generar; historial `hist_test`).
+  La matriz reparte cada creativo POR CONJUNTO (`breakdown`, con `impresiones`/`video3s`/`thruplay`
+  por conjunto) según la audiencia real (`etapaAud` = `AUD_POS`): no por su audiencia dominante.
+  Solo entran creativos CON fila en el Sheet; lo sin Sheet (catálogos) va al desglose "sin nivel"
+  del header. Videos "⚠ sin reproducciones" (`sinRepro`: formato de video, >5.000 impresiones,
+  <2% de 3 s — Meta no los cuenta como video) se marcan (también en el PANEL) y quedan fuera de
+  las medianas de hook/hold y del veredicto en frío. **`contextoAngulos(filas, u, msg)`** arma el
+  contexto que comparten PRÓXIMO TEST y GENERAR → Ángulos nuevos: sin los "sin reproducciones",
+  inventario completo de motivadores, "voz" (8 mejores ganchos por hook rate en frío + 5 mejores
+  por venta en caliente) y motivadores/formatos por celda. `/api/conciencia/proximo-test` valida
+  diversidad (3 motivadorTipo distintos, sin motivador repetido ni saturado con 3+ creativos) y
+  pide UNA corrección si falla; devuelve `advertencia` si sigue rota. `GEN_TIPOS.angulos` exige 5
+  tipos + Oferta, cercano/diferencia y `descarte` por ángulo. La clasificación se comparte entre
+  pestañas vía `conciencia` en App (`{key, data}`).
 - `lib/fx.js` — cotización del **dólar oficial** (Argentina) para no mezclar monedas cuando la cuenta de
   Meta está en USD. `getDolarOficial()` (PROMEDIO de compra y venta = medio del spread, cache en memoria
   ~1h) y `convertMonto(monto, from, to)` (solo ARS↔USD). Fuente: dolarapi.com, fallback criptoya.com.
@@ -134,6 +163,14 @@ respuestas concisas.
   **MEDIR: Ventas | Mensajes** (`modo`) que filtra y cambia la métrica de toda la app, y toggle
   **MONEDA CUENTA: Pesos | USD** (`accCur`, auto-detectado del `currency` de Meta, override manual).
   NO reescribir entero; editar quirúrgico. `money()` muestra 2 decimales en montos < 100 no enteros (USD).
+- `app/api/conciencia/*` — `clasificar` (POST rows con campos del Sheet → niveles), `override`
+  (POST/DELETE, requiere Upstash → 409 si no), `proximo-test` (POST matriz + motivadores + receta →
+  3 hipótesis JSON de Claude, mode-aware). Ver `lib/conciencia.js`.
+- `app/api/video` — "▶ ver video": `?account=&ad=` → 302 a la vista previa oficial del anuncio
+  (`getAdPreviewUrl` en `lib/meta.js`: `/{ad}/previews` probando formatos en orden — feed mobile,
+  Reels, feed desktop, story — y VERIFICANDO el HTML: los creativos SHARE fallan en feed mobile con
+  "la historia no está disponible"; fallback post → Administrador). Cada fila de `buildRows` lleva `adId` (anuncio de más spend del creativo).
+  Solo Meta; el link vence a las ~24 h así que se resuelve al clic.
 - `app/api/*` — `accounts` (filtra por sesión), `ads` (insights + targeting + estado en paralelo,
   cruza Sheet, arma tipoMap), `login`, `logout`, `sheets/tabs` (scopeada por `tabs` de sesión),
   `tiendanube/{stores,summary}` (stores scopeadas por cuenta), `copy` (generador), **`analyze`**
