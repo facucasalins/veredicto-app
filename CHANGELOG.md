@@ -4,25 +4,14 @@ Registro de cambios por versión. **V 1.N = número del PR mergeado** — es el 
 app muestra en el header ("V 1.N ▮▮▮"), así se confirma de un vistazo qué versión corre en prod.
 Regla de la casa: cada PR suma su entrada acá ANTES de mergearse.
 
-## V 1.39 — Chat: modelo que respondió debajo de cada respuesta
-- `/api/chat` devuelve también el `model` de la respuesta de Anthropic (el de la última vuelta
-  del loop de tool-use) junto con el texto. PREGUNTAR lo guarda con el mensaje y lo muestra chico
-  y gris debajo de cada respuesta de NUSA — sirve para confirmar qué modelo contestó.
+## V 1.40 — Pestaña ÁNGULOS + ▶ ver video (ex PR #33 y #31), actualizada con main
+- Entra a main lo que venía en `feat/angulos-conciencia` (PR #33, cerrado sin mergear, y "ver
+  video" de #31): la rama se actualizó con main por merge (trae V 1.38 y V 1.39).
+- **`getAdPreviewUrl` por header**: las llamadas a Graph de "ver video" pasan por `graphFetch`
+  (token en `Authorization: Bearer`); la página de business.facebook.com se pide sin token. Ya
+  ninguna URL de `lib/` lleva `access_token`.
 
-## V 1.38 — Chat: errores reales, fechas en hora argentina y token de Meta por header
-- **Errores visibles, no datos vacíos**: las tools del chat (`meta_anuncios`,
-  `estructura_campanas`, `meta_resumen`) devuelven `{error}` cuando falla la consulta (antes `[]`
-  → el modelo leía "0 anuncios" como dato). En vista combinada, datos + `errores` por plataforma;
-  los datos secundarios (targeting, estado, canal) degradan con `avisos`. El prompt obliga a
-  informar el error. La banda de Tienda Nube muestra el error real en vez de "sin datos".
-- **Fechas**: `fechasAR()` — "hoy" en hora de Argentina con día de la semana y rangos ya resueltos
-  (ayer, últimos 7/30 sin hoy, esta semana, mes pasado) inyectados en el prompt del chat.
-  `presetToRange` también calcula "hoy" en Argentina (antes UTC: pasadas las 21 h ya era mañana)
-  y `last_Nd` excluye hoy como Meta → Tienda Nube/GA4 alineados con los anuncios.
-- **Token de Meta por header** `Authorization: Bearer` en las 9 llamadas de `lib/meta.js`
-  (`graphFetch`): el token ya no viaja en la URL.
-
-## V 1.33 — Pestaña ÁNGULOS (nivel de conciencia × etapa × performance)
+### Pestaña ÁNGULOS (nivel de conciencia × etapa × performance)
 - Nueva pestaña **ÁNGULOS** (entre EMBUDO y PANEL): clasifica cada creativo con Sheet en un
   **nivel de conciencia** (Schwartz, juzgado SOLO por el gancho: 5 producto+oferta · 4 producto ·
   3 solución · 2 problema · 1 inconsciente) y lo cruza con la etapa de su audiencia (frío/medio/
@@ -75,7 +64,8 @@ Regla de la casa: cada PR suma su entrada acá ANTES de mergearse.
 - Calibrado contra Juanita Shoes (30 días: 17/17 esperados) y Shark (10/11; FitTecnico queda en 3
   por rúbrica). Dos desvíos documentados de las reglas del spec: precio dentro de un Comparativo
   no es nivel 5, y ángulo Social_Proof sobre Entretenimiento va a Claude en vez de a 4.
-## V 1.31 — "▶ ver video": abrir el anuncio en una pestaña nueva
+
+### "▶ ver video": abrir el anuncio en una pestaña nueva
 - Chip **▶ ver video** al lado del nombre del creativo en el TOP ADS DEL MES, en el desplegable
   por creativo de TOP PERFORMERS y en la tabla del PANEL. Abre en pestaña nueva la vista previa
   oficial del anuncio (el video se reproduce ahí), sin buscarlo a mano en el Administrador.
@@ -87,6 +77,24 @@ Regla de la casa: cada PR suma su entrada acá ANTES de mergearse.
 - Fix (MoraShop): los creativos de tipo SHARE no renderizan en `MOBILE_FEED_STANDARD` ("la historia
   de este anuncio no está disponible") — la ruta ahora prueba varios formatos (feed mobile → Reels
   → feed desktop → story) y verifica el HTML de la vista previa antes de redirigir.
+
+## V 1.39 — Chat: modelo que respondió debajo de cada respuesta
+- `/api/chat` devuelve también el `model` de la respuesta de Anthropic (el de la última vuelta
+  del loop de tool-use) junto con el texto. PREGUNTAR lo guarda con el mensaje y lo muestra chico
+  y gris debajo de cada respuesta de NUSA — sirve para confirmar qué modelo contestó.
+
+## V 1.38 — Chat: errores reales, fechas en hora argentina y token de Meta por header
+- **Errores visibles, no datos vacíos**: las tools del chat (`meta_anuncios`,
+  `estructura_campanas`, `meta_resumen`) devuelven `{error}` cuando falla la consulta (antes `[]`
+  → el modelo leía "0 anuncios" como dato). En vista combinada, datos + `errores` por plataforma;
+  los datos secundarios (targeting, estado, canal) degradan con `avisos`. El prompt obliga a
+  informar el error. La banda de Tienda Nube muestra el error real en vez de "sin datos".
+- **Fechas**: `fechasAR()` — "hoy" en hora de Argentina con día de la semana y rangos ya resueltos
+  (ayer, últimos 7/30 sin hoy, esta semana, mes pasado) inyectados en el prompt del chat.
+  `presetToRange` también calcula "hoy" en Argentina (antes UTC: pasadas las 21 h ya era mañana)
+  y `last_Nd` excluye hoy como Meta → Tienda Nube/GA4 alineados con los anuncios.
+- **Token de Meta por header** `Authorization: Bearer` en las 9 llamadas de `lib/meta.js`
+  (`graphFetch`): el token ya no viaja en la URL.
 
 ## V 1.30 — Tienda Nube: un solo barrido, cache y sin datos silenciosamente incompletos
 - **Causa raíz de la lentitud y de "no me carga nuevos vs recurrentes"**: la banda hacía TRES
