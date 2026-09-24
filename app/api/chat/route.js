@@ -326,6 +326,7 @@ ${tablaFechas}
     const apiMessages = messages.slice(-12).map((m) => ({ role: m.role === "assistant" ? "assistant" : "user", content: String(m.content || "") }));
     const toolDefs = tools({ hasStore: !!store, hasTab: !!tab, hasGa4: !!gaProp, plataforma: cuentas.map((c) => platformOf(c.id)).join("+"), criterio });
 
+    let model = null; // el modelo que efectivamente respondió (lo devuelve Anthropic en cada respuesta)
     for (let turn = 0; turn < MAX_TURNS; turn++) {
       const r = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
@@ -334,13 +335,14 @@ ${tablaFechas}
       });
       const data = await r.json();
       if (data.error) return Response.json({ error: data.error.message || "Error de Claude" }, { status: 500 });
+      model = data.model || model;
 
       const toolUses = (data.content || []).filter((b) => b.type === "tool_use");
       if (data.stop_reason !== "tool_use" || !toolUses.length) {
         let text = (data.content || []).filter((b) => b.type === "text").map((b) => b.text).join("\n").trim();
         // Si igual llegó al tope de tokens, avisar en vez de cortar en silencio a mitad de frase.
         if (data.stop_reason === "max_tokens" && text) text += "\n\n_…me quedé sin espacio. Decime \"seguí\" y continúo desde acá._";
-        return Response.json({ text: text || "No pude armar una respuesta con los datos disponibles." });
+        return Response.json({ text: text || "No pude armar una respuesta con los datos disponibles.", model });
       }
       apiMessages.push({ role: "assistant", content: data.content });
       const results = await Promise.all(toolUses.map(async (tu) => {
@@ -351,7 +353,7 @@ ${tablaFechas}
       }));
       apiMessages.push({ role: "user", content: results });
     }
-    return Response.json({ text: "La pregunta necesitó demasiadas consultas — probá algo más acotado." });
+    return Response.json({ text: "La pregunta necesitó demasiadas consultas — probá algo más acotado.", model });
   } catch (e) {
     return Response.json({ error: e.message }, { status: 500 });
   }

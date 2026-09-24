@@ -1512,7 +1512,7 @@ function Chat({ account, accountName, store, tab, accCur, extras = [], extrasCur
       try { d = JSON.parse(raw); }
       catch { throw new Error(res.status === 504 || /timeout|FUNCTION_INVOCATION/i.test(raw) ? "La consulta tardó demasiado y se cortó. Probá de nuevo, o pedila en partes (primero los datos, después las ideas)." : "El servidor no respondió bien. Probá de nuevo o acotá la consulta."); }
       if (d.error) throw new Error(d.error);
-      saveMsgs([...next, { role: "assistant", content: d.text }].slice(-30));
+      saveMsgs([...next, { role: "assistant", content: d.text, ...(d.model ? { model: d.model } : {}) }].slice(-30));
     } catch (e) { setErr("No se pudo responder: " + e.message); } finally { setLoading(false); }
   };
   const limpiar = () => saveMsgs([]);
@@ -1534,7 +1534,10 @@ function Chat({ account, accountName, store, tab, accCur, extras = [], extrasCur
           {msgs.map((m, i) => (
             <div key={i} className={"chatmsg " + (m.role === "user" ? "user" : "ai")}>
               <span className="chatwho">{m.role === "user" ? "VOS" : "NUSA"}</span>
-              <div className="chattext">{m.content}</div>
+              <div className="chatbody">
+                <div className="chattext">{m.content}</div>
+                {m.model && <div className="chatmodel">{m.model}</div>}
+              </div>
             </div>
           ))}
           {loading && <div className="chatmsg ai"><span className="chatwho">NUSA</span><div className="chattext chatthinking">● consultando la cuenta…</div></div>}
@@ -2809,6 +2812,8 @@ td{padding:11px 12px;vertical-align:middle;}.num{text-align:right;}.name{font-we
 .chatmsg.user .chatwho{background:var(--c6);color:var(--paper);border-color:var(--c6);}
 .chattext{font-family:'Space Mono',monospace;font-size:13px;line-height:1.55;color:var(--ink);white-space:pre-wrap;background:var(--paper2);border:2px solid var(--ink);border-radius:10px;padding:10px 14px;box-shadow:3px 3px 0 var(--ink);}
 .chatmsg.user .chattext{background:var(--paper);box-shadow:none;}
+.chatbody{display:flex;flex-direction:column;gap:4px;min-width:0;}
+.chatmodel{font-family:'Space Mono',monospace;font-size:10px;color:var(--soft);padding-left:4px;}
 .chatthinking{color:var(--soft);font-style:italic;animation:pulse 1.2s ease-in-out infinite;}
 @keyframes pulse{0%,100%{opacity:.5}50%{opacity:1}}
 .chatrow{display:flex;gap:10px;}
