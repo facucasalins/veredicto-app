@@ -10,6 +10,7 @@ import { HOOKS } from "@/lib/hooks";
 import { getDolarOficial } from "@/lib/fx";
 import { gaEnabled, propertyFor, getResumen as gaGetResumen, getCanales as gaGetCanales, getDaily as gaGetDaily } from "@/lib/ga4";
 import { SESSION_COOKIE, verifySession, authDisabled, canSeeAccount } from "@/lib/auth";
+import { fechasAR } from "@/lib/dates";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300; // Vercel (Fluid): el loop de tools + una respuesta larga (hasta 8000 tokens) puede pasar tranquilo los 60s
@@ -120,8 +121,9 @@ export async function POST(req) {
   // GA4: si hay una propiedad mapeada para esta cuenta/tienda, el chat gana la tool ga4_trafico.
   const gaProp = gaEnabled() ? propertyFor(account, store) : null;
 
-  const hoy = new Date().toISOString().slice(0, 10);
-  const system = `Sos el asistente de datos de NUSA APP para la cuenta "${accountName || account}". Fecha de hoy: ${hoy}.
+  const { hoy, dia, rangos } = fechasAR();
+  const tablaFechas = rangos.map((r) => `  - ${r.label}: since=${r.since} until=${r.until}`).join("\n");
+  const system = `Sos el asistente de datos de NUSA APP para la cuenta "${accountName || account}". Hoy es ${dia} ${hoy} (hora de Argentina).
 
 ALCANCE — esto es INNEGOCIABLE. Sos el asistente COMPLETO de esta cuenta, con dos patas:
 1. DATOS: todo lo de ESTA cuenta — ${cuentas.map((c) => platformOf(c.id) + " Ads").join(" + ")}${multi ? " (vista COMBINADA: las herramientas devuelven los datos POR PLATAFORMA y el total; sumá o compará según lo que pidan)" : ""} (inversión, anuncios, campañas/conjuntos, ROAS, ventas, conversaciones, estados, audiencias${cuentas.some((c) => isGoogle(c.id)) ? "; en Google la \"audiencia\" es el canal de la campaña — Búsqueda/PMax/Shopping/... — y el budget vive siempre a nivel campaña" : ""})${store ? ", la tienda de Tienda Nube (facturación, órdenes, productos vendidos, stock/inventario actual, clientes nuevos vs recurrentes)" : ""}${tab ? ", la planilla de análisis cualitativo de los videos" : ""}${gaProp ? ", Google Analytics del sitio (sesiones de todos los canales, embudo carrito→checkout→compra, venta por canal — usalo para separar problema de pauta de problema de sitio y para ver cuánta venta es orgánica vs paga)" : ""} y la biblioteca de hooks de la app. Incluye análisis, diagnóstico, opinión y recomendaciones (estructura, qué reformar/escalar/pausar, dónde mover budget), fundadas en los números de las herramientas.
@@ -130,9 +132,12 @@ FUERA DE ALCANCE (esto sí rechazalo): conocimiento general ajeno a la marca, no
 
 REGLAS:
 - SIEMPRE usá las herramientas para traer la data real antes de responder. NO inventes, NO estimes de memoria: si una herramienta no devuelve el dato, decí que no está disponible.
+- ERRORES: si una herramienta devuelve "error" (o una lista "errores" para alguna plataforma), la consulta FALLÓ — NO es un dato vacío ni "cero". Informá el error con su mensaje textual, aclarando qué dato no se pudo traer, y NO saques conclusiones (ni "no hubo anuncios", ni "no hubo inversión") sobre lo que falló. Si trae "avisos", el resto de los datos es válido pero el campo avisado no está disponible: mencionalo.
 - Citá los números concretos. Para rankings/listas devolvé lista numerada, valor y contexto (período usado).
 - Todos los montos de Meta ya vienen en pesos argentinos${rateNota}. La tienda ya está en pesos.
-- Períodos relativos ("últimos 60 días", "este mes") calculalos desde hoy (${hoy}). Si no te dan período, usá los últimos 30 días y aclaralo en la respuesta.
+- FECHAS: estos rangos ya están resueltos — usalos TAL CUAL como since/until, no los recalcules:
+${tablaFechas}
+  Para otros períodos relativos ("últimos 60 días", "este mes") calculá desde hoy (${dia} ${hoy}) con la misma convención: "últimos N días" = N días completos SIN hoy (igual que Meta). Si no te dan período, usá "últimos 30 días (sin hoy)" y aclaralo en la respuesta. Siempre mencioná las fechas exactas usadas.
 - ${store ? `La tienda conectada es "${store}". El criterio de VENTA de este cliente es: ${criterio === "no_canceladas" ? "toda orden NO cancelada cuenta como venta (pagadas + pendientes de pago; las de pago anulado no)" : "solo las órdenes PAGADAS cuentan como venta"} — los números de facturación/órdenes de las herramientas ya vienen con ese criterio aplicado.` : "Esta cuenta NO tiene Tienda Nube conectada: si preguntan por productos o facturación de tienda, decilo."}
 - ${tab ? `La pestaña de la planilla de análisis es "${tab}".` : "No hay pestaña de planilla seleccionada: si preguntan por el análisis cualitativo, pedí que elijan la pestaña del Sheet en el panel."}
 - Español rioplatense (vos), conciso y directo. Sin relleno.`;
@@ -165,7 +170,8 @@ REGLAS:
           return o;
         } catch (e) { return { plataforma: platformOf(c.id), error: e.message }; }
       }));
-      if (!multi) return { since, until, ...outs[0], moneda: "ARS" };
+      if (!multi) return outs[0].error ? { error: outs[0].error } : { since, until, ...outs[0], moneda: "ARS" };
+      if (outs.every((o) => o.error)) return { error: outs.map((o) => o.plataforma + ": " + o.error).join(" · ") };
       return {
         since, until, moneda: "ARS",
         inversion_total: outs.reduce((s, o) => s + (o.inversion || 0), 0),
@@ -179,33 +185,37 @@ REGLAS:
       const rowsFor = async (c) => {
         const ctt = isTikTok(c.id), cgg = isGoogle(c.id);
         let ads, audMap = {}, tipoMap = {}, statuses;
+        // datos SECUNDARIOS (audiencia/estado): si fallan, las filas igual salen, pero con aviso —
+        // así el modelo no toma "activa: null" o "audiencia: nd" como un dato real
+        const avisos = [];
+        const falla = (que, vacio) => (e) => { avisos.push(`${platformOf(c.id)}: no se pudo leer ${que} (${e.message})`); return vacio; };
         if (ctt) {
           const adv = ttId(c.id);
           [ads, audMap, statuses] = await Promise.all([
             ttGetAds(adv, since, until),
-            getAdgroupAudiences(adv).catch(() => ({})),
-            ttGetAdStatuses(adv).catch(() => null),
+            getAdgroupAudiences(adv).catch(falla("la audiencia", {})),
+            ttGetAdStatuses(adv).catch(falla("el estado activo/pausado", null)),
           ]);
           for (const a of ads) tipoMap[a.adset_id] = "ventas";
         } else if (cgg) {
           const cid = gId(c.id);
           [ads, audMap, statuses] = await Promise.all([
             gGetAds(cid, { since, until }),
-            getChannelAudiences(cid).catch(() => ({})),
-            gGetAdStatuses(cid).catch(() => null),
+            getChannelAudiences(cid).catch(falla("el canal", {})),
+            gGetAdStatuses(cid).catch(falla("el estado activo/pausado", null)),
           ]);
           for (const a of ads) tipoMap[a.adset_id] = "ventas";
         } else {
           const [mAds, targeting, st] = await Promise.all([
             getAds(c.id, "last_30d", { since, until }),
-            getAdsetTargeting(c.id).catch(() => ({})),
-            getAdStatuses(c.id).catch(() => null),
+            getAdsetTargeting(c.id).catch(falla("el targeting (audiencia/tipo)", {})),
+            getAdStatuses(c.id).catch(falla("el estado activo/pausado", null)),
           ]);
           ads = mAds; statuses = st;
           for (const id in targeting) { const lbl = classifyTargeting(targeting[id]); if (lbl) audMap[id] = lbl; tipoMap[id] = targetingTipo(targeting[id]); }
         }
         const rf = rateOf(c.cur);
-        return buildRows(ads, audMap, statuses && Object.keys(statuses).length ? statuses : null, tipoMap).map((r) => ({
+        const rows = buildRows(ads, audMap, statuses && Object.keys(statuses).length ? statuses : null, tipoMap).map((r) => ({
           // Google no lleva nomenclatura → label() da "nd"; el fingerprint (id) ES el nombre real
           nombre: cgg && r.nombre === "nd" ? r.id : r.nombre,
           ...(multi ? { plataforma: platformOf(c.id) } : {}),
@@ -217,9 +227,14 @@ REGLAS:
           // embudo + fatiga (conteos, no plata): frecuencia, impresiones, clics, landing, ATC, video 3s
           frecuencia: r.freq, impresiones: r.impresiones, clics_enlace: r.clics, landing_page_views: r.lpv, add_to_cart: r.atc, video_3s: r.video3s,
         }));
+        return { rows, avisos };
       };
-      const all = (await Promise.all(cuentas.map((c) => rowsFor(c).catch(() => [])))).flat().sort((a, b) => b.spend - a.spend);
-      return { since, until, total_anuncios: all.length, moneda: "ARS", anuncios: all.slice(0, 100) };
+      const res = await Promise.all(cuentas.map((c) => rowsFor(c).catch((e) => ({ plataforma: platformOf(c.id), error: e.message }))));
+      const avisos = res.flatMap((x) => x.avisos || []);
+      const errores = res.filter((x) => x.error).map(({ plataforma, error }) => ({ plataforma, error }));
+      if (errores.length === res.length) return { error: errores.map((x) => (multi ? x.plataforma + ": " : "") + x.error).join(" · ") };
+      const all = res.flatMap((x) => x.rows || []).sort((a, b) => b.spend - a.spend);
+      return { since, until, total_anuncios: all.length, moneda: "ARS", anuncios: all.slice(0, 100), ...(errores.length ? { errores } : {}), ...(avisos.length ? { avisos } : {}) };
     }
     if (name === "estructura_campanas") {
       // budgets reales (ABO/CBO; en Google todo CBO a nivel campaña) + performance del período,
@@ -257,8 +272,11 @@ REGLAS:
         }
         return Object.values(camps).map((g) => ({ ...g, conjuntos: g.conjuntos.sort((a, b) => b.spend - a.spend).slice(0, 15) }));
       };
-      const lista = (await Promise.all(cuentas.map((c) => estructuraDe(c).catch(() => [])))).flat();
-      return { since, until, moneda: "ARS", total_campanias: lista.length, campanias: lista.slice(0, 40) };
+      const res = await Promise.all(cuentas.map((c) => estructuraDe(c).then((camps) => ({ camps }), (e) => ({ plataforma: platformOf(c.id), error: e.message }))));
+      const errores = res.filter((x) => x.error).map(({ plataforma, error }) => ({ plataforma, error }));
+      if (errores.length === res.length) return { error: errores.map((x) => (multi ? x.plataforma + ": " : "") + x.error).join(" · ") };
+      const lista = res.flatMap((x) => x.camps || []);
+      return { since, until, moneda: "ARS", total_campanias: lista.length, campanias: lista.slice(0, 40), ...(errores.length ? { errores } : {}) };
     }
     if (name === "biblioteca_hooks") {
       const fam = String(input.familia || "").toLowerCase().replace("perdida", "pérdida");
@@ -282,9 +300,10 @@ REGLAS:
       if (!gaProp) return { error: "GA4 no está configurado para esta cuenta" };
       const [resumen, canales] = await Promise.all([
         gaGetResumen(gaProp.property_id, since, until),
-        gaGetCanales(gaProp.property_id, since, until).catch(() => []),
+        gaGetCanales(gaProp.property_id, since, until).catch((e) => ({ error: e.message })),
       ]);
-      const out = { since, until, propiedad: gaProp.name || gaProp.property_id, resumen, canales };
+      const out = { since, until, propiedad: gaProp.name || gaProp.property_id, resumen, canales: Array.isArray(canales) ? canales : [] };
+      if (canales && canales.error) out.avisos = [`no se pudo leer el desglose por canal (${canales.error})`];
       if (input.por_dia) out.por_dia = await gaGetDaily(gaProp.property_id, since, until);
       return out;
     }
@@ -307,6 +326,7 @@ REGLAS:
     const apiMessages = messages.slice(-12).map((m) => ({ role: m.role === "assistant" ? "assistant" : "user", content: String(m.content || "") }));
     const toolDefs = tools({ hasStore: !!store, hasTab: !!tab, hasGa4: !!gaProp, plataforma: cuentas.map((c) => platformOf(c.id)).join("+"), criterio });
 
+    let model = null; // el modelo que efectivamente respondió (lo devuelve Anthropic en cada respuesta)
     for (let turn = 0; turn < MAX_TURNS; turn++) {
       const r = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
@@ -315,13 +335,14 @@ REGLAS:
       });
       const data = await r.json();
       if (data.error) return Response.json({ error: data.error.message || "Error de Claude" }, { status: 500 });
+      model = data.model || model;
 
       const toolUses = (data.content || []).filter((b) => b.type === "tool_use");
       if (data.stop_reason !== "tool_use" || !toolUses.length) {
         let text = (data.content || []).filter((b) => b.type === "text").map((b) => b.text).join("\n").trim();
         // Si igual llegó al tope de tokens, avisar en vez de cortar en silencio a mitad de frase.
         if (data.stop_reason === "max_tokens" && text) text += "\n\n_…me quedé sin espacio. Decime \"seguí\" y continúo desde acá._";
-        return Response.json({ text: text || "No pude armar una respuesta con los datos disponibles." });
+        return Response.json({ text: text || "No pude armar una respuesta con los datos disponibles.", model });
       }
       apiMessages.push({ role: "assistant", content: data.content });
       const results = await Promise.all(toolUses.map(async (tu) => {
@@ -332,7 +353,7 @@ REGLAS:
       }));
       apiMessages.push({ role: "user", content: results });
     }
-    return Response.json({ text: "La pregunta necesitó demasiadas consultas — probá algo más acotado." });
+    return Response.json({ text: "La pregunta necesitó demasiadas consultas — probá algo más acotado.", model });
   } catch (e) {
     return Response.json({ error: e.message }, { status: 500 });
   }

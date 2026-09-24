@@ -325,6 +325,7 @@ export default function App() {
   }, [tnStore, tnStores]);
   const setCount = (v) => { setTnCount(v); try { localStorage.setItem("nusa_tncount_" + tnStore, v); } catch {} };
   const [tnSummary, setTnSummary] = useState(null);
+  const [tnErr, setTnErr] = useState(""); // error real del summary (antes se tragaba y quedaba "sin datos")
   const [tnLoading, setTnLoading] = useState(false);
   const [analysis, setAnalysis] = useState(null); // lectura del cerebro, persiste entre pestañas
   const [hookMatch, setHookMatch] = useState(null); // {probados, byTemplate} del match de biblioteca, persiste
@@ -346,13 +347,14 @@ export default function App() {
   useEffect(() => { fetch("/api/sheets/tabs").then((r) => r.json()).then((j) => setSheetTabs(j.tabs || [])).catch(() => {}); }, []);
   useEffect(() => { fetch("/api/tiendanube/stores").then((r) => r.json()).then((j) => setTnStores(j.stores || [])).catch(() => {}); }, []);
   useEffect(() => {
-    if (!tnStore) { setTnSummary(null); return; }
+    if (!tnStore) { setTnSummary(null); setTnErr(""); return; }
     let cancelled = false;
-    setTnLoading(true);
+    setTnLoading(true); setTnErr("");
     fetch("/api/tiendanube/summary?store=" + encodeURIComponent(tnStore) + "&preset=" + preset + "&count=" + tnCount + (account ? "&accounts=" + encodeURIComponent(accountsQS) + "&curs=" + cursQS : "") + customRange)
-      .then((r) => r.json())
-      .then((j) => { if (!cancelled) setTnSummary(j.error ? null : j); })
-      .catch(() => { if (!cancelled) setTnSummary(null); })
+      // a mano en vez de r.json(): si Vercel corta por timeout responde texto, no JSON
+      .then(async (r) => { const raw = await r.text(); try { return JSON.parse(raw); } catch { return { error: r.status === 504 || /timeout|FUNCTION_INVOCATION/i.test(raw) ? "la consulta tardó demasiado y se cortó (" + r.status + ")" : "el servidor respondió " + r.status }; } })
+      .then((j) => { if (!cancelled) { setTnSummary(j.error ? null : j); setTnErr(j.error ? String(j.error) : ""); } })
+      .catch((e) => { if (!cancelled) { setTnSummary(null); setTnErr(e.message || "no se pudo conectar"); } })
       .finally(() => { if (!cancelled) setTnLoading(false); });
     return () => { cancelled = true; };
   }, [tnStore, accountsQS, cursQS, preset, customRange, tnCount]);
@@ -728,8 +730,9 @@ export default function App() {
               {ajOn && <>−$ <input className="ttusdh ajmonto" type="number" min="0" placeholder="0" value={ajInv} onChange={(e) => setAjInvP(e.target.value)} />
                 {cmpOn && <><em>comparado</em> −$ <input className="ttusdh ajmonto" type="number" min="0" placeholder="0" value={ajInvCmp} onChange={(e) => setAjInvCmpP(e.target.value)} /></>}</>}
             </span>
-            <span className="tnrange">{tnLoading ? "cargando…" : tnSummary ? (tnSummary.since + " → " + tnSummary.until) : "sin datos"}</span>
+            <span className="tnrange">{tnLoading ? "cargando…" : tnSummary ? (tnSummary.since + " → " + tnSummary.until) : tnErr ? "error" : "sin datos"}</span>
           </div>
+          {!tnLoading && tnErr && <div className="tnnote" style={{ color: "#E08578" }}>⚠ No se pudo leer Tienda Nube: {tnErr}</div>}
           {tnSummary && (
             <>
               <div className="tnstats">
@@ -1840,7 +1843,7 @@ function Chat({ account, accountName, store, tab, accCur, extras = [], extrasCur
       try { d = JSON.parse(raw); }
       catch { throw new Error(res.status === 504 || /timeout|FUNCTION_INVOCATION/i.test(raw) ? "La consulta tardó demasiado y se cortó. Probá de nuevo, o pedila en partes (primero los datos, después las ideas)." : "El servidor no respondió bien. Probá de nuevo o acotá la consulta."); }
       if (d.error) throw new Error(d.error);
-      saveMsgs([...next, { role: "assistant", content: d.text }].slice(-30));
+      saveMsgs([...next, { role: "assistant", content: d.text, ...(d.model ? { model: d.model } : {}) }].slice(-30));
     } catch (e) { setErr("No se pudo responder: " + e.message); } finally { setLoading(false); }
   };
   const limpiar = () => saveMsgs([]);
@@ -1862,7 +1865,10 @@ function Chat({ account, accountName, store, tab, accCur, extras = [], extrasCur
           {msgs.map((m, i) => (
             <div key={i} className={"chatmsg " + (m.role === "user" ? "user" : "ai")}>
               <span className="chatwho">{m.role === "user" ? "VOS" : "NUSA"}</span>
-              <div className="chattext">{m.content}</div>
+              <div className="chatbody">
+                <div className="chattext">{m.content}</div>
+                {m.model && <div className="chatmodel">{m.model}</div>}
+              </div>
             </div>
           ))}
           {loading && <div className="chatmsg ai"><span className="chatwho">NUSA</span><div className="chattext chatthinking">● consultando la cuenta…</div></div>}
@@ -3204,6 +3210,8 @@ td{padding:11px 12px;vertical-align:middle;}.num{text-align:right;}.name{font-we
 .chatmsg.user .chatwho{background:var(--c6);color:var(--paper);border-color:var(--c6);}
 .chattext{font-family:'Space Mono',monospace;font-size:13px;line-height:1.55;color:var(--ink);white-space:pre-wrap;background:var(--paper2);border:2px solid var(--ink);border-radius:10px;padding:10px 14px;box-shadow:3px 3px 0 var(--ink);}
 .chatmsg.user .chattext{background:var(--paper);box-shadow:none;}
+.chatbody{display:flex;flex-direction:column;gap:4px;min-width:0;}
+.chatmodel{font-family:'Space Mono',monospace;font-size:10px;color:var(--soft);padding-left:4px;}
 .chatthinking{color:var(--soft);font-style:italic;animation:pulse 1.2s ease-in-out infinite;}
 @keyframes pulse{0%,100%{opacity:.5}50%{opacity:1}}
 .chatrow{display:flex;gap:10px;}
