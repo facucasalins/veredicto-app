@@ -4,6 +4,11 @@ Registro de cambios por versión. **V 1.N = número del PR mergeado** — es el 
 app muestra en el header ("V 1.N ▮▮▮"), así se confirma de un vistazo qué versión corre en prod.
 Regla de la casa: cada PR suma su entrada acá ANTES de mergearse.
 
+## V 1.39 — Chat: modelo que respondió debajo de cada respuesta
+- `/api/chat` devuelve también el `model` de la respuesta de Anthropic (el de la última vuelta
+  del loop de tool-use) junto con el texto. PREGUNTAR lo guarda con el mensaje y lo muestra chico
+  y gris debajo de cada respuesta de NUSA — sirve para confirmar qué modelo contestó.
+
 ## V 1.38 — Chat: errores reales, fechas en hora argentina y token de Meta por header
 - **Errores visibles, no datos vacíos**: las tools del chat (`meta_anuncios`,
   `estructura_campanas`, `meta_resumen`) devuelven `{error}` cuando falla la consulta (antes `[]`
