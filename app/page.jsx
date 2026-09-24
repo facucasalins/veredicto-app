@@ -314,6 +314,7 @@ export default function App() {
   }, [tnStore, tnStores]);
   const setCount = (v) => { setTnCount(v); try { localStorage.setItem("nusa_tncount_" + tnStore, v); } catch {} };
   const [tnSummary, setTnSummary] = useState(null);
+  const [tnErr, setTnErr] = useState(""); // error real del summary (antes se tragaba y quedaba "sin datos")
   const [tnLoading, setTnLoading] = useState(false);
   const [analysis, setAnalysis] = useState(null); // lectura del cerebro, persiste entre pestañas
   const [hookMatch, setHookMatch] = useState(null); // {probados, byTemplate} del match de biblioteca, persiste
@@ -333,13 +334,14 @@ export default function App() {
   useEffect(() => { fetch("/api/sheets/tabs").then((r) => r.json()).then((j) => setSheetTabs(j.tabs || [])).catch(() => {}); }, []);
   useEffect(() => { fetch("/api/tiendanube/stores").then((r) => r.json()).then((j) => setTnStores(j.stores || [])).catch(() => {}); }, []);
   useEffect(() => {
-    if (!tnStore) { setTnSummary(null); return; }
+    if (!tnStore) { setTnSummary(null); setTnErr(""); return; }
     let cancelled = false;
-    setTnLoading(true);
+    setTnLoading(true); setTnErr("");
     fetch("/api/tiendanube/summary?store=" + encodeURIComponent(tnStore) + "&preset=" + preset + "&count=" + tnCount + (account ? "&accounts=" + encodeURIComponent(accountsQS) + "&curs=" + cursQS : "") + customRange)
-      .then((r) => r.json())
-      .then((j) => { if (!cancelled) setTnSummary(j.error ? null : j); })
-      .catch(() => { if (!cancelled) setTnSummary(null); })
+      // a mano en vez de r.json(): si Vercel corta por timeout responde texto, no JSON
+      .then(async (r) => { const raw = await r.text(); try { return JSON.parse(raw); } catch { return { error: r.status === 504 || /timeout|FUNCTION_INVOCATION/i.test(raw) ? "la consulta tardó demasiado y se cortó (" + r.status + ")" : "el servidor respondió " + r.status }; } })
+      .then((j) => { if (!cancelled) { setTnSummary(j.error ? null : j); setTnErr(j.error ? String(j.error) : ""); } })
+      .catch((e) => { if (!cancelled) { setTnSummary(null); setTnErr(e.message || "no se pudo conectar"); } })
       .finally(() => { if (!cancelled) setTnLoading(false); });
     return () => { cancelled = true; };
   }, [tnStore, accountsQS, cursQS, preset, customRange, tnCount]);
@@ -715,8 +717,9 @@ export default function App() {
               {ajOn && <>−$ <input className="ttusdh ajmonto" type="number" min="0" placeholder="0" value={ajInv} onChange={(e) => setAjInvP(e.target.value)} />
                 {cmpOn && <><em>comparado</em> −$ <input className="ttusdh ajmonto" type="number" min="0" placeholder="0" value={ajInvCmp} onChange={(e) => setAjInvCmpP(e.target.value)} /></>}</>}
             </span>
-            <span className="tnrange">{tnLoading ? "cargando…" : tnSummary ? (tnSummary.since + " → " + tnSummary.until) : "sin datos"}</span>
+            <span className="tnrange">{tnLoading ? "cargando…" : tnSummary ? (tnSummary.since + " → " + tnSummary.until) : tnErr ? "error" : "sin datos"}</span>
           </div>
+          {!tnLoading && tnErr && <div className="tnnote" style={{ color: "#E08578" }}>⚠ No se pudo leer Tienda Nube: {tnErr}</div>}
           {tnSummary && (
             <>
               <div className="tnstats">
