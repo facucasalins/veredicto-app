@@ -824,6 +824,7 @@ export default function App() {
             <button className={"tab" + (effView === "hoy" ? " active" : "")} onClick={() => setView("hoy")}>QUÉ HACER HOY {totalTasks ? <span className="tabn">{totalTasks}</span> : null}</button>
             <button className={"tab" + (effView === "grabar" ? " active" : "")} onClick={() => setView("grabar")}>QUÉ GRABAR</button>
             <button className={"tab" + (effView === "top" ? " active" : "")} onClick={() => setView("top")}>TOP PERFORMERS</button>
+            <button className={"tab" + (effView === "demo" ? " active" : "")} onClick={() => setView("demo")}>DEMOGRAFÍA</button>
             <button className={"tab" + (effView === "embudo" ? " active" : "")} onClick={() => setView("embudo")}>EMBUDO</button>
             <button className={"tab" + (effView === "angulos" ? " active" : "")} onClick={() => setView("angulos")}>ÁNGULOS</button>
             <button className={"tab" + (effView === "panel" ? " active" : "")} onClick={() => setView("panel")}>PANEL</button>
@@ -852,6 +853,7 @@ export default function App() {
           {effView === "dash" && (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Dash stats={stats} u={ueff} goal={goal} setGoal={setGoal} factTienda={tnSummary ? tnSummary.facturacion : null} tnStore={tnStore} modo={modo} cmp={cmpOn ? { stats: statsCmp, loading: cmpLoading, range: cmpRange } : null} tendencia={tendencia} />)}
           {effView === "hoy" && (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Hoy acc={acciones} u={ueff} done={done} toggle={toggle} total={totalTasks} doneCount={doneCount} mantener={stats.counts.Mantener} modo={modo} />)}
           {effView === "grabar" && (soloGoogle ? <SinGoogle que="Qué grabar" /> : !withVCreative.length ? <EmptyState account={account} loading={loading} err={err} /> : <QueGrabar withV={withVCreative} u={ueff} modo={modo} role={role} accountName={(accounts.find((a) => a.id === account) || {}).name || ""} />)}
+          {effView === "demo" && (!account ? <EmptyState account={account} loading={loading} err={err} /> : allIds.every((id) => platOf(id) !== "meta") ? <div className="anplaceholder">La demografía (edad, género, zona y ubicación) solo está disponible para cuentas de Meta.</div> : <Demografia accountsQS={accountsQS} cursQS={cursQS} preset={preset} customRange={customRange} modo={modo} />)}
           {effView === "top" && (!withV.length ? <EmptyState account={account} loading={loading} err={err} /> : <Top withV={withV} u={ueff} audData={audConv} modo={modo} />)}
           {effView === "angulos" && (soloGoogle ? <SinGoogle que="Ángulos" /> : !withVCreative.length ? <EmptyState account={account} loading={loading} err={err} /> : <Angulos withV={withVCreative} u={ueff} modo={modo} account={account} extras={extras} tab={sheetTab} accountName={(accounts.find((a) => a.id === account) || {}).name || ""} preset={preset} cSince={cSince} cUntil={cUntil} onBrief={(ctx) => { setGenPrefill({ tipo: "hooks", modo: "explorar", contexto: ctx, t: Date.now() }); setView("gen"); }} conciencia={conciencia} onClasif={setConciencia} />)}
           {effView === "embudo" && (soloGoogle ? <SinGoogle que="El embudo" /> : !withVCreative.length ? <EmptyState account={account} loading={loading} err={err} /> : <Embudo withV={withVCreative} u={ueff} modo={modo} accountName={(accounts.find((a) => a.id === account) || {}).name || ""} />)}
@@ -2428,6 +2430,119 @@ function Panel({ rows, u = {}, stats, sort, setSortKey, modo = "ventas" }) {
   );
 }
 
+// ─────────── Vista: DEMOGRAFÍA ───────────
+// Performance por edad / género / zona / ubicación (lib/demografia.js vía /api/demografia — el
+// mismo cálculo que usa el chat). Todas las tasas vienen calculadas del server. Mejor/peor de la
+// métrica principal solo entre segmentos con ≥5% del spend (un segmento chico no es concluyente).
+const CORTE_OPTS = [["edad_genero", "EDAD × GÉNERO"], ["edad", "EDAD"], ["genero", "GÉNERO"], ["zona", "ZONA"], ["ubicacion", "UBICACIÓN"]];
+function Demografia({ accountsQS, cursQS, preset, customRange, modo = "ventas" }) {
+  const msg = modo === "mensajes";
+  const [corte, setCorte] = useState("edad_genero");
+  const [campQ, setCampQ] = useState(""); // lo que se tipea
+  const [campania, setCampania] = useState(""); // lo aplicado (Enter / FILTRAR)
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState("");
+  const [sort, setSort] = useState({ key: "spend", dir: "desc" });
+  const setSortKey = (k) => setSort((s) => ({ key: k, dir: s.key === k && s.dir === "desc" ? "asc" : "desc" }));
+  useEffect(() => {
+    if (!accountsQS) return;
+    let cancelled = false;
+    setLoading(true); setErr("");
+    fetch("/api/demografia?accounts=" + encodeURIComponent(accountsQS) + "&curs=" + cursQS + "&corte=" + corte + "&preset=" + preset + customRange + (campania ? "&campania=" + encodeURIComponent(campania) : ""))
+      .then(async (r) => { const raw = await r.text(); try { return JSON.parse(raw); } catch { return { error: "el servidor respondió " + r.status }; } })
+      .then((j) => { if (!cancelled) { setData(j.error ? null : j); setErr(j.error ? String(j.error) : ""); } })
+      .catch((e) => { if (!cancelled) { setData(null); setErr(e.message || "no se pudo conectar"); } })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [accountsQS, cursQS, preset, customRange, corte, campania]);
+
+  const segs = useMemo(() => {
+    const l = [...((data && data.segmentos) || [])];
+    const { key, dir } = sort;
+    l.sort((a, b) => {
+      const x = a[key], y = b[key];
+      if (x == null && y == null) return 0; if (x == null) return 1; if (y == null) return -1; // sin dato siempre al final
+      const c = typeof x === "string" ? x.localeCompare(y) : x - y;
+      return dir === "asc" ? c : -c;
+    });
+    return l;
+  }, [data, sort]);
+  // métrica principal: ROAS (más es mejor) o costo/conv (menos es mejor)
+  const mk = msg ? "costo_conv" : "roas";
+  const elegibles = segs.filter((r) => r[mk] != null && (r.pct_spend || 0) >= 5);
+  const vals = elegibles.map((r) => r[mk]);
+  const mejor = vals.length > 1 ? (msg ? Math.min(...vals) : Math.max(...vals)) : null;
+  const peor = vals.length > 1 ? (msg ? Math.max(...vals) : Math.min(...vals)) : null;
+  const tag = (r) => (r[mk] == null || (r.pct_spend || 0) < 5 ? "" : r[mk] === mejor ? " demobest" : r[mk] === peor ? " demoworst" : "");
+  const fmtPct = (x) => (x == null ? "—" : x.toFixed(2).replace(/\.?0+$/, "") + "%");
+  const fmtMoney = (x) => (x == null ? "—" : money(x));
+  const fila = (r, total = false) => (
+    <tr key={r.segmento} className={total ? "demototal" : ""}>
+      <td className="name">{r.segmento}</td>
+      <td className="mono num">{fmtMoney(r.spend)}</td>
+      <td className="mono num">{total ? "100%" : <span className="demoshare"><span className="demobar" style={{ width: Math.max(2, Math.round(Math.min(100, r.pct_spend || 0) * 0.6)) + "px" }} />{fmtPct(r.pct_spend)}</span>}</td>
+      <td className="mono num">{nf.format(r.impresiones)}</td>
+      <td className="mono num">{fmtPct(r.ctr)}</td>
+      <td className="mono num">{fmtMoney(r.cpm)}</td>
+      <td className="mono num">{fmtPct(r.hook_rate)}</td>
+      {msg ? <>
+        <td className="mono num strong">{nf.format(r.conversaciones)}</td>
+        <td className={"mono num" + (total ? "" : tag(r))}>{fmtMoney(r.costo_conv)}</td>
+      </> : <>
+        <td className="mono num strong">{nf.format(r.ventas)}</td>
+        <td className="mono num">{fmtMoney(r.cpa)}</td>
+        <td className={"mono num" + (total ? "" : tag(r))}>{r.roas == null ? "—" : r.roas.toFixed(2) + "x"}</td>
+      </>}
+    </tr>
+  );
+  return (
+    <section className="an">
+      <div className="anhead">
+        <div>
+          <div className="antitle">▸ DEMOGRAFÍA Y UBICACIÓN</div>
+          <div className="ansub">Cómo rinde la cuenta por edad, género, zona y ubicación (Meta). {msg ? "Costo por conversación" : "ROAS"}: verde = mejor, rojo = peor, solo entre segmentos con 5% o más del spend. Click en una columna para ordenar.</div>
+        </div>
+      </div>
+      <div className="democtrl">
+        <span className="platsel">{CORTE_OPTS.map(([k, l]) => <button key={k} className={"modotgl" + (corte === k ? " on" : "")} onClick={() => setCorte(k)}>{l}</button>)}</span>
+        <span className="demofilt">
+          <input className="chatinput" value={campQ} onChange={(e) => setCampQ(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") setCampania(campQ.trim()); }} placeholder="filtrar campaña (nombre contiene…)" />
+          <button className="modotgl" onClick={() => setCampania(campQ.trim())}>FILTRAR</button>
+          {campania && <button className="modotgl" onClick={() => { setCampQ(""); setCampania(""); }}>✕</button>}
+        </span>
+      </div>
+      {loading && <div className="anplaceholder">● consultando Meta…</div>}
+      {!loading && err && <div className="generr">⚠ No se pudo leer la demografía: {err}</div>}
+      {!loading && data && (!segs.length
+        ? <div className="anplaceholder">Meta no devolvió datos para este corte en el período{campania ? " con ese filtro" : ""}.</div>
+        : <section className="tablewrap">
+          <table>
+            <thead><tr>
+              <Th label="Segmento" k="segmento" sort={sort} on={setSortKey} align="left" />
+              <Th label="Spend" k="spend" sort={sort} on={setSortKey} /><Th label="% spend" k="pct_spend" sort={sort} on={setSortKey} />
+              <Th label="Impr." k="impresiones" sort={sort} on={setSortKey} /><Th label="CTR" k="ctr" sort={sort} on={setSortKey} />
+              <Th label="CPM" k="cpm" sort={sort} on={setSortKey} /><Th label="Hook rate" k="hook_rate" sort={sort} on={setSortKey} />
+              {msg ? <><Th label="Conv." k="conversaciones" sort={sort} on={setSortKey} /><Th label="Costo/conv" k="costo_conv" sort={sort} on={setSortKey} /></>
+                : <><Th label="Ventas" k="ventas" sort={sort} on={setSortKey} /><Th label="CPA" k="cpa" sort={sort} on={setSortKey} /><Th label="ROAS" k="roas" sort={sort} on={setSortKey} /></>}
+            </tr></thead>
+            <tbody>{segs.map((r) => fila(r))}</tbody>
+            <tfoot>{fila(data.total, true)}</tfoot>
+          </table>
+        </section>)}
+      {!loading && data && (
+        <div className="demonota">
+          {data.since} → {data.until}{campania ? " · campañas que contienen “" + campania + "”" : ""} · montos en pesos.
+          {data.fx && data.fx.error ? " ⚠ No se pudo cotizar el dólar: los montos de cuentas en USD van sin convertir." : ""}
+          {data.omitidas ? " Sin estos cortes: " + data.omitidas.join(", ") + " (solo Meta los tiene)." : ""}
+          {data.errores ? " ⚠ Alguna cuenta falló: " + data.errores.join(" · ") : ""}
+          {" "}Los totales por corte pueden diferir un poco del total de la cuenta: Meta no informa todos los segmentos.
+        </div>
+      )}
+    </section>
+  );
+}
+
 // ─────────── Vista: BIBLIOTECA (Parte 6) ───────────
 function Biblioteca({ rows = [], hookMatch, setHookMatch }) {
   const [tab, setTab] = useState("hooks");
@@ -3184,6 +3299,15 @@ td{padding:11px 12px;vertical-align:middle;}.num{text-align:right;}.name{font-we
 .ansub{font-family:'Space Mono',monospace;font-size:11.5px;color:var(--soft);margin-top:5px;max-width:560px;line-height:1.5;}
 .anbtn{font-family:'Anton',Impact,sans-serif;font-size:15px;letter-spacing:1.5px;color:var(--paper);background:var(--ink);border:2px solid var(--ink);border-radius:9px;padding:11px 20px;cursor:pointer;box-shadow:4px 4px 0 var(--c6);white-space:nowrap;}
 .anbtn:hover{transform:translate(-1px,-1px);}.anbtn:disabled{opacity:.6;cursor:default;}
+.democtrl{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px;}
+.democtrl .platsel{display:flex;gap:6px;flex-wrap:wrap;}
+.demofilt{display:flex;gap:6px;align-items:center;min-width:280px;}
+.demofilt .chatinput{padding:6px 10px;font-size:12px;}
+.demoshare{display:inline-flex;align-items:center;gap:6px;justify-content:flex-end;}
+.demobar{display:inline-block;height:6px;background:var(--c6);border-radius:3px;opacity:.7;}
+td.demobest{color:#1F7A4D;font-weight:700;}td.demoworst{color:#B03A2E;font-weight:700;}
+tfoot tr.demototal{border-top:2px solid var(--ink);background:#EFE6D2;font-weight:700;}
+.demonota{font-family:'Space Mono',monospace;font-size:11px;color:var(--soft);margin-top:10px;line-height:1.5;}
 .anplaceholder{background:var(--paper2);border:2px dashed var(--line);border-radius:12px;padding:26px;font-family:'Space Mono',monospace;font-size:13px;color:var(--soft);line-height:1.6;}
 .anout{display:flex;flex-direction:column;gap:16px;}
 .antop{font-family:'Anton',Impact,sans-serif;font-size:20px;letter-spacing:.5px;color:var(--ink);background:linear-gradient(90deg,var(--paper2),transparent);border-left:4px solid var(--c4);padding:12px 16px;border-radius:0 8px 8px 0;}

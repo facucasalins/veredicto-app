@@ -4,6 +4,16 @@ Registro de cambios por versión. **V 1.N = número del PR mergeado** — es el 
 app muestra en el header ("V 1.N ▮▮▮"), así se confirma de un vistazo qué versión corre en prod.
 Regla de la casa: cada PR suma su entrada acá ANTES de mergearse.
 
+## V 1.41 — Demografía y ubicación (chat + pestaña) y chat sin respuestas vacías
+- **Pestaña DEMOGRAFÍA** y tool del chat `meta_demografia`: performance por edad, género,
+  edad×género, zona (región) y ubicación (Facebook/Instagram × Feed/Reels/Stories), con filtro de
+  campaña/creativo. CTR, CPM, CPC, CPA, ROAS, costo/conv, hook rate y % del spend calculados en
+  código (`lib/demografia.js`); chat y pestaña muestran los mismos números. Tabla ordenable,
+  total, y mejor/peor solo entre segmentos con ≥5% del spend. Solo Meta (Google/TikTok avisados).
+- **Chat sin "No pude armar una respuesta"**: `max_tokens` 16000 (el razonamiento de los modelos
+  nuevos gasta el mismo tope), `pause_turn` se continúa y, si no hay texto, se dice el motivo
+  (sin espacio → pedilo en partes; filtro de seguridad; otro).
+
 ## V 1.40 — Pestaña ÁNGULOS + ▶ ver video (ex PR #33 y #31), actualizada con main
 - Entra a main lo que venía en `feat/angulos-conciencia` (PR #33, cerrado sin mergear, y "ver
   video" de #31): la rama se actualizó con main por merge (trae V 1.38 y V 1.39).

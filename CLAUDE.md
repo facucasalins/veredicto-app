@@ -151,6 +151,15 @@ respuestas concisas.
   pide UNA corrección si falla; devuelve `advertencia` si sigue rota. `GEN_TIPOS.angulos` exige 5
   tipos + Oferta, cercano/diferencia y `descarte` por ángulo. La clasificación se comparte entre
   pestañas vía `conciencia` en App (`{key, data}`).
+- `lib/demografia.js` — performance **por corte** (edad, género, edad×género, zona/región,
+  ubicación = plataforma × posición). `demografia({cuentas, corte, since, until, filtro, rateOf})`
+  suma las cuentas de Meta de la vista (en pesos) y calcula EN CÓDIGO CTR, CPM, CPC, CPA, ROAS,
+  costo/conv, hook rate y % del spend (null si no se puede dividir, nunca 0 inventado). Usa
+  `getBreakdown(account, corte, since, until, {campania?, creativo?})` de `lib/meta.js` (level
+  account; con filtro "nombre contiene" pide level ad y agrega). Google/TikTok no tienen estos
+  cortes → `omitidas`. Lo consumen `/api/demografia` (pestaña **DEMOGRAFÍA**: corte, filtro de
+  campaña, tabla ordenable, mejor/peor ROAS o costo/conv solo entre segmentos con ≥5% del spend)
+  y la tool `meta_demografia` del chat — mismos números en los dos lados.
 - `lib/fx.js` — cotización del **dólar oficial** (Argentina) para no mezclar monedas cuando la cuenta de
   Meta está en USD. `getDolarOficial()` (PROMEDIO de compra y venta = medio del spread, cache en memoria
   ~1h) y `convertMonto(monto, from, to)` (solo ARS↔USD). Fuente: dolarapi.com, fallback criptoya.com.
@@ -267,8 +276,12 @@ pushear a `main` sin romper prod.
   Meta/TikTok), `meta_anuncios` (rows con estado/audiencia, top 100 por spend), `estructura_campanas`
   (campañas→conjuntos con ABO/CBO, budgets y performance — para opinar sobre estructura/reformas),
   `tiendanube_resumen`/`tiendanube_productos` (con el criterio de venta del cliente),
-  `biblioteca_hooks` (los 271 templates de `lib/hooks.js`, filtrable por familia) y `sheet_analisis`
-  (análisis cualitativo de la pestaña elegida). **Capado doble**: el prompt rechaza con respuesta fija
+  `biblioteca_hooks` (los 271 templates de `lib/hooks.js`, filtrable por familia), `sheet_analisis`
+  (análisis cualitativo de la pestaña elegida) y `meta_demografia` (edad/género/zona/ubicación,
+  ver `lib/demografia.js`). Las tools devuelven `{error}` si la consulta falla (nunca `[]` mudo).
+  `max_tokens` 16000 (los modelos nuevos razonan con el mismo tope) y sin texto nunca se muestra
+  un cartel genérico: se dice el `stop_reason` (sin espacio / filtro de seguridad / otro);
+  `pause_turn` se continúa solo. **Capado doble**: el prompt rechaza con respuesta fija
   lo que no sea de la cuenta (conocimiento general, otras marcas, buscar afuera), y las únicas tools
   que existen consultan esa cuenta (account validado con `canSeeAccount`). Montos en pesos (misma
   regla que el panel). Conversación por cliente en localStorage+Upstash (tope 30 mensajes).
