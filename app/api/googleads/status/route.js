@@ -40,13 +40,13 @@ async function accessToken() {
   return j.access_token;
 }
 
-async function gaql(token, customerId, query) {
+async function gaql(token, customerId, query, login) {
   const r = await fetch(`${BASE}/customers/${customerId}/googleAds:searchStream`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${token}`,
       "developer-token": env("GOOGLE_ADS_DEVELOPER_TOKEN"),
-      "login-customer-id": env("GOOGLE_ADS_MCC_ID").replace(/-/g, ""),
+      "login-customer-id": login || env("GOOGLE_ADS_MCC_ID").replace(/-/g, ""),
       "Content-Type": "application/json",
     },
     body: JSON.stringify({ query }),
@@ -82,18 +82,28 @@ export async function GET(req) {
       .map((r) => r.customerClient)
       .filter((c) => c && !c.manager);
 
-    const cuentas = await Promise.all(clientes.map(async (c) => {
+    // Cuentas fuera de la MCC con acceso directo del mismo usuario (env GOOGLE_ADS_EXTRA_ACCOUNTS, separadas por coma)
+    const extras = (process.env.GOOGLE_ADS_EXTRA_ACCOUNTS || "9068214007").split(",").map((x) => x.replace(/\D/g, "")).filter(Boolean);
+    const extraCl = await Promise.all(extras.filter((id) => !clientes.some((c) => String(c.id) === id)).map(async (id) => {
+      try {
+        const r = (await gaql(token, id, `SELECT customer.id, customer.descriptive_name, customer.currency_code, customer.status FROM customer`, id))[0]?.customer;
+        return { id, descriptiveName: r?.descriptiveName, currencyCode: r?.currencyCode, status: r?.status || "ENABLED", login: id };
+      } catch (e) { return { id, descriptiveName: id, status: "ERROR", errorExtra: e.message, login: id }; }
+    }));
+
+    const cuentas = await Promise.all([...clientes, ...extraCl].map(async (c) => {
       const base = { id: String(c.id), nombre: c.descriptiveName || String(c.id), moneda: c.currencyCode, estado: c.status };
+      if (c.status === "ERROR") return { ...base, campanasActivas: [], gastoTotal: 0, error: c.errorExtra };
       if (c.status !== "ENABLED") return { ...base, campanasActivas: [], gastoTotal: 0 };
       try {
         const [camps, gasto] = await Promise.all([
           gaql(token, String(c.id), `
             SELECT campaign.id, campaign.name, campaign.status, campaign.primary_status,
                    campaign.advertising_channel_type
-            FROM campaign WHERE campaign.status = 'ENABLED'`),
+            FROM campaign WHERE campaign.status = 'ENABLED'`, c.login),
           gaql(token, String(c.id), `
             SELECT campaign.id, metrics.cost_micros
-            FROM campaign WHERE segments.date = '${fecha}'`),
+            FROM campaign WHERE segments.date = '${fecha}'`, c.login),
         ]);
         const costo = {};
         for (const r of gasto) costo[String(r.campaign?.id)] = (costo[String(r.campaign?.id)] || 0) + num(r.metrics?.costMicros) / 1e6;
