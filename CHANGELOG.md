@@ -4,6 +4,17 @@ Registro de cambios por versión. **V 1.N = número del PR mergeado** — es el 
 app muestra en el header ("V 1.N ▮▮▮"), así se confirma de un vistazo qué versión corre en prod.
 Regla de la casa: cada PR suma su entrada acá ANTES de mergearse.
 
+## V 1.42 — Tiendas de Tienda Nube: solo el token en Vercel
+- **`lib/tiendas.js`**: datos fijos de cada tienda (name, store_id, cuenta de Meta, criterio de venta).
+  No son secretos, viven en el repo.
+- **`TN_TOKEN_<slug>`** (ej. `TN_TOKEN_FLINT`): en Vercel va solo el token, una variable por marca.
+  Renovar un token = pegar el nuevo y redeploy; ya no hay que reescribir `TIENDANUBE_STORES` (Sensitive
+  en Vercel, no se puede leer).
+- `TIENDANUBE_STORES` sigue funcionando y, mientras exista, sus valores pisan a tiendas.js (nada cambia
+  hasta borrarla). `TN_STORE_<MARCA>` (JSON completo) queda para sumar una tienda sin tocar código.
+- Una variable rota se ignora con warning y no tumba las demás. `/api/tiendanube/units` usa la misma
+  resolución (`tnStores()`), así n8n y el panel ven las mismas tiendas.
+
 ## V 1.41 — Demografía y ubicación (chat + pestaña) y chat sin respuestas vacías
 - **Pestaña DEMOGRAFÍA** y tool del chat `meta_demografia`: performance por edad, género,
   edad×género, zona (región) y ubicación (Facebook/Instagram × Feed/Reels/Stories), con filtro de

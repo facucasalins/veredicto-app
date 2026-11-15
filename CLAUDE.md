@@ -315,8 +315,16 @@ pushear a `main` sin romper prod.
 - `META_SYSTEM_TOKEN`, `META_API_VERSION` — Meta Marketing API.
 - `GOOGLE_SA_EMAIL`, `GOOGLE_SA_KEY` (private_key con `\n`), `SHEET_ID` — Google Sheets.
 - `APP_USERS` (JSON `[{u,p,admin?,accounts?}]`), `SESSION_SECRET` — login.
-- `TIENDANUBE_STORES` (JSON `[{name,store_id,token,account?,ventas?}]` — `ventas`:
-  `"pagadas"`|`"no_canceladas"`, criterio de venta default de esa tienda), `TIENDANUBE_UA`.
+- **Tiendas de Tienda Nube:** los datos fijos (name, store_id, account de Meta, ventas) están en
+  **`lib/tiendas.js`**; en Vercel va SOLO el token, una variable por marca **`TN_TOKEN_<slug>`**
+  (ej. `TN_TOKEN_FLINT`, `TN_TOKEN_JUANITA_SHOES`) con el token pelado. Renovar = pegar el token nuevo +
+  redeploy. Tienda nueva = línea en `lib/tiendas.js` + su `TN_TOKEN_*` (o, sin tocar código,
+  `TN_STORE_<MARCA>` con el JSON completo `{name,store_id,token,account?,ventas?}`). Lo arma `tnStores()`
+  en `lib/tiendanube.js` por capas: tiendas.js < `TIENDANUBE_STORES` < `TN_STORE_*` < `TN_TOKEN_*`.
+  Los store_id de tiendas.js salieron de las URLs de imágenes de cada tienda (nov 2026).
+- `TIENDANUBE_STORES` (JSON `[{name,store_id,token,account?,ventas?}]`, LEGADO) — `ventas`:
+  `"pagadas"`|`"no_canceladas"`. En Vercel es Sensitive (no se puede leer). Mientras exista, sus valores
+  pisan a tiendas.js; cuando todas las marcas tengan su `TN_TOKEN_*` y anden, se borra. `TIENDANUBE_UA`.
 - `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL` (`claude-sonnet-4-6`) — generador, cerebro, match-hooks y chat.
 - `TIKTOK_ACCESS_TOKEN`, `TIKTOK_APP_ID`, `TIKTOK_SECRET` (+ `TIKTOK_ADVERTISERS` JSON opcional para
   limitar cuentas) — TikTok Ads. Sin esto, el dropdown muestra solo Meta.

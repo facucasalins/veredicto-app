@@ -1,6 +1,7 @@
 import { cookies } from "next/headers";
 import { timingSafeEqual } from "crypto";
 import { SESSION_COOKIE, verifySession, authDisabled } from "@/lib/auth";
+import { tnStores } from "@/lib/tiendanube";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
@@ -21,8 +22,7 @@ function keyOk(req) {
 }
 
 function findStore(name) {
-  try { const s = JSON.parse(process.env.TIENDANUBE_STORES || "[]"); return (Array.isArray(s) ? s : []).find((x) => x.name === name) || null; }
-  catch { return null; }
+  return tnStores().find((x) => x.name === name) || null;
 }
 
 async function tnGet(store, path) {
