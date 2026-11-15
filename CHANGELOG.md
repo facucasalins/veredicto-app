@@ -4,6 +4,15 @@ Registro de cambios por versión. **V 1.N = número del PR mergeado** — es el 
 app muestra en el header ("V 1.N ▮▮▮"), así se confirma de un vistazo qué versión corre en prod.
 Regla de la casa: cada PR suma su entrada acá ANTES de mergearse.
 
+## V 1.42 — Tiendas de Tienda Nube: una variable por marca
+- **`TN_STORE_<MARCA>`** (JSON de un objeto `{name, store_id, token, account?, ventas?}`): cada tienda
+  puede ir en su propia env var. Sumar o renovar una tienda ya no obliga a reescribir el JSON de
+  todas (`TIENDANUBE_STORES` está como Sensitive en Vercel y su valor no se puede leer).
+- `TIENDANUBE_STORES` sigue funcionando como respaldo; si una tienda está en las dos, la variable por
+  marca pisa campo a campo (alcanza con `{"name":"Flint","token":"..."}` para renovar el token).
+- Una variable rota (JSON inválido, sin store_id/token) se ignora con warning y no tumba las demás.
+- `/api/tiendanube/units` usa la misma resolución (`tnStores()`), así n8n y el panel ven las mismas tiendas.
+
 ## V 1.41 — Demografía y ubicación (chat + pestaña) y chat sin respuestas vacías
 - **Pestaña DEMOGRAFÍA** y tool del chat `meta_demografia`: performance por edad, género,
   edad×género, zona (región) y ubicación (Facebook/Instagram × Feed/Reels/Stories), con filtro de

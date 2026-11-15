@@ -315,8 +315,16 @@ pushear a `main` sin romper prod.
 - `META_SYSTEM_TOKEN`, `META_API_VERSION` — Meta Marketing API.
 - `GOOGLE_SA_EMAIL`, `GOOGLE_SA_KEY` (private_key con `\n`), `SHEET_ID` — Google Sheets.
 - `APP_USERS` (JSON `[{u,p,admin?,accounts?}]`), `SESSION_SECRET` — login.
-- `TIENDANUBE_STORES` (JSON `[{name,store_id,token,account?,ventas?}]` — `ventas`:
-  `"pagadas"`|`"no_canceladas"`, criterio de venta default de esa tienda), `TIENDANUBE_UA`.
+- **Tiendas de Tienda Nube — una variable POR MARCA (recomendado):** `TN_STORE_<MARCA>` = JSON de UN
+  objeto `{name,store_id,token,account?,ventas?}` (ej. `TN_STORE_FLINT`). Sumar o renovar una tienda =
+  tocar solo su variable + redeploy. `name` = etiqueta exacta que usan front, n8n y reportes (si falta
+  sale del nombre de la variable). Lo resuelve `tnStores()` en `lib/tiendanube.js` (también lo usa
+  `/api/tiendanube/units`).
+- `TIENDANUBE_STORES` (JSON `[{name,store_id,token,account?,ventas?}]`, LEGADO, sigue andando) — `ventas`:
+  `"pagadas"`|`"no_canceladas"`, criterio de venta default de esa tienda. Si una tienda está en las dos,
+  `TN_STORE_*` pisa campo a campo (alcanza `{"name":"Flint","token":"nuevo"}` para renovar solo el token).
+  OJO: en Vercel está marcada Sensitive → su valor NO se puede leer; por eso no se edita más, se migra
+  tienda por tienda a `TN_STORE_*`. `TIENDANUBE_UA`.
 - `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL` (`claude-sonnet-4-6`) — generador, cerebro, match-hooks y chat.
 - `TIKTOK_ACCESS_TOKEN`, `TIKTOK_APP_ID`, `TIKTOK_SECRET` (+ `TIKTOK_ADVERTISERS` JSON opcional para
   limitar cuentas) — TikTok Ads. Sin esto, el dropdown muestra solo Meta.
